@@ -3,9 +3,11 @@ package virtbench
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
@@ -15,9 +17,9 @@ import (
 // The virtbench scenarios all need one shared ssh helper pod: datasource-clone /
 // boot-storm ping the VMs through it (they only VALIDATE it exists and fail
 // otherwise), and disk-ops runs in-VM checks through it via sshpass. It is a
-// single cluster-wide resource, so the harness creates it ONCE for a whole batch
-// of virtbench tests (a group-scoped SetupProvider) rather than once per scenario
-// — the customer never creates it by hand. Mirrors virtbench's own ensure_ssh_pod
+// single cluster-wide resource, shared by a group-scoped SetupProvider. Each
+// scenario rechecks it before provisioning because a preceding node drain can
+// evict it. Mirrors virtbench's own ensure_ssh_pod
 // (disk-ops-benchmark/measure-disk-ops.py). See decisions/0008.
 const (
 	sshPodName = "ssh-test-pod"
@@ -27,8 +29,9 @@ const (
 // sshPodManifest is the helper pod virtbench uses for ping and in-VM SSH checks.
 // An init container installs alpine packages into a shared emptyDir; the main
 // container mounts those paths and runs with readOnlyRootFilesystem. The pod is
-// left running (persistent) so subsequent runs reuse it instantly — our
-// sshpassReady check confirms sshpass is installed before declaring it ready. Remove manually when decommissioning the cluster:
+// shared across scenarios; pre-existing pods are left running after the run.
+// The readiness check confirms the pod is Running and sshpass is installed.
+// Remove manually when decommissioning the cluster:
 //
 //	kubectl delete pod ssh-test-pod -n default
 const sshPodManifest = `apiVersion: v1
@@ -128,8 +131,13 @@ spec:
 
 // sshPodSetup is the group-scoped provider that ensures the shared ssh helper pod.
 type sshPodSetup struct {
+	mu          sync.Mutex
 	createdByUs bool
 }
+
+// The group setup and individual provisioners share ownership tracking so a pod
+// recreated after a drain is still cleaned up by the group's final teardown.
+var sharedSSHSetup = &sshPodSetup{}
 
 func (*sshPodSetup) SetupInfo() stages.SetupInfo {
 	return stages.SetupInfo{Scope: stages.ScopeGroup, Key: setupGroup}
@@ -137,41 +145,56 @@ func (*sshPodSetup) SetupInfo() stages.SetupInfo {
 
 // Setup ensures the ssh helper pod exists and has sshpass, creating it if absent.
 // Idempotent: reuses a pod that is already usable (so re-runs and a pre-existing
-// pod are fine). Called once per run for the whole virtbench group.
+// pod are fine). Called at group startup and before each live scenario.
 func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.TestRequirement) error {
 	// Replay grades pre-collected results with no cluster — no helper pod needed.
 	if replayDir(trs) != "" {
 		rc.Logger.Info("virtbench: replay mode, skipping ssh helper pod setup")
 		return nil
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	kubeconfig := kubeconfigOf(trs)
-
-	if sshpassReady(ctx, kubeconfig) {
-		rc.Logger.Info("virtbench: reusing existing ssh helper pod", "pod", sshPodNS+"/"+sshPodName)
-		return nil
-	}
-	if !podExists(ctx, kubeconfig) {
-		rc.Logger.Info("virtbench: creating shared ssh helper pod", "pod", sshPodNS+"/"+sshPodName)
-		if err := kubectlApply(ctx, kubeconfig, sshPodManifest); err != nil {
-			return fmt.Errorf("create ssh helper pod: %w", err)
-		}
-		s.createdByUs = true // tracked for the log message in Teardown
-	}
-
 	// Wait for the init container to finish installing tools (image pull + apk add).
-	// 300s matches virtbench's own ping timeout and handles slow registries.
-	deadline := time.Now().Add(300 * time.Second)
-	for time.Now().Before(deadline) {
+	// Bound kubectl calls and polling together, and honor run cancellation.
+	ctx, cancel := context.WithTimeout(ctx, 300*time.Second)
+	defer cancel()
+	for {
 		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("wait for ssh helper pod %s/%s: %w", sshPodNS, sshPodName, err)
+		}
+		pod, err := getSSHPod(ctx, kubeconfig)
+		if err != nil {
 			return err
 		}
-		if sshpassReady(ctx, kubeconfig) {
+		switch {
+		case pod == nil:
+			rc.Logger.Info("virtbench: creating shared ssh helper pod", "pod", sshPodNS+"/"+sshPodName)
+			if err := kubectlApply(ctx, kubeconfig, sshPodManifest); err != nil {
+				return fmt.Errorf("create ssh helper pod: %w", err)
+			}
+			s.createdByUs = true
+			continue
+		case pod.Metadata.DeletionTimestamp != "":
+			// Applying an existing terminating pod cannot revive it. Wait for
+			// deletion to complete, then create a fresh pod on the next poll.
+		case pod.Status.Phase == "Failed" || pod.Status.Phase == "Succeeded":
+			rc.Logger.Info("virtbench: replacing stopped ssh helper pod", "phase", pod.Status.Phase)
+			out, ok, err := runKubectl(ctx, kubeconfig, "delete", "pod", sshPodName, "-n", sshPodNS, "--wait=false", "--ignore-not-found")
+			if err != nil || !ok {
+				return fmt.Errorf("delete stopped ssh helper pod: %v: %s", err, strings.TrimSpace(out))
+			}
+			continue
+		case pod.Status.Phase == "Running" && sshpassReady(ctx, kubeconfig):
 			rc.Logger.Info("virtbench: ssh helper pod ready", "pod", sshPodNS+"/"+sshPodName)
 			return nil
 		}
-		time.Sleep(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for ssh helper pod %s/%s: %w", sshPodNS, sshPodName, ctx.Err())
+		case <-time.After(5 * time.Second):
+		}
 	}
-	return fmt.Errorf("ssh helper pod %s/%s not ready after 300s (apk install may have timed out)", sshPodNS, sshPodName)
 }
 
 // Teardown removes the ssh helper pod if this run created it. This is the group
@@ -180,12 +203,21 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 // at the end. A pre-existing pod (created by a previous run or by the customer) is
 // left alone. Best-effort; never fails the run.
 func (s *sshPodSetup) Teardown(ctx context.Context, rc *core.RunCtx, trs []core.TestRequirement) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	defer func() { s.createdByUs = false }()
 	if !s.createdByUs {
 		return nil
 	}
 	kubeconfig := kubeconfigOf(trs)
 	rc.Logger.Info("virtbench: removing shared ssh helper pod", "pod", sshPodNS+"/"+sshPodName)
-	_, _, err := runKubectl(ctx, kubeconfig, "delete", "pod", sshPodName, "-n", sshPodNS, "--wait=false", "--ignore-not-found")
+	// Cleanup must still run if the benchmark was cancelled.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownBudget)
+	defer cancel()
+	out, ok, err := runKubectl(ctx, kubeconfig, "delete", "pod", sshPodName, "-n", sshPodNS, "--wait=false", "--ignore-not-found")
+	if err == nil && !ok {
+		return fmt.Errorf("delete ssh helper pod: %s", strings.TrimSpace(out))
+	}
 	return err
 }
 
@@ -241,15 +273,37 @@ func kubectlApply(ctx context.Context, kubeconfig, manifest string) error {
 	return nil
 }
 
-// podExists returns true only if the pod exists AND is not Terminating — a
-// Terminating pod can't be exec'd into and will be replaced by a fresh one.
-func podExists(ctx context.Context, kubeconfig string) bool {
-	out, ok, _ := runKubectl(ctx, kubeconfig, "get", "pod", sshPodName, "-n", sshPodNS,
-		"-o", "jsonpath={.metadata.deletionTimestamp}")
-	if !ok {
-		return false // doesn't exist
+type sshPodState struct {
+	Metadata struct {
+		DeletionTimestamp string `json:"deletionTimestamp"`
+	} `json:"metadata"`
+	Status struct {
+		Phase string `json:"phase"`
+	} `json:"status"`
+}
+
+// getSSHPod distinguishes absence from API/auth failures; only absence permits
+// creation. A terminating or terminal pod must never pass the readiness check.
+func getSSHPod(ctx context.Context, kubeconfig string) (*sshPodState, error) {
+	out, ok, err := runKubectl(ctx, kubeconfig, "get", "pod", sshPodName, "-n", sshPodNS,
+		"--ignore-not-found", "-o", "json")
+	if err != nil {
+		return nil, fmt.Errorf("get ssh helper pod: %w", err)
 	}
-	return strings.TrimSpace(out) == "" // exists and NOT terminating
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("get ssh helper pod: %w", err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("get ssh helper pod %s/%s: %s", sshPodNS, sshPodName, strings.TrimSpace(out))
+	}
+	if strings.TrimSpace(out) == "" {
+		return nil, nil
+	}
+	var pod sshPodState
+	if err := json.Unmarshal([]byte(out), &pod); err != nil {
+		return nil, fmt.Errorf("decode ssh helper pod: %w", err)
+	}
+	return &pod, nil
 }
 
 // sshpassReady checks that the pod has sshpass installed and ready. The alpine

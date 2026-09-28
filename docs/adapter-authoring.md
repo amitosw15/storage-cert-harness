@@ -116,8 +116,19 @@ must happen **once per run** or **once for a batch of tests that share it**, use
 
 virtbench is the reference: all its scenarios share one `ssh-test-pod` helper via
 a group provider (`internal/tools/virtbench/setup.go`), so a batch of virtbench
-tests creates it once and removes it once. Skip shared setup in replay mode
-(no cluster).
+tests reuses it and removes run-created helpers at group teardown. Each live
+scenario's provisioner rechecks that the helper is Running with `sshpass`
+available, recreating it if a preceding node drain removed it. Terminating pods
+are allowed to disappear before recreation; completed or failed pods are
+replaced. Skip shared setup and these readiness checks in replay mode (no cluster).
+
+The opt-in `TestSSHHelperAfterNodeDrain` regression (`-tags=integration`) runs
+the real drain → clone-at-scale → boot-storm sequence. Set
+`VIRTBENCH_LIVE_STORAGE_CLASS` and `VIRTBENCH_LIVE_WORKDIR`, with `KUBECONFIG`
+pointing to a test cluster and the released Virtbench runtime available. It
+drains the worker hosting the helper, so use a cluster reserved for testing.
+Run with `-run '^TestSSHHelperAfterNodeDrain$' -count=3 -timeout=90m` to check
+repeated recovery; ordinary unit tests do not contact a cluster.
 
 ## When there's no released image
 
