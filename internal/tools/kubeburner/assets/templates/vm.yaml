@@ -11,7 +11,7 @@ spec:
     - metadata:
         name: vmdisk-{{.Replica}}
         annotations:
-          cdi.kubevirt.io/storage.usePopulator: "{{.USE_POPULATOR}}"
+          cdi.kubevirt.io/storage.usePopulator: "{{.usePopulator}}"
       spec:
         preallocation: true
         storage:
