@@ -60,6 +60,21 @@ func (preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs 
 
 	caps := []clustercheck.Capability{clustercheck.KubeVirt, clustercheck.CDI, snapshotCRD}
 	findings = append(findings, clustercheck.Preflight(ctx, caps, sc)...)
+	cli := clustercheck.KubeCLI()
+	if cli == "" {
+		return findings, nil
+	}
+	usePopulator, err := clustercheck.HasVolumePopulator(ctx, cli, "cdi.kubevirt.io", "VolumeImportSource")
+	if err != nil {
+		return append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("kube-burner: checking CDI VolumeImportSource populator: %v", err)}), nil
+	}
+	p.UsePopulator = usePopulator
+	bag.Set("params", p)
+	if usePopulator {
+		findings = append(findings, core.Finding{Level: "info", Message: "CDI VolumeImportSource populator registered; using populator imports"})
+	} else {
+		findings = append(findings, core.Finding{Level: "info", Message: "CDI VolumeImportSource populator not registered; using legacy CDI imports"})
+	}
 	return findings, nil
 }
 

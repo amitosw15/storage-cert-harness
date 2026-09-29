@@ -34,6 +34,9 @@ func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []cor
 		return stages.RunHandle{}, fmt.Errorf("kube-burner: results_dir missing (provision first)")
 	}
 	p := resolveParams(trs)
+	if configured, ok := core.GetAs[Params](bag, "params"); ok {
+		p.UsePopulator = configured.UsePopulator
+	}
 	if err := p.validateFor(tr.ID); err != nil {
 		return stages.RunHandle{}, err
 	}

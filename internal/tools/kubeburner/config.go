@@ -54,6 +54,7 @@ func buildEnv(p Params, storageClass string) []string {
 		"DISK_SIZE=" + p.DiskSize,
 		"STORAGE_CLASS=" + storageClass,
 		"NAMESPACE=" + p.NS,
+		"USE_POPULATOR=" + strconv.FormatBool(p.UsePopulator),
 		"MAX_WAIT=" + p.MaxWait,
 		"QPS=" + strconv.Itoa(p.QPS),
 		"BURST=" + strconv.Itoa(p.Burst),
