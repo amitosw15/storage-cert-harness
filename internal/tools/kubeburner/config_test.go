@@ -27,6 +27,15 @@ func TestResolveParamsUsesKBCanonicalDiskSize(t *testing.T) {
 	if p.DiskSize != "2Gi" {
 		t.Fatalf("disk size = %q, want KB value", p.DiskSize)
 	}
+	if !p.UsePopulator {
+		t.Fatal("UsePopulator default = false, want true")
+	}
+}
+
+func TestBuildEnvSetsUsePopulator(t *testing.T) {
+	if got := strings.Join(buildEnv(Params{UsePopulator: false}, "example-storage"), "\n"); !strings.Contains(got, "USE_POPULATOR=false") {
+		t.Fatalf("environment does not select legacy CDI imports: %s", got)
+	}
 }
 
 func TestWriteConfigReplacesYAMLCommentMarker(t *testing.T) {

@@ -23,6 +23,7 @@ jobs:
         replicas: {{.REPLICAS}}
         inputVars:
           storageClass: {{.STORAGE_CLASS}}
+          usePopulator: {{.USE_POPULATOR}}
           vmImage: {{.VM_IMAGE}}
           diskSize: {{.DISK_SIZE}}
 

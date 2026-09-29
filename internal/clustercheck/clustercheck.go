@@ -2,6 +2,7 @@ package clustercheck
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -65,6 +66,39 @@ var (
 	// KubeVirt is the KubeVirt/OpenShift Virtualization capability.
 	KubeVirt = CRD("kubevirts.kubevirt.io")
 )
+
+// HasVolumePopulator reports whether the cluster has registered a populator for
+// the requested CDI source kind. Older CDI versions expose the CRDs but do not
+// register every source kind, so checking the registration is necessary.
+func HasVolumePopulator(ctx context.Context, cli, group, kind string) (bool, error) {
+	out, err := exec.CommandContext(ctx, cli, "get", "volumepopulator", "-o", "json").CombinedOutput() // #nosec G204 -- CLI is selected by cluster detection and args are structured.
+	if err != nil {
+		message := strings.ToLower(string(out))
+		if strings.Contains(message, "the server doesn't have a resource type") || strings.Contains(message, "not found") {
+			return false, nil
+		}
+		return false, fmt.Errorf("get volume populators: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	var list struct {
+		Items []struct {
+			// VolumePopulator is a cluster-scoped API whose sourceKind is
+			// top-level, unlike namespaced Kubernetes specs.
+			SourceKind struct {
+				Group string `json:"group"`
+				Kind  string `json:"kind"`
+			} `json:"sourceKind"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return false, fmt.Errorf("decode volume populators: %w", err)
+	}
+	for _, item := range list.Items {
+		if item.SourceKind.Group == group && item.SourceKind.Kind == kind {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 // Preflight runs the shared cluster-prereq flow: warn if no kube CLI, else check each capability plus the StorageClass when set.
 func Preflight(ctx context.Context, caps []Capability, storageClass string) []core.Finding {

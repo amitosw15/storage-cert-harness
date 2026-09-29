@@ -47,12 +47,13 @@ type Params struct {
 	Burst         int
 	MaxWait       string
 	NS            string
+	UsePopulator  bool
 
 	snapshotCountSet bool
 }
 
 func resolveParams(trs []core.TestRequirement) Params {
-	p := Params{VMImage: DefaultVMImage, DiskSize: defaultDiskSize, QPS: defaultQPS, Burst: defaultBurst, MaxWait: defaultMaxWait, NS: defaultNS}
+	p := Params{VMImage: DefaultVMImage, DiskSize: defaultDiskSize, QPS: defaultQPS, Burst: defaultBurst, MaxWait: defaultMaxWait, NS: defaultNS, UsePopulator: true}
 	if len(trs) == 0 || trs[0].Params == nil {
 		return p
 	}

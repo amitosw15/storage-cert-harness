@@ -10,6 +10,8 @@ spec:
   dataVolumeTemplates:
     - metadata:
         name: vmdisk-{{.Replica}}
+        annotations:
+          cdi.kubevirt.io/storage.usePopulator: "{{.usePopulator}}"
       spec:
         preallocation: true
         storage:
