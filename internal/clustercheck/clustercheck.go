@@ -81,19 +81,19 @@ func HasVolumePopulator(ctx context.Context, cli, group, kind string) (bool, err
 	}
 	var list struct {
 		Items []struct {
-			Spec struct {
-				SourceKind struct {
-					Group string `json:"group"`
-					Kind  string `json:"kind"`
-				} `json:"sourceKind"`
-			} `json:"spec"`
+			// VolumePopulator is a cluster-scoped API whose sourceKind is
+			// top-level, unlike namespaced Kubernetes specs.
+			SourceKind struct {
+				Group string `json:"group"`
+				Kind  string `json:"kind"`
+			} `json:"sourceKind"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(out, &list); err != nil {
 		return false, fmt.Errorf("decode volume populators: %w", err)
 	}
 	for _, item := range list.Items {
-		if item.Spec.SourceKind.Group == group && item.Spec.SourceKind.Kind == kind {
+		if item.SourceKind.Group == group && item.SourceKind.Kind == kind {
 			return true, nil
 		}
 	}
