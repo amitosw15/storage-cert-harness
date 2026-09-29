@@ -11,7 +11,7 @@ endif
 
 .PHONY: all build test unittest vet lint lint-yaml lint-actions lint-md lint-go tidy cover \
 	run-example run-tr-stor-006 clean clean-image-cache ci ci-image replay-smoke image-build \
-	image-build-fresh image-build-local run-image-tests \
+	image-build-fresh image-build-local run-harness-smoke \
 	run-quay-image-tests \
 	image-contents-check image-scan-trivy image-scan-dive image-scan image-push \
 	secret-scan supply-chain install-tools mirror-ci-tools sync-images set-next-version
@@ -94,8 +94,8 @@ image-build-local: export GOARCH = $(LOCAL_GOARCH)
 image-build-local: build
 	./ci/scripts/image-build-local.sh
 
-# Run the live smoke plan; override KUBECONFIG to use another kubeconfig.
-run-image-tests:
+# Run the live harness smoke plan; override KUBECONFIG to use another kubeconfig.
+run-harness-smoke:
 	./ci/scripts/run-image-tests.sh "$(or $(KUBECONFIG),work/kubeconfig)"
 
 # Pull and run the published Quay image; override VERSION and KUBECONFIG as needed.
