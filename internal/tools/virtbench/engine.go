@@ -131,6 +131,11 @@ func (p provisioner) Provision(ctx context.Context, rc *core.RunCtx, bag *core.B
 		rc.Logger.Info("virtbench: replay mode", "results_dir", dir)
 		return nil
 	}
+	// A preceding test (notably node drain) may have evicted the shared helper.
+	// Recheck before scenario provisioning, which can itself invoke virtbench.
+	if err := sharedSSHSetup.Setup(ctx, rc, trs); err != nil {
+		return fmt.Errorf("virtbench: ensure ssh helper pod: %w", err)
+	}
 	root := rc.WorkDir
 	if root == "" {
 		root = "."

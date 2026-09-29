@@ -182,12 +182,12 @@ var scenarios = []Scenario{
 }
 
 // setupGroup is the shared-setup group key every virtbench scenario belongs to.
-// Its provider (sshPodSetup, setup.go) ensures the single ssh helper pod once for
-// a whole batch of virtbench tests rather than once per scenario (decisions/0008).
+// Its provider (sshPodSetup, setup.go) creates and cleans up the shared helper;
+// individual provisioners recheck it in case a previous scenario evicted it.
 const setupGroup = "virtbench"
 
 func init() {
-	registry.RegisterSetup(&sshPodSetup{})
+	registry.RegisterSetup(sharedSSHSetup)
 	for _, sc := range scenarios {
 		registry.Register(stages.ToolIntegration{
 			Name:         sc.AutomationTool,
@@ -205,7 +205,7 @@ func init() {
 			ParallelSafe:      false,
 			ExclusivityGroups: []string{"cluster"},
 
-			// All virtbench scenarios share the ssh helper pod (created once).
+			// All virtbench scenarios share the SSH helper and its cleanup.
 			SetupGroups: []string{setupGroup},
 
 			Evaluators: map[string]stages.Evaluator{
