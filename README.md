@@ -24,6 +24,21 @@ time via `--thresholds <path>` or `HARNESS_THRESHOLDS`.
 
 Partner certification workflow: [`PARTNER-CERTIFICATION-GUIDE.md`](PARTNER-CERTIFICATION-GUIDE.md).
 
+## Preflight checks
+
+Use the same catalog, plan, and backend options as the intended run:
+
+```sh
+./bin/harness preflight --catalog catalog.json --plan plans/level3-internal-minimal.yaml \
+                       --backends backends.example.yaml
+```
+
+Preflight prints one `[PASS]`, `[FAIL]`, or `[SKIP]` line per check, followed by
+`Preflight summary: N PASS, N FAIL, N SKIP`. Skipped checks include a reason,
+such as replay mode or a missing CLI needed to query the cluster. Independent
+checks continue after failures. Any failed check makes the command exit non-zero;
+skips alone do not. Invalid input files also exit non-zero before checks run.
+
 ## Run artifacts
 
 Pass the same writable directory to `--workdir` and `--output` when collecting

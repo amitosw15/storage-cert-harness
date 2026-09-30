@@ -75,17 +75,27 @@ const teardownBudget = 120 * time.Second
 type preflight struct{ sc Scenario }
 
 func (p preflight) Check(ctx context.Context, rc *core.RunCtx, _ *core.Bag, trs []core.TestRequirement) ([]core.Finding, error) {
+	var findings []core.Finding
 	// Replay grades pre-collected results — no binary or cluster needed.
-	if dir := replayDir(trs); dir != "" {
+	dir := replayDir(trs)
+	if dir != "" {
 		if _, err := os.Stat(dir); err != nil {
-			return []core.Finding{{Level: "error", Message: fmt.Sprintf("virtbench: replay results_dir %q not accessible: %v", dir, err)}}, nil
+			findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: replay results_dir %q not accessible: %v", dir, err)})
+		} else {
+			findings = append(findings, core.Finding{Level: "info", Message: "virtbench: replay results_dir accessible: " + dir})
 		}
-		return []core.Finding{{Level: "info", Message: "virtbench: replay mode (" + dir + "), skipping live-exec preflight"}}, nil
 	}
 
-	var findings []core.Finding
-	if _, err := exec.LookPath(binary); err != nil {
+	if dir != "" {
+		findings = append(findings, core.Finding{Level: "skip", Message: "virtbench CLI on PATH: replay mode"})
+		if len(p.sc.CommandCheck) > 0 {
+			findings = append(findings, core.Finding{Level: "skip", Message: "virtbench command " + p.sc.CommandCheck[0] + ": replay mode"})
+		}
+	} else if _, err := exec.LookPath(binary); err != nil {
 		findings = append(findings, core.Finding{Level: "error", Message: "virtbench CLI not found on PATH (install per https://portworx.github.io/kubevirt-benchmark/install/, or use replay mode via the results_dir param)"})
+		if len(p.sc.CommandCheck) > 0 {
+			findings = append(findings, core.Finding{Level: "skip", Message: "virtbench command " + p.sc.CommandCheck[0] + ": virtbench CLI not found on PATH"})
+		}
 	} else {
 		findings = append(findings, core.Finding{Level: "info", Message: "virtbench CLI found on PATH"})
 		if len(p.sc.CommandCheck) > 0 {
@@ -98,12 +108,20 @@ func (p preflight) Check(ctx context.Context, rc *core.RunCtx, _ *core.Bag, trs 
 		}
 	}
 	for _, tr := range trs {
-		if storageClass(rc, tr) == "" {
+		if dir != "" {
+			findings = append(findings, core.Finding{Level: "skip", Message: tr.ID + " storage_class: replay mode"})
+		} else if sc := storageClass(rc, tr); sc == "" {
 			findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: %s has no storage_class (select a --backend or set the TR 'storage_class' param)", tr.ID)})
+		} else {
+			findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " storage_class=" + sc})
 		}
 		if p.sc.Validate != nil {
-			if err := p.sc.Validate(tr); err != nil {
-				findings = append(findings, core.Finding{Level: "error", Message: err.Error()})
+			if dir != "" {
+				findings = append(findings, core.Finding{Level: "skip", Message: tr.ID + " scenario parameters: replay mode"})
+			} else if err := p.sc.Validate(tr); err != nil {
+				findings = append(findings, core.Finding{Level: "error", Message: tr.ID + " scenario parameters: " + err.Error()})
+			} else {
+				findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " scenario parameters valid"})
 			}
 		}
 	}

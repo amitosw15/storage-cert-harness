@@ -46,16 +46,32 @@ const (
 
 // drainPreflight adds the drain-specific checks on top of the generic ones
 // (binary, storage_class): kubectl present, a target_node named, and a second
-// schedulable worker to live-migrate onto. Not called in replay.
+// schedulable worker to live-migrate onto. Reports skips in replay.
 func drainPreflight(ctx context.Context, _ *core.RunCtx, trs []core.TestRequirement) []core.Finding {
 	var findings []core.Finding
-	if _, err := exec.LookPath("kubectl"); err != nil {
+	replay := replayDir(trs) != ""
+	_, cliErr := exec.LookPath("kubectl")
+	if replay {
+		findings = append(findings, core.Finding{Level: "skip", Message: "kubectl on PATH: replay mode"})
+	} else if cliErr != nil {
 		findings = append(findings, core.Finding{Level: "error", Message: "kubectl not found on PATH (needed to drain the target node)"})
+	} else {
+		findings = append(findings, core.Finding{Level: "info", Message: "kubectl found on PATH"})
 	}
 	for _, tr := range trs {
-		if strParamOr(tr, "target_node", "") == "" {
+		if replay {
+			findings = append(findings, core.Finding{Level: "skip", Message: tr.ID + " target_node: replay mode"})
+		} else if target := strParamOr(tr, "target_node", ""); target == "" {
 			findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: %s requires a target_node param (the worker to drain)", tr.ID)})
+		} else {
+			findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " target_node=" + target})
 		}
+	}
+	if replay {
+		return append(findings, core.Finding{Level: "skip", Message: "schedulable workers for drain: replay mode"})
+	}
+	if cliErr != nil {
+		return append(findings, core.Finding{Level: "skip", Message: "schedulable workers for drain: kubectl not found on PATH"})
 	}
 	kc := kubeconfigOf(trs)
 	schedulable, _, err := listWorkers(ctx, kc)

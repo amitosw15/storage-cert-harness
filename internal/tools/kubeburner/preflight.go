@@ -18,10 +18,13 @@ var snapshotCRD = clustercheck.CRD("virtualmachinesnapshots.snapshot.kubevirt.io
 type preflight struct{}
 
 func (preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) ([]core.Finding, error) {
+	var findings []core.Finding
 	// Validate every selected TR's params, not just the first.
 	for i := range trs {
 		if err := resolveParams(trs[i : i+1]).validateFor(trs[i].ID); err != nil {
-			return []core.Finding{{Level: "error", Message: err.Error()}}, nil
+			findings = append(findings, core.Finding{Level: "error", Message: trs[i].ID + " parameters: " + err.Error()})
+		} else {
+			findings = append(findings, core.Finding{Level: "info", Message: trs[i].ID + " parameters valid"})
 		}
 	}
 	p := resolveParams(trs)
@@ -32,37 +35,27 @@ func (preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs 
 		sc = rc.Backend.StorageClass
 	}
 	if sc == "" {
-		return []core.Finding{{
+		findings = append(findings, core.Finding{
 			Level:   "error",
 			Message: "kube-burner: storage_class required (pass --backends/--backend)",
-		}}, nil
+		})
+	} else {
+		findings = append(findings, core.Finding{Level: "info", Message: "storage_class=" + sc})
 	}
 
-	var findings []core.Finding
-	findings = append(findings, core.Finding{
-		Level:   "info",
-		Message: fmt.Sprintf("kube-burner vm-snapshot replicas=%d snapshot_count=%d vm_image=%s", p.Replicas, p.SnapshotCount, p.VMImage),
-	})
 	if len(trs) == 1 && trs[0].ID == "TR-VIRT-027" && p.SnapshotCount == 0 {
-		findings = append(findings, core.Finding{Level: "warn", Message: "TR-VIRT-027 reduced mode: creates the source volume without snapshots; the 250-snapshot SLA will fail"})
+		findings = append(findings, core.Finding{Level: "skip", Message: "TR-VIRT-027 snapshot readiness: reduced mode creates the source volume without snapshots; the 250-snapshot SLA will fail"})
 	}
 	if _, err := exec.LookPath("kube-burner"); err != nil {
 		findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("host execution needs %q on PATH: %v", "kube-burner", err)})
 	} else {
 		findings = append(findings, core.Finding{Level: "info", Message: "host binary found: kube-burner"})
 	}
-	if sc != "" {
-		findings = append(findings, core.Finding{Level: "info", Message: "storage_class=" + sc})
-	}
-	for _, f := range findings {
-		rc.Logger.Info(f.Message)
-	}
-
 	caps := []clustercheck.Capability{clustercheck.KubeVirt, clustercheck.CDI, snapshotCRD}
 	findings = append(findings, clustercheck.Preflight(ctx, caps, sc)...)
 	cli := clustercheck.KubeCLI()
 	if cli == "" {
-		return findings, nil
+		return append(findings, core.Finding{Level: "skip", Message: "CDI VolumeImportSource populator: neither kubectl nor oc found on PATH"}), nil
 	}
 	usePopulator, err := clustercheck.HasVolumePopulator(ctx, cli, "cdi.kubevirt.io", "VolumeImportSource")
 	if err != nil {

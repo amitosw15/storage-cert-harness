@@ -173,9 +173,13 @@ func templateDiskCount(path string) (int, error) {
 func singleNodeCeilingPreflight(ctx context.Context, _ *core.RunCtx, trs []core.TestRequirement) []core.Finding {
 	var findings []core.Finding
 	for _, tr := range trs {
+		if replayDir(trs) != "" {
+			findings = append(findings, core.Finding{Level: "skip", Message: tr.ID + " node_name schedulability: replay mode"})
+			continue
+		}
 		node := strParamOr(tr, "node_name", "")
 		if node == "" {
-			findings = append(findings, core.Finding{Level: "info", Message: fmt.Sprintf("virtbench: %s: no node_name pinned; virtbench will select a random worker", tr.ID)})
+			findings = append(findings, core.Finding{Level: "skip", Message: fmt.Sprintf("virtbench: %s: no node_name pinned; virtbench will select a random worker", tr.ID)})
 			continue
 		}
 		schedulable, _, err := listWorkers(ctx, kubeconfigOf(trs))
@@ -185,6 +189,8 @@ func singleNodeCeilingPreflight(ctx context.Context, _ *core.RunCtx, trs []core.
 		}
 		if !slices.Contains(schedulable, node) {
 			findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: %s: node_name %q is not a schedulable worker", tr.ID, node)})
+		} else {
+			findings = append(findings, core.Finding{Level: "info", Message: fmt.Sprintf("virtbench: %s: node_name %q is a schedulable worker", tr.ID, node)})
 		}
 	}
 	return findings
