@@ -89,7 +89,7 @@ else
 fi
 
 echo "==> checking /usr/bin/virtbench fio"
-if run_cmd /usr/bin/virtbench fio --help >/dev/null 2>&1; then
+if run_cmd env VIRTBENCH_REPO=/opt/virtbench-runtime /usr/bin/virtbench fio --help >/dev/null 2>&1; then
 	echo "  virtbench fio: present"
 else
 	fail "/usr/bin/virtbench fio is missing or cannot run"

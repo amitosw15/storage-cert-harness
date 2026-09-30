@@ -286,12 +286,29 @@ Macs natively, and Apple Silicon via Docker/Podman Desktop Rosetta 2.
 |--------|---------|----------------|
 | `harness` | CLI (this repo) | Go build from source |
 | `kube-burner` | TR-VIRT-010 adapter | GitHub release tarball (`KUBE_BURNER_VERSION`) |
-| `kube-burner-ocp` | TR-STOR-006 adapter | GitHub release tarball (`KUBE_BURNER_OCP_VERSION`) |
+| `kube-burner-ocp` | TR-STOR-006 adapter | Upstream OCP source (`KUBE_BURNER_OCP_VERSION`) with upstream core (`KUBE_BURNER_CORE_REF`) |
 | `virtbench` | virtbench adapter local-exec | Pinned `VIRTBENCH_VERSION` |
 
 All three must be on `PATH` under `/usr/bin/`. Pins live in
 `ci/config/images.env`. `image-contents-check.sh` verifies each binary is
 present and runnable after every image build (locally and in CI).
+
+The temporary `kube-burner-ocp` build uses the upstream v1.12.7 source and
+resolves its `github.com/kube-burner/kube-burner/v2` dependency from upstream
+`main` (`KUBE_BURNER_CORE_REF`). This consumes the vendor-node-condition fix
+merged in [upstream PR #1312](https://github.com/kube-burner/kube-burner/pull/1312),
+without depending on a personal fork. Both local and CI image builds
+compile the OCP binary for the target architecture using the existing `GO_IMAGE`
+toolchain. The resolved core module version is included in the OCP binary's
+`version` output and Go build metadata.
+
+`main` is a moving reference. Use `IMAGE_BUILD_NO_CACHE=1` when rebuilding to
+refresh it; an existing image layer can otherwise retain an earlier resolution.
+`KUBE_BURNER_CORE_REF` also accepts an upstream commit or release tag for a fixed
+build.
+Once an upstream OCP release includes the fixed core dependency, return to its
+release-tarball download. The standalone `kube-burner` CLI continues to use
+`KUBE_BURNER_VERSION`.
 
 In the supported GitHub Actions flow, `image-push` runs automatically on
 `main` pushes. `supply-chain` is gating.

@@ -62,6 +62,7 @@ if [[ "${1:-}" == "--check" ]]; then
 	fi
 	check_containerfile_arg KUBE_BURNER_VERSION "${KUBE_BURNER_VERSION}"
 	check_containerfile_arg KUBE_BURNER_OCP_VERSION "${KUBE_BURNER_OCP_VERSION}"
+	check_containerfile_arg KUBE_BURNER_CORE_REF "${KUBE_BURNER_CORE_REF}"
 	check_containerfile_arg OPENSHIFT_CLIENT_VERSION "${OPENSHIFT_CLIENT_VERSION}"
 	check_containerfile_arg VIRTBENCH_VERSION "${VIRTBENCH_VERSION}"
 	check_containerfile_arg KUBEVIRT_VERSION "${KUBEVIRT_VERSION}"

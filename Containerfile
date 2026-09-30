@@ -6,9 +6,11 @@ ARG HARNESS_VERSION=0.0.0-dev
 ARG IMAGE_VERSION=0.0.0-dev
 ARG TARGETARCH=amd64
 ARG BUILD_IMAGE
+ARG GO_IMAGE
 ARG RUNTIME_IMAGE
 ARG KUBE_BURNER_VERSION=v2.8.5
 ARG KUBE_BURNER_OCP_VERSION=v1.12.7
+ARG KUBE_BURNER_CORE_REF=main
 ARG OPENSHIFT_CLIENT_VERSION=4.22.15
 ARG VIRTBENCH_VERSION=v2.0.0
 ARG KUBEVIRT_VERSION=v1.9.0
@@ -16,25 +18,41 @@ ARG KUBEVIRT_VERSION=v1.9.0
 FROM ${BUILD_IMAGE} AS builder
 ARG TARGETARCH
 ARG KUBE_BURNER_VERSION
-ARG KUBE_BURNER_OCP_VERSION
 ARG KUBEVIRT_VERSION
 USER 0
 WORKDIR /src
 
 RUN set -eux; \
-    case "${TARGETARCH}" in amd64) tool_arch=x86_64; kube_arch=x86_64; virtctl_arch=amd64 ;; arm64) tool_arch=arm64; kube_arch=arm64; virtctl_arch=arm64 ;; *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; esac; \
+    case "${TARGETARCH}" in amd64) kube_arch=x86_64; virtctl_arch=amd64 ;; arm64) kube_arch=arm64; virtctl_arch=arm64 ;; *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; esac; \
     kube_ver="${KUBE_BURNER_VERSION#v}"; \
     curl -sSfL "https://github.com/kube-burner/kube-burner/releases/download/${KUBE_BURNER_VERSION}/kube-burner-V${kube_ver}-linux-${kube_arch}.tar.gz" -o /tmp/kube-burner.tar.gz; \
     tar xz -C /tmp -f /tmp/kube-burner.tar.gz kube-burner; \
     install -m 0755 /tmp/kube-burner /kube-burner; \
-    ocp_ver="${KUBE_BURNER_OCP_VERSION#v}"; \
-    curl -sSfL "https://github.com/kube-burner/kube-burner-ocp/releases/download/${KUBE_BURNER_OCP_VERSION}/kube-burner-ocp-V${ocp_ver}-linux-${tool_arch}.tar.gz" -o /tmp/kube-burner-ocp.tar.gz; \
-    tar xz -C /tmp -f /tmp/kube-burner-ocp.tar.gz kube-burner-ocp; \
-    install -m 0755 /tmp/kube-burner-ocp /kube-burner-ocp; \
     curl -sSfL "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/virtctl-${KUBEVIRT_VERSION}-linux-${virtctl_arch}" \
       -o /tmp/virtctl; \
     install -m 0755 /tmp/virtctl /virtctl; \
-    rm -f /tmp/kube-burner.tar.gz /tmp/kube-burner-ocp.tar.gz /tmp/kube-burner /tmp/kube-burner-ocp /tmp/virtctl
+    rm -f /tmp/kube-burner.tar.gz /tmp/kube-burner /tmp/virtctl
+USER 65532
+
+# Keep the OCP workload release, but consume the node-health fix from upstream core.
+FROM ${GO_IMAGE} AS kube-burner-ocp-builder
+ARG TARGETARCH
+ARG KUBE_BURNER_OCP_VERSION
+ARG KUBE_BURNER_CORE_REF
+USER 0
+WORKDIR /src/kube-burner-ocp
+RUN set -eux; \
+    case "${TARGETARCH}" in amd64|arm64) ;; *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; esac; \
+    git init .; \
+    git remote add origin https://github.com/kube-burner/kube-burner-ocp.git; \
+    git fetch --depth 1 origin "${KUBE_BURNER_OCP_VERSION}"; \
+    git checkout --detach FETCH_HEAD; \
+    GOPROXY=https://proxy.golang.org,direct \
+      go get "github.com/kube-burner/kube-burner/v2@${KUBE_BURNER_CORE_REF}"; \
+    core_version="$(go list -m -f '{{.Version}}' github.com/kube-burner/kube-burner/v2)"; \
+    GOPROXY=https://proxy.golang.org,direct GOOS=linux GOARCH="${TARGETARCH}" CGO_ENABLED=0 \
+      make ARCH="${TARGETARCH}" VERSION="${KUBE_BURNER_OCP_VERSION#v}-core.${core_version}" build; \
+    install -m 0755 "bin/${TARGETARCH}/kube-burner-ocp" /kube-burner-ocp
 USER 65532
 
 FROM ${BUILD_IMAGE} AS virtbench-builder
@@ -71,7 +89,8 @@ LABEL io.storage-cert-harness.virtbench.version="${VIRTBENCH_VERSION}"
 LABEL io.storage-cert-harness.harness.version="${HARNESS_VERSION}"
 # Multiple sources are allowed when the destination is a directory (trailing slash).
 COPY bin/harness /usr/bin/
-COPY --from=builder /kube-burner /kube-burner-ocp /virtctl /usr/bin/
+COPY --from=builder /kube-burner /virtctl /usr/bin/
+COPY --from=kube-burner-ocp-builder /kube-burner-ocp /usr/bin/
 COPY --from=virtbench-builder /oc /kubectl /opt/virtbench-venv/bin/virtbench /usr/bin/
 COPY --from=virtbench-builder /opt/virtbench /opt/virtbench-runtime
 COPY container-patches/virtbench/examples/utilities/ssh-pod.yaml /opt/virtbench-runtime/examples/utilities/ssh-pod.yaml
