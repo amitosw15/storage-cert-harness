@@ -197,39 +197,50 @@ func newPreflightCmd() *cobra.Command {
 				}
 				byTool[key] = append(byTool[key], tr)
 			}
-			var problems int
-			for tool, ts := range byTool {
+			results := preflightOutput{out: out}
+			tools := make([]string, 0, len(byTool))
+			for tool := range byTool {
+				tools = append(tools, tool)
+			}
+			sort.Strings(tools)
+			for _, tool := range tools {
+				ts := byTool[tool]
 				if ts[0].AutomationTool == "" || ts[0].AutomationTool == core.CheckManual {
-					fmt.Fprintf(out, "[info] %d TR(s) with no automation tool: skipped\n", len(ts)) //nolint:errcheck // follow-up: check CLI writes
+					for _, tr := range ts {
+						results.add("SKIP", core.ExecutionLabel(tr.ID, tr.Variant), "no automation tool; manual check required")
+					}
 					continue
 				}
 				ti, ok := orchestrator.ResolveTool(ts[0])
 				if !ok {
-					fmt.Fprintf(out, "[error] tool %q not registered\n", tool) //nolint:errcheck // follow-up: check CLI writes
-					problems++
+					results.add("FAIL", tool, "tool not registered")
 					continue
 				}
 				if ti.Preflight == nil {
-					fmt.Fprintf(out, "[info] %s: no preflight\n", tool) //nolint:errcheck // follow-up: check CLI writes
+					results.add("SKIP", tool, "no preflight checks implemented")
 					continue
 				}
 				findings, err := ti.Preflight.Check(cmd.Context(), rc, core.NewBag(), ts)
-				if err != nil {
-					fmt.Fprintf(out, "[error] %s: %v\n", tool, err) //nolint:errcheck // follow-up: check CLI writes
-					problems++
-					continue
-				}
 				for _, f := range findings {
-					fmt.Fprintf(out, "[%s] %s: %s\n", f.Level, tool, f.Message) //nolint:errcheck // follow-up: check CLI writes
-					if f.Level == "error" {
-						problems++
+					switch f.Level {
+					case "info":
+						results.add("PASS", tool, f.Message)
+					case "skip", "warn":
+						results.add("SKIP", tool, f.Message)
+					default:
+						results.add("FAIL", tool, f.Message)
 					}
 				}
+				if err != nil {
+					results.add("FAIL", tool, err.Error())
+				} else if len(findings) == 0 {
+					results.add("SKIP", tool, "preflight returned no check results")
+				}
 			}
-			if problems > 0 {
-				return fmt.Errorf("%d preflight problem(s)", problems)
+			if len(trs) == 0 {
+				fmt.Fprintln(out, "No test requirements selected.") //nolint:errcheck // follow-up: check CLI writes
 			}
-			return nil
+			return results.finish()
 		},
 	}
 	cmd.Flags().StringVar(&catalogPath, "catalog", "", "path to catalog.json (required)")

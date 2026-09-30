@@ -42,7 +42,8 @@ type Scenario struct {
 	// drain-nodes uses them (decisions/0013).
 
 	// Preflight runs extra scenario-specific checks after the generic ones (binary,
-	// storage_class). Nil adds nothing.
+	// storage_class). Hooks must report skips without contacting the cluster in
+	// replay mode. Nil adds nothing.
 	Preflight func(ctx context.Context, rc *core.RunCtx, trs []core.TestRequirement) []core.Finding
 	// Provision runs after the generic provisioner made resultsRoot (never in
 	// replay), for a scenario that must stage the cluster before Run — drain clones

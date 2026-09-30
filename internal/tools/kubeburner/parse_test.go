@@ -305,13 +305,14 @@ func TestParseResults_AggregatesSnapshotReadyQuantilesAcrossBatches(t *testing.T
 }
 
 func TestPreflight_RequiresStorageClass(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	rc := &core.RunCtx{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	findings, err := (preflight{}).Check(context.Background(), rc, core.NewBag(), []core.TestRequirement{{ID: "TR-VIRT-010", Params: map[string]any{"replicas": 1, "snapshot_count": 1}}})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	if len(findings) != 1 || findings[0].Level != "error" {
-		t.Fatalf("got %#v, want one error finding", findings)
+	if len(findings) != 8 || findings[1].Level != "error" || !strings.Contains(findings[1].Message, "storage_class required") {
+		t.Fatalf("got %#v, want missing storage class error and all independent checks", findings)
 	}
 }
 

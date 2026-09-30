@@ -21,6 +21,9 @@ type RunHandle struct {
 }
 
 // Preflight checks prerequisites before anything is provisioned.
+// Return one finding for every check, including successes and skips (with a
+// reason). Continue independent checks after failures. An error may accompany
+// partial findings when the remaining checks cannot be completed.
 type Preflight interface {
 	Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) ([]core.Finding, error)
 }

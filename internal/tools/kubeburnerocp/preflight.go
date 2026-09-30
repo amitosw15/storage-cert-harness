@@ -16,23 +16,21 @@ type preflight struct{}
 
 func (preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) ([]core.Finding, error) {
 	p := resolveParams(trs)
-	if err := p.validate(); err != nil {
-		return []core.Finding{{Level: "error", Message: err.Error()}}, nil
-	}
 	bag.Set("params", p)
 
 	var findings []core.Finding
-	findings = append(findings, core.Finding{
-		Level:   "info",
-		Message: fmt.Sprintf("kube-burner-ocp workload=%s", p.Workload),
-	})
+	for _, tr := range trs {
+		params := resolveParams([]core.TestRequirement{tr})
+		if err := params.validate(); err != nil {
+			findings = append(findings, core.Finding{Level: "error", Message: tr.ID + " parameters: " + err.Error()})
+			findings = append(findings, core.Finding{Level: "skip", Message: tr.ID + " workload prerequisites: cannot select checks without a valid workload"})
+		} else {
+			findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " workload=" + params.Workload})
+		}
+	}
 
 	if rc.Backend != nil && rc.Backend.StorageClass != "" {
 		findings = append(findings, core.Finding{Level: "info", Message: "storage_class=" + rc.Backend.StorageClass})
-	}
-
-	for _, f := range findings {
-		rc.Logger.Info(f.Message)
 	}
 
 	seenHost := map[string]bool{}
@@ -61,13 +59,6 @@ func (preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs 
 	}
 
 	cli := clustercheck.KubeCLI()
-	if cli == "" {
-		findings = append(findings, core.Finding{
-			Level:   "warn",
-			Message: "neither kubectl nor oc found; skipping cluster prereq checks",
-		})
-		return findings, nil
-	}
 
 	// Run the union of every selected workload's cluster prerequisites, once each.
 	seen := map[string]bool{}
@@ -77,7 +68,11 @@ func (preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs 
 				continue
 			}
 			seen[c.Name] = true
-			findings = append(findings, c.Check(ctx, cli))
+			if cli == "" {
+				findings = append(findings, core.Finding{Level: "skip", Message: c.Name + ": neither kubectl nor oc found on PATH"})
+			} else {
+				findings = append(findings, c.Check(ctx, cli))
+			}
 		}
 	}
 

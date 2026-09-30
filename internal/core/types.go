@@ -244,9 +244,11 @@ type Provenance struct {
 	GeneratedDate string `json:"generated_date,omitempty"`
 }
 
-// Finding is a preflight observation.
+// Finding is one preflight check result. Successful checks use info, failed
+// checks use error, and checks that did not run use skip with a reason.
+// Legacy warn findings are non-fatal and displayed as SKIP by the CLI.
 type Finding struct {
-	Level   string `json:"level"` // info | warn | error
+	Level   string `json:"level"` // info | error | skip | warn
 	Message string `json:"message"`
 }
 

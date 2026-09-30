@@ -292,8 +292,13 @@ func TestPreflightUsesEmbeddedFIOP99Template(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
-	if len(findings) != 1 || findings[0].Level == "error" {
-		t.Fatalf("findings = %+v, want no FIO template error", findings)
+	if len(findings) != 3 {
+		t.Fatalf("findings = %+v, want binary, storage class, and parameter checks", findings)
+	}
+	for _, f := range findings {
+		if f.Level != "info" {
+			t.Fatalf("findings = %+v, want all checks to pass", findings)
+		}
 	}
 }
 
