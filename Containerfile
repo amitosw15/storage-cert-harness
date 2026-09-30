@@ -8,7 +8,7 @@ ARG TARGETARCH=amd64
 ARG BUILD_IMAGE
 ARG RUNTIME_IMAGE
 ARG KUBE_BURNER_VERSION=v2.8.5
-ARG KUBE_BURNER_OCP_VERSION=v1.12.7
+ARG KUBE_BURNER_OCP_VERSION=v1.12.7-vendor-node-health.1
 ARG OPENSHIFT_CLIENT_VERSION=4.22.15
 ARG VIRTBENCH_VERSION=v2.0.0
 ARG KUBEVIRT_VERSION=v1.9.0
@@ -28,7 +28,7 @@ RUN set -eux; \
     tar xz -C /tmp -f /tmp/kube-burner.tar.gz kube-burner; \
     install -m 0755 /tmp/kube-burner /kube-burner; \
     ocp_ver="${KUBE_BURNER_OCP_VERSION#v}"; \
-    curl -sSfL "https://github.com/kube-burner/kube-burner-ocp/releases/download/${KUBE_BURNER_OCP_VERSION}/kube-burner-ocp-V${ocp_ver}-linux-${tool_arch}.tar.gz" -o /tmp/kube-burner-ocp.tar.gz; \
+    curl -sSfL "https://github.com/borod108/kube-burner-ocp/releases/download/${KUBE_BURNER_OCP_VERSION}/kube-burner-ocp-V${ocp_ver}-linux-${tool_arch}.tar.gz" -o /tmp/kube-burner-ocp.tar.gz; \
     tar xz -C /tmp -f /tmp/kube-burner-ocp.tar.gz kube-burner-ocp; \
     install -m 0755 /tmp/kube-burner-ocp /kube-burner-ocp; \
     curl -sSfL "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/virtctl-${KUBEVIRT_VERSION}-linux-${virtctl_arch}" \

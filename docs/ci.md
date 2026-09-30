@@ -286,12 +286,24 @@ Macs natively, and Apple Silicon via Docker/Podman Desktop Rosetta 2.
 |--------|---------|----------------|
 | `harness` | CLI (this repo) | Go build from source |
 | `kube-burner` | TR-VIRT-010 adapter | GitHub release tarball (`KUBE_BURNER_VERSION`) |
-| `kube-burner-ocp` | TR-STOR-006 adapter | GitHub release tarball (`KUBE_BURNER_OCP_VERSION`) |
+| `kube-burner-ocp` | TR-STOR-006 adapter | GitHub release tarball (`KUBE_BURNER_OCP_VERSION`; temporary fork described below) |
 | `virtbench` | virtbench adapter local-exec | Pinned `VIRTBENCH_VERSION` |
 
 All three must be on `PATH` under `/usr/bin/`. Pins live in
 `ci/config/images.env`. `image-contents-check.sh` verifies each binary is
 present and runnable after every image build (locally and in CI).
+
+The temporary `kube-burner-ocp` pin is
+[`v1.12.7-vendor-node-health.1`](https://github.com/borod108/kube-burner-ocp/releases/tag/v1.12.7-vendor-node-health.1).
+It keeps the upstream v1.12.7 workloads and pins kube-burner to
+[`c7c7c10995e0`](https://github.com/borod108/kube-burner/commit/c7c7c10995e0),
+which ignores vendor-defined node conditions while retaining the standard
+Kubernetes health checks
+([upstream PR #1312](https://github.com/kube-burner/kube-burner/pull/1312)).
+The existing image build downloads the fork's release
+tarballs for amd64 or arm64. Once an upstream release includes this fix, restore
+the download repository in `Containerfile` to `kube-burner/kube-burner-ocp` and
+update `KUBE_BURNER_OCP_VERSION` in both `Containerfile` and `ci/config/images.env`.
 
 In the supported GitHub Actions flow, `image-push` runs automatically on
 `main` pushes. `supply-chain` is gating.
