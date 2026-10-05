@@ -1,0 +1,52 @@
+global:
+  gc: false
+  measurements:
+    - name: podLatency
+    - name: pvcLatency
+metricsEndpoints:
+  - metrics: [metrics.yml]
+    alerts: [alerts.yml]
+    indexer:
+      type: local
+      metricsDirectory: collected-metrics
+jobs:
+  - name: pvc-density-four-pvc-per-pod
+    namespace: pvc-density-four-pvc-per-pod
+    jobIterations: __ITERATIONS__
+    cleanup: true
+    namespacedIterations: false
+    podWait: false
+    waitWhenFinished: true
+    verifyObjects: true
+    errorOnVerify: true
+    waitForDeletion: true
+    preLoadImages: false
+    objects:
+      - objectTemplate: pvc.yml
+        replicas: 1
+        inputVars:
+          claimSize: __CLAIM_SIZE__
+          storageClassName: __STORAGE_CLASS__
+          suffix: a
+      - objectTemplate: pvc.yml
+        replicas: 1
+        inputVars:
+          claimSize: __CLAIM_SIZE__
+          storageClassName: __STORAGE_CLASS__
+          suffix: b
+      - objectTemplate: pvc.yml
+        replicas: 1
+        inputVars:
+          claimSize: __CLAIM_SIZE__
+          storageClassName: __STORAGE_CLASS__
+          suffix: c
+      - objectTemplate: pvc.yml
+        replicas: 1
+        inputVars:
+          claimSize: __CLAIM_SIZE__
+          storageClassName: __STORAGE_CLASS__
+          suffix: d
+      - objectTemplate: pod.yml
+        replicas: 1
+        inputVars:
+          containerImage: registry.k8s.io/pause:3.1

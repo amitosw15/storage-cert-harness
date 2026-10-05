@@ -54,11 +54,11 @@
       "category": "Control path",
       "checks": [
         {
-          "expectation": "all 1000 PVCs reach Bound without provisioner backlog or failure",
+          "expectation": "all requested PVCs reach Bound without provisioner backlog or failure",
           "id": "pvc-1000-bound",
           "kind": "suite",
-          "name": "1000 PVCs provisioned and bound",
-          "suite": "kube-burner-ocp pvc-density (1000 PVCs)"
+          "name": "Requested PVCs provisioned and bound",
+          "suite": "kube-burner-ocp pvc-density"
         }
       ],
       "checks_count": 1,

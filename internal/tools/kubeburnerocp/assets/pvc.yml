@@ -1,0 +1,13 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  labels:
+    app: pvc-density-four-pvc-{{.Iteration}}
+  name: pvc-{{.Iteration}}-{{.suffix}}
+spec:
+  storageClassName: {{.storageClassName}}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{.claimSize}}

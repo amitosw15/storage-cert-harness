@@ -16,8 +16,16 @@ const (
 )
 
 func mapPVCDensityResults(summaries []jobSummary, data map[string][]byte, result *core.TestResult) error {
+	return mapPVCDensityResultsFor(WorkloadPVCDensity, 1, summaries, data, result)
+}
+
+func mapFourPVCDensityResults(summaries []jobSummary, data map[string][]byte, result *core.TestResult) error {
+	return mapPVCDensityResultsFor(WorkloadPVCDensityFourPVC, 4, summaries, data, result)
+}
+
+func mapPVCDensityResultsFor(jobName string, pvcPerIteration int, summaries []jobSummary, data map[string][]byte, result *core.TestResult) error {
 	for _, s := range summaries {
-		if s.JobConfig.Name != WorkloadPVCDensity {
+		if s.JobConfig.Name != jobName {
 			continue
 		}
 		// A successful, verified job waits for every requested PVC to be ready.
@@ -28,7 +36,7 @@ func mapPVCDensityResults(summaries []jobSummary, data map[string][]byte, result
 		}
 		result.Checks[pvcBoundCheck] = outcome
 		result.Metrics = append(result.Metrics,
-			core.Metric{Name: "pvc_requested_count", Value: float64(s.JobConfig.JobIterations), Unit: "count"})
+			core.Metric{Name: "pvc_requested_count", Value: float64(s.JobConfig.JobIterations * pvcPerIteration), Unit: "count"})
 		break
 	}
 	for name, blob := range data {
@@ -40,7 +48,7 @@ func mapPVCDensityResults(summaries []jobSummary, data map[string][]byte, result
 			continue
 		}
 		for _, q := range quants {
-			if q.MetricName == "pvcLatencyQuantilesMeasurement" && q.QuantileName == "Bound" && q.JobName == WorkloadPVCDensity {
+			if q.MetricName == "pvcLatencyQuantilesMeasurement" && q.QuantileName == "Bound" && q.JobName == jobName {
 				result.Metrics = append(result.Metrics,
 					core.Metric{Name: "pvc_bind_latency", Value: q.P99, Unit: "ms", Percentile: "p99"})
 			}

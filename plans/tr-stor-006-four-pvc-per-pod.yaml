@@ -1,0 +1,21 @@
+schema_version: "1"
+name: tr-stor-006-four-pvc-per-pod
+description: >-
+  TR-STOR-006 variant that creates 1,000 Pods with four PVCs each on the three
+  named workers, for 4,000 PVCs total. Select the backend configured for the
+  target Trident storage class when running the plan.
+concurrency: 1
+select:
+  ids:
+    - TR-STOR-006
+variants:
+  TR-STOR-006:
+    - name: four-pvc-per-pod-1000-pod
+      params:
+        workload: pvc-density-four-pvc-per-pod
+        iterations: 1000
+        claim_size: 256Mi
+        worker_nodes: worker-0-0,worker-0-1,worker-0-2
+        qps: 5
+        burst: 10
+        timeout: 30m

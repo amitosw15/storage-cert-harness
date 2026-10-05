@@ -1,0 +1,59 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  labels:
+    app: pvc-density-four-pvc-{{.Iteration}}
+    experiment: pvc-density-four-pvc
+  name: pod-{{.Iteration}}
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                  - __WORKER_1__
+                  - __WORKER_2__
+                  - __WORKER_3__
+  topologySpreadConstraints:
+    - maxSkew: 1
+      minDomains: 3
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      nodeAffinityPolicy: Honor
+      nodeTaintsPolicy: Honor
+      labelSelector:
+        matchLabels:
+          experiment: pvc-density-four-pvc
+  volumes:
+    - name: storage-a
+      persistentVolumeClaim:
+        claimName: pvc-{{.Iteration}}-a
+    - name: storage-b
+      persistentVolumeClaim:
+        claimName: pvc-{{.Iteration}}-b
+    - name: storage-c
+      persistentVolumeClaim:
+        claimName: pvc-{{.Iteration}}-c
+    - name: storage-d
+      persistentVolumeClaim:
+        claimName: pvc-{{.Iteration}}-d
+  containers:
+    - image: {{.containerImage}}
+      name: pvc-density-container
+      resources:
+        requests:
+          memory: "10Mi"
+          cpu: "10m"
+      imagePullPolicy: IfNotPresent
+      volumeMounts:
+        - name: storage-a
+          mountPath: /data/a
+        - name: storage-b
+          mountPath: /data/b
+        - name: storage-c
+          mountPath: /data/c
+        - name: storage-d
+          mountPath: /data/d

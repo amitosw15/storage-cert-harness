@@ -29,24 +29,32 @@ type argSpec struct {
 // (value from the backend), typed flags, and cluster prerequisites. Adding a
 // workload is a new entry here — no engine-code changes.
 type workloadSpec struct {
-	sub        string
-	scFlag     string
-	args       []argSpec
-	prereqs    []clustercheck.Capability
-	hostBins   []string
-	mapResults resultMapper
+	sub             string
+	scFlag          string
+	args            []argSpec
+	prereqs         []clustercheck.Capability
+	hostBins        []string
+	mapResults      resultMapper
+	pvcPerIteration int
+	customConfig    bool
 }
 
 var workloadSpecs = map[string]workloadSpec{
 	WorkloadPVCDensity: {
-		sub:        "pvc-density",
-		scFlag:     "--storage-class-name",
-		mapResults: mapPVCDensityResults,
+		sub:             "pvc-density",
+		scFlag:          "--storage-class-name",
+		mapResults:      mapPVCDensityResults,
+		pvcPerIteration: 1,
 		args: []argSpec{
 			{flag: "--iterations", param: "iterations", typ: argInt},
 			{flag: "--claim-size", param: "claim_size", typ: argString},
 			{flag: "--container-image", param: "container_image", typ: argString, optional: true},
 		},
+	},
+	WorkloadPVCDensityFourPVC: {
+		mapResults:      mapFourPVCDensityResults,
+		pvcPerIteration: 4,
+		customConfig:    true,
 	},
 	WorkloadVirtMigration: {
 		sub:        "virt-migration",

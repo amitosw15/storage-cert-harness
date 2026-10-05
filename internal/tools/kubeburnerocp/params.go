@@ -8,10 +8,11 @@ import (
 )
 
 const (
-	WorkloadPVCDensity    = "pvc-density"
-	WorkloadVirtMigration = "virt-migration"
-	WorkloadVirtParallel  = "virt-parallel"
-	resultsSubdir         = "kubeburner-results"
+	WorkloadPVCDensity        = "pvc-density"
+	WorkloadPVCDensityFourPVC = "pvc-density-four-pvc-per-pod"
+	WorkloadVirtMigration     = "virt-migration"
+	WorkloadVirtParallel      = "virt-parallel"
+	resultsSubdir             = "kubeburner-results"
 )
 
 // Params identifies the workload; per-flag values stay in Raw (the plan's TR
@@ -38,6 +39,11 @@ func (p Params) validate() error {
 	}
 	if _, ok := workloadSpecs[p.Workload]; !ok {
 		return fmt.Errorf("kube-burner-ocp: unknown workload %q", p.Workload)
+	}
+	if p.Workload == WorkloadPVCDensityFourPVC {
+		if _, _, _, err := fourPVCInputs(p.Raw); err != nil {
+			return err
+		}
 	}
 	return nil
 }

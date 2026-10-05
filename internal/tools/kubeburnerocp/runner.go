@@ -66,7 +66,13 @@ func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []cor
 			runs[i].RunErr = err.Error()
 			continue
 		}
-		args, err := buildCLIArgs(p, sc)
+		var args []string
+		var err error
+		if workloadSpecs[p.Workload].customConfig {
+			args, err = prepareFourPVCConfig(ctx, rc, subdir, sc, p)
+		} else {
+			args, err = buildCLIArgs(p, sc)
+		}
 		if err != nil {
 			runs[i].RunErr = err.Error()
 			continue
@@ -208,10 +214,11 @@ func (parser) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, logs core.
 		if err != nil {
 			return nil, err
 		}
-		if r.Workload == WorkloadPVCDensity {
+		if pvcPerIteration := workloadSpecs[r.Workload].pvcPerIteration; pvcPerIteration > 0 {
+			expectedPVCs := r.Iterations * pvcPerIteration
 			matched := false
 			for _, m := range res.Metrics {
-				if m.Name == "pvc_requested_count" && r.Iterations > 0 && m.Value == float64(r.Iterations) {
+				if m.Name == "pvc_requested_count" && expectedPVCs > 0 && m.Value == float64(expectedPVCs) {
 					matched = true
 				}
 			}
