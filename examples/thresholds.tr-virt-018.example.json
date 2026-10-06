@@ -17,7 +17,7 @@
           "operator": "<=",
           "value": 360000,
           "unit": "s",
-          "condition": "1000 VMs, 2 disks each (30Gi rhel9 root + 10Gi blank data), datasource-clone; p99 per-VM clone duration (computed from per-VM samples). Completeness (every VM succeeds) is enforced natively, not gated here."
+          "condition": "100 VMs, 2 disks each (30Gi rhel9 root + 10Gi blank data), datasource-clone; p99 per-VM clone duration (computed from per-VM samples). Completeness (every VM succeeds) is enforced natively, not gated here."
         }
       ]
     }

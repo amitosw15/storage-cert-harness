@@ -63,16 +63,6 @@
           "when": {
             "num_vms": 100
           }
-        },
-        {
-          "condition": "1000 concurrent VMs Running, synchronized power-on storm",
-          "metric": "vm_boot_time",
-          "operator": "<",
-          "unit": "h",
-          "value": 1,
-          "when": {
-            "num_vms": 1000
-          }
         }
       ],
       "sla_status": "defined"

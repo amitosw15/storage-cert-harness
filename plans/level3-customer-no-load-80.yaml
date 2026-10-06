@@ -6,7 +6,6 @@ description: >-
   included in this customer-facing plan.
 overrides:
   TR-VIRT-001:
-    # Certification profiles use 100 and 1000 VMs in separate runs.
     num_vms: 100
   TR-VIRT-004:
     workload: virt-migration
