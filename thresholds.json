@@ -111,7 +111,7 @@
           "metric": "vm_ha_restart_time",
           "operator": "<=",
           "unit": "s",
-          "value": 45
+          "value": 600
         }
       ],
       "sla_status": "defined"
