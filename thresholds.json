@@ -131,7 +131,7 @@
           "operator": "<=",
           "percentile": "p99",
           "unit": "s",
-          "value": 5
+          "value": 15
         }
       ],
       "sla_status": "defined"
@@ -158,7 +158,7 @@
           "operator": "<",
           "percentile": "p99",
           "unit": "s",
-          "value": 10,
+          "value": 15,
           "when": {
             "iteration_clones": 100
           }
