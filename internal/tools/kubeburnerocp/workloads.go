@@ -102,6 +102,13 @@ func buildCLIArgs(p Params, storageClass string) ([]string, error) {
 	if !ok {
 		return nil, fmt.Errorf("kube-burner-ocp: unknown workload %q", p.Workload)
 	}
+	if p.Workload == WorkloadVirtParallel {
+		raw, err := virtParallelParams(p.Raw)
+		if err != nil {
+			return nil, err
+		}
+		p.Raw = raw
+	}
 	args := []string{spec.sub}
 	for _, set := range [][]argSpec{spec.args, globalArgs} {
 		for _, a := range set {

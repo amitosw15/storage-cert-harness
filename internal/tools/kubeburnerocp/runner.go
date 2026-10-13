@@ -166,12 +166,13 @@ func findCollectedMetrics(root string) (map[string][]byte, []string, error) {
 			return walkErr
 		}
 		name := entry.Name()
-		if name == "jobSummary.json" || strings.Contains(name, "Quantiles") {
+		if name == "jobSummary.json" || strings.Contains(name, "Quantiles") ||
+			strings.HasPrefix(name, "vmiLatencyMeasurement-") || strings.HasPrefix(name, "vmimLatencyMeasurement-") {
 			content, err := rootFS.ReadFile(path)
 			if err != nil {
 				return err
 			}
-			data[name] = content
+			data[filepath.ToSlash(path)] = content
 			paths = append(paths, filepath.Join(root, path))
 		}
 		return nil
@@ -205,7 +206,7 @@ func (parser) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, logs core.
 			}
 		}
 
-		if _, ok := sub["jobSummary.json"]; !ok {
+		if !hasJobSummary(sub) {
 			reason := "kube-burner produced no jobSummary"
 			if r.RunErr != "" {
 				reason = r.RunErr
@@ -231,6 +232,23 @@ func (parser) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, logs core.
 				res.Native = core.OutcomeError
 			}
 		}
+		if r.RunErr != "" {
+			res.Native = core.OutcomeFail
+			res.Checks["jobs_passed"] = core.OutcomeFail
+			if r.Workload == WorkloadVirtParallel {
+				res.Checks[virtParallelCheck] = core.OutcomeFail
+				var raw map[string]json.RawMessage
+				if json.Unmarshal(res.Raw, &raw) == nil {
+					var ev virtParallelEvidence
+					if json.Unmarshal(raw["lifecycle"], &ev) == nil {
+						ev.Outcome = core.OutcomeFail
+						ev.Reason = "kube-burner execution failed: " + r.RunErr
+						raw["lifecycle"], _ = json.Marshal(ev)
+						res.Raw, _ = json.Marshal(raw)
+					}
+				}
+			}
+		}
 		out = append(out, res)
 	}
 	return out, nil
@@ -241,4 +259,13 @@ type teardown struct{}
 // Teardown relies on each workload's native gc/cleanup.
 func (teardown) Teardown(_ context.Context, _ *core.RunCtx, _ *core.Bag) error {
 	return nil
+}
+
+func hasJobSummary(data map[string][]byte) bool {
+	for name := range data {
+		if filepath.Base(name) == "jobSummary.json" {
+			return true
+		}
+	}
+	return false
 }

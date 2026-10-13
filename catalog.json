@@ -403,7 +403,7 @@
             "Resize volumes",
             "Restart VMs",
             "Snapshot VMs",
-            "Migrate VMs from a random node",
+            "Live-migrate all VMs in the current test iteration",
             "Delete all"
           ]
         }

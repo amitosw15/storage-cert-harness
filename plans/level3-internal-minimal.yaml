@@ -56,12 +56,12 @@ overrides:
     target_node: worker-0-0
     namespace_prefix: l3-internal-drain
   TR-VIRT-019:
+    vms: 3
     workload: virt-parallel
     initial_vms: 3
     increment: 0
     data_volume_count: 1
     max_iterations: 1
-    skip_migration_job: true
   TR-VIRT-007:
     # Internal smoke only: an external node failure must already be active.
     mode: monitor

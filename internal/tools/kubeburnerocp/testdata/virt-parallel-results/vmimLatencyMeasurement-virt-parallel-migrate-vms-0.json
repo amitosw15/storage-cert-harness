@@ -1,0 +1,20 @@
+[
+  {
+    "metricName": "vmimLatencyMeasurement",
+    "uuid": "4412cfcd-0000-0000-0000-000000000000",
+    "namespace": "virt-parallel",
+    "vmiName": "virt-parallel-0-0",
+    "jobName": "virt-parallel-migrate-vms-0",
+    "vmimName": "migration-0",
+    "succeededLatency": 1000
+  },
+  {
+    "metricName": "vmimLatencyMeasurement",
+    "uuid": "4412cfcd-0000-0000-0000-000000000000",
+    "namespace": "virt-parallel",
+    "vmiName": "virt-parallel-0-1",
+    "jobName": "virt-parallel-migrate-vms-0",
+    "vmimName": "migration-1",
+    "succeededLatency": 1000
+  }
+]

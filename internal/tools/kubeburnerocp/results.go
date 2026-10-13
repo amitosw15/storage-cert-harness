@@ -64,25 +64,33 @@ func mapVirtMigrationResults(summaries []jobSummary, _ map[string][]byte, result
 
 // mapVirtParallelResults maps the results of the virt-parallel workload to the test result.
 // It checks if the workload reached the required scale and calculates the total lifecycle duration.
-func mapVirtParallelResults(summaries []jobSummary, _ map[string][]byte, result *core.TestResult) error {
-	if virtParallelReachesCheckScale(summaries) {
-		result.Checks[virtParallelCheck] = result.Native
-	} else {
-		result.Checks[virtParallelCheck] = core.OutcomeSkip
-	}
-
+func mapVirtParallelResults(summaries []jobSummary, data map[string][]byte, result *core.TestResult) error {
 	var lifecycleSeconds float64
 	for _, s := range summaries {
-		if s.JobConfig.Name == "virt-parallel-start-fresh" ||
-			!strings.HasPrefix(s.JobConfig.Name, virtParallelJobPrefix) {
-			continue
+		if s.JobConfig.Name != "virt-parallel-start-fresh" && strings.HasPrefix(s.JobConfig.Name, virtParallelJobPrefix) {
+			lifecycleSeconds += s.ElapsedTime
 		}
-		lifecycleSeconds += s.ElapsedTime
 	}
 	if lifecycleSeconds > 0 {
-		result.Metrics = append(result.Metrics,
-			core.Metric{Name: virtParallelMetric, Value: lifecycleSeconds, Unit: "s"})
+		result.Metrics = append(result.Metrics, core.Metric{Name: virtParallelMetric, Value: lifecycleSeconds, Unit: "s"})
 	}
+	evidence := verifyVirtParallel(summaries, data)
+	if result.Native == core.OutcomeFail && evidence.Outcome == core.OutcomePass {
+		evidence.Outcome = core.OutcomeFail
+		evidence.Reason = "one or more kube-burner jobs failed"
+	}
+	result.Native = evidence.Outcome
+	// Below the check's scale a clean run proves nothing about 20 VMs, but a
+	// broken one is still worth reporting.
+	if evidence.Outcome == core.OutcomePass && !virtParallelReachesCheckScale(summaries) {
+		result.Checks[virtParallelCheck] = core.OutcomeSkip
+	} else {
+		result.Checks[virtParallelCheck] = evidence.Outcome
+	}
+	result.Metrics = append(result.Metrics,
+		core.Metric{Name: "migration_expected_count", Value: float64(evidence.Expected), Unit: "count"},
+		core.Metric{Name: "migration_completed_count", Value: float64(evidence.Completed), Unit: "count"})
+	result.Raw, _ = json.Marshal(evidence)
 	return nil
 }
 

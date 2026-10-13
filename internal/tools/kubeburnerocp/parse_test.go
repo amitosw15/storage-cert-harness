@@ -3,6 +3,7 @@ package kubeburnerocp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,7 +74,9 @@ func TestParseResults_PVCDensity_NativeFail(t *testing.T) {
 func TestParseResults_VirtParallel_Golden(t *testing.T) {
 	data := readFixtures(t, "virt-parallel",
 		"jobSummary.json",
-		"vmiLatencyQuantilesMeasurement-virt-parallel-create-vms-0.json")
+		"vmiLatencyQuantilesMeasurement-virt-parallel-create-vms-0.json",
+		"vmiLatencyMeasurement-virt-parallel-create-vms-0.json",
+		"vmimLatencyMeasurement-virt-parallel-migrate-vms-0.json")
 	res, err := ParseResults(WorkloadVirtParallel, "TR-VIRT-019", data)
 	if err != nil {
 		t.Fatalf("ParseResults: %v", err)
@@ -103,7 +106,8 @@ func TestParseResults_VirtParallel_Golden(t *testing.T) {
 }
 
 func TestParseResults_VirtParallelFailedGolden(t *testing.T) {
-	data := map[string][]byte{"jobSummary.json": mustRead(t, "virt-parallel", "jobSummary-fail.json")}
+	data := readFixtures(t, "virt-parallel", "jobSummary.json", "vmiLatencyMeasurement-virt-parallel-create-vms-0.json", "vmimLatencyMeasurement-virt-parallel-migrate-vms-0.json")
+	data["jobSummary.json"] = mustRead(t, "virt-parallel", "jobSummary-fail.json")
 	res, err := ParseResults(WorkloadVirtParallel, "TR-VIRT-019", data)
 	if err != nil {
 		t.Fatalf("ParseResults: %v", err)
@@ -111,8 +115,9 @@ func TestParseResults_VirtParallelFailedGolden(t *testing.T) {
 	if res.Native != core.OutcomeFail {
 		t.Fatalf("failed result = native %q checks %+v", res.Native, res.Checks)
 	}
-	if res.Checks[virtParallelCheck] != core.OutcomeSkip {
-		t.Fatalf("%s=%v, want skip for a two-VM smoke run", virtParallelCheck, res.Checks[virtParallelCheck])
+	// Below-scale only withholds a pass; a failed lifecycle still reports fail.
+	if res.Checks[virtParallelCheck] != core.OutcomeFail {
+		t.Fatalf("%s=%v, want fail", virtParallelCheck, res.Checks[virtParallelCheck])
 	}
 	if got := res.Metrics[0].Value; got != 128 {
 		t.Fatalf("lifecycle metric = %v, want 128", got)
@@ -120,7 +125,9 @@ func TestParseResults_VirtParallelFailedGolden(t *testing.T) {
 }
 
 func TestParseResults_VirtParallelFullScaleCheck(t *testing.T) {
-	data := readFixtures(t, "virt-parallel", "jobSummary.json")
+	data := readFixtures(t, "virt-parallel", "jobSummary.json",
+		"vmiLatencyMeasurement-virt-parallel-create-vms-0.json",
+		"vmimLatencyMeasurement-virt-parallel-migrate-vms-0.json")
 	var summaries []jobSummary
 	if err := json.Unmarshal(data["jobSummary.json"], &summaries); err != nil {
 		t.Fatal(err)
@@ -129,6 +136,25 @@ func TestParseResults_VirtParallelFullScaleCheck(t *testing.T) {
 		summaries[i].WorkloadFlags["initialVms"] = "20"
 	}
 	data["jobSummary.json"], _ = json.Marshal(summaries)
+	for _, name := range []string{
+		"vmiLatencyMeasurement-virt-parallel-create-vms-0.json",
+		"vmimLatencyMeasurement-virt-parallel-migrate-vms-0.json",
+	} {
+		var docs []lifecycleSample
+		if err := json.Unmarshal(data[name], &docs); err != nil {
+			t.Fatal(err)
+		}
+		grown := make([]lifecycleSample, 0, virtParallelCheckVMs)
+		for vm := 0; vm < virtParallelCheckVMs; vm++ {
+			doc := docs[0]
+			doc.VMIName = fmt.Sprintf("virt-parallel-0-%d", vm)
+			if doc.MigrationName != "" {
+				doc.MigrationName = fmt.Sprintf("migration-%d", vm)
+			}
+			grown = append(grown, doc)
+		}
+		data[name], _ = json.Marshal(grown)
+	}
 
 	res, err := ParseResults(WorkloadVirtParallel, "TR-VIRT-019", data)
 	if err != nil {

@@ -78,23 +78,10 @@ func TestBuildCLIArgsVirtParallelDefaults(t *testing.T) {
 }
 
 func TestBuildCLIArgsVirtParallelSkipFlags(t *testing.T) {
-	p := Params{
-		Workload: WorkloadVirtParallel,
-		Raw: map[string]any{
-			"workload":           WorkloadVirtParallel,
-			"initial_vms":        2,
-			"max_iterations":     1,
-			"skip_migration_job": true,
-			"skip_snapshot_job":  true,
-		},
-	}
-	args, err := buildCLIArgs(p, "trident-sc")
-	if err != nil {
-		t.Fatalf("buildCLIArgs failed: %v", err)
-	}
-	for _, flag := range []string{"--initial-vms", "--max-iterations", "--skip-migration-job=true", "--skip-snapshot-job=true"} {
-		if !slices.Contains(args, flag) {
-			t.Errorf("missing expected flag %q", flag)
+	for _, flag := range []string{"skip_migration_job", "skip_snapshot_job", "skip_resize_job", "skip_restart_job"} {
+		p := Params{Workload: WorkloadVirtParallel, Raw: map[string]any{"workload": WorkloadVirtParallel, flag: true}}
+		if _, err := buildCLIArgs(p, "trident-sc"); err == nil {
+			t.Fatalf("%s must not allow a partial certification lifecycle", flag)
 		}
 	}
 }

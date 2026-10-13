@@ -16,8 +16,7 @@ timestamp: 2026-09-03T00:00:00Z
 
 Progressive-scale parallel VM lifecycle via the upstream
 [virt-parallel](../workloads/virt-parallel.md) workload. Each iteration creates
-N VMs with DataVolumes, resizes volumes, restarts VMs, snapshots, migrates from
-a random node, and deletes all — then increments N by the configured step. Runs
+N VMs with DataVolumes, resizes volumes, restarts VMs, snapshots, live-migrates every VM in the current iteration, and deletes all — then increments N by the configured step. Runs
 until failure or `max-iterations` reached.
 
 | Field | Value |

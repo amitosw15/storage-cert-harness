@@ -1,0 +1,68 @@
+[
+  {
+    "clusterName": "ocp-edge112-0-sjfq9",
+    "clusterType": "self-managed",
+    "controlPlaneArch": "amd64",
+    "distribution": "openshift",
+    "elapsedTime": 0,
+    "jobConfig": {
+      "burst": 10,
+      "gc": false,
+      "jobIterations": 1,
+      "jobType": "delete",
+      "name": "virt-parallel-start-fresh",
+      "qps": 5
+    },
+    "k8sVersion": "v1.33.12",
+    "masterNodesCount": 3,
+    "metricName": "jobSummary",
+    "ocpMajorVersion": "4.20",
+    "ocpVersion": "4.20.28",
+    "passed": true,
+    "platform": "BareMetal",
+    "totalNodes": 5,
+    "uuid": "4412cfcd-0000-0000-0000-000000000000",
+    "version": "1.12.3",
+    "workerNodesCount": 2,
+    "workloadFlags": {
+      "dataVolumeCount": "1",
+      "increment": "0",
+      "initialVms": "2",
+      "maxIterations": "1",
+      "skipMigrationJob": "true"
+    }
+  },
+  {
+    "clusterName": "ocp-edge112-0-sjfq9",
+    "clusterType": "self-managed",
+    "controlPlaneArch": "amd64",
+    "distribution": "openshift",
+    "elapsedTime": 128,
+    "jobConfig": {
+      "burst": 10,
+      "gc": false,
+      "jobIterations": 2,
+      "jobType": "create",
+      "name": "virt-parallel-create-vms-0",
+      "qps": 5
+    },
+    "k8sVersion": "v1.33.12",
+    "masterNodesCount": 3,
+    "metricName": "jobSummary",
+    "ocpMajorVersion": "4.20",
+    "ocpVersion": "4.20.28",
+    "passed": true,
+    "platform": "BareMetal",
+    "totalNodes": 5,
+    "uuid": "4412cfcd-0000-0000-0000-000000000000",
+    "version": "1.12.3",
+    "workerNodesCount": 2,
+    "workloadFlags": {
+      "dataVolumeCount": "1",
+      "increment": "0",
+      "initialVms": "2",
+      "maxIterations": "1",
+      "skipMigrationJob": "true"
+    }
+  }
+]

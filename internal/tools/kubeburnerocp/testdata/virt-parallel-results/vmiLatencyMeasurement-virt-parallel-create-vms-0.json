@@ -1,0 +1,16 @@
+[
+  {
+    "metricName": "vmiLatencyMeasurement",
+    "uuid": "4412cfcd-0000-0000-0000-000000000000",
+    "namespace": "virt-parallel",
+    "vmiName": "virt-parallel-0-0",
+    "jobName": "virt-parallel-create-vms-0"
+  },
+  {
+    "metricName": "vmiLatencyMeasurement",
+    "uuid": "4412cfcd-0000-0000-0000-000000000000",
+    "namespace": "virt-parallel",
+    "vmiName": "virt-parallel-0-1",
+    "jobName": "virt-parallel-create-vms-0"
+  }
+]
