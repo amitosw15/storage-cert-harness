@@ -19,6 +19,7 @@ body="$(
 # Generated from ci/config/images.env by ci/scripts/sync-images-yml.sh. Do not edit.
 # GitLab \`image:\` is resolved at parse time and cannot source dotenv.
 variables:
+  # TODO: switch back to registry.access.redhat.com/ubi10/go-toolset:1.26.9 once published.
   GO_IMAGE: "${GO_IMAGE}"
   BUILD_IMAGE: "${BUILD_IMAGE}"
   RUNTIME_IMAGE: "${RUNTIME_IMAGE}"

@@ -28,12 +28,21 @@ repos:
         pass_filenames: false
         # yamllint disable-line rule:line-length
         files: '(\.vscode/|\.cursor/|\.devcontainer/|\.code-workspace|(^|/)\.env|ci/scripts/secret-scan|report\.(json|md))'
-      # supply-chain.sh is not a pre-commit hook while GitLab allow_failure is on
-      # (ECOPROJECT-5419 / govulncheck GO-2026-4602). Re-add when that job is gating:
-      #   id: supply-chain
-      #   entry: ./ci/scripts/supply-chain.sh
-      #   pass_filenames: false
-      #   files: '(go\.mod|go\.sum|^vendor/|\.go$|Containerfile)'
+      - id: unittest
+        name: unittest (ci/scripts/unittest.sh)
+        language: system
+        entry: bash
+        args: [-c, 'GOTOOLCHAIN=auto GOPROXY=https://proxy.golang.org,direct ./ci/scripts/unittest.sh']
+        files: '\.go$|^go\.(mod|sum)$'
+        exclude: ^vendor/
+        pass_filenames: false
+      - id: supply-chain
+        name: supply-chain (ci/scripts/supply-chain.sh)
+        language: system
+        entry: bash
+        args: [-c, 'GOTOOLCHAIN=auto GOPROXY=https://proxy.golang.org,direct ./ci/scripts/supply-chain.sh']
+        files: '(\.go$|^go\.(mod|sum)$|^vendor/|^Containerfile$)'
+        pass_filenames: false
       - id: version-files-locked
         name: version files locked
         language: script

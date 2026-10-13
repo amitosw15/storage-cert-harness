@@ -6,6 +6,8 @@ set -euo pipefail
 # shellcheck source=ci-utils.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ci-utils.sh"
 ci_log_init "supply-chain"
+# Tools installed by ci/scripts/install-tools.sh may live outside the default PATH.
+export PATH="${HOME}/.local/bin:$(go env GOPATH)/bin:${PATH}"
 require_cmd go
 require_cmd govulncheck
 require_cmd gosec

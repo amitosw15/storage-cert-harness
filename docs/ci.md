@@ -391,7 +391,7 @@ generated projection is retained for repository compatibility.
 | image-scan-trivy | Trivy release binary (`TRIVY_VERSION`) + `dist/harness-image.tar` |
 | image-scan-dive | Dive release binary (`DIVE_VERSION`) + `dist/harness-image.tar` |
 
-`GO_IMAGE` (`ubi10/go-toolset`, Go **1.26.9+**) is not used by the harness
+`GO_IMAGE` (`docker.io/library/golang:1.26.9`, Go **1.26.9+**) is not used by the harness
 `Containerfile`. `BUILD_IMAGE` is **not** the UBI python builder base; it names
 the published **harness-builder** image that already contains the cert tools.
 `YAML_LINT_IMAGE` and `MD_LINT_IMAGE` use the UBI **minor stream** (`:9.8` /

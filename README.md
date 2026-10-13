@@ -11,7 +11,7 @@ functional checks, and emits a certification report.
 ## Prerequisites
 
 - GNU Make
-- Go 1.26.7 or newer
+- Go 1.26.9 or newer
 
 Verify the required tools:
 

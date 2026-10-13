@@ -2,7 +2,7 @@
 # Install local CI tools. Idempotent: a second run is a no-op when versions match.
 # Does not source ci/lib.sh (that file sets GOPROXY=off, which would break go install).
 #
-# Prerequisites (not installed here): Go 1.26.7+, git, python3, pip, npm.
+# Prerequisites (not installed here): Go 1.26.9+, git, python3, pip, npm.
 # Podman is the default container engine; OS-package it if missing.
 #
 # Usage:
@@ -104,7 +104,7 @@ install_go_pkg() {
 			echo "missing  ${bin}  (need go)"
 			return
 		fi
-		die "Go 1.26.7+ is required to install ${bin}"
+			die "Go 1.26.9+ is required to install ${bin}"
 	fi
 	local dest
 	dest="$(go_bin_dir)/${bin}"
@@ -150,7 +150,7 @@ install_golangci_lint() {
 		return
 	fi
 	if [[ "${check_only}" -eq 1 ]]; then
-		echo "missing  golangci-lint  (want v${ver} built with go1.26.7+)"
+			echo "missing  golangci-lint  (want v${ver} built with go1.26.9+)"
 		return
 	fi
 	need curl
@@ -370,8 +370,8 @@ if have go; then
 	echo "ok  go  $(go version)"
 	ensure_dir_on_path "$(go_bin_dir)"
 else
-	[[ "${check_only}" -eq 1 ]] && echo "missing  go  (need 1.26.7+)"
-	[[ "${check_only}" -eq 0 ]] && die "Go 1.26.7+ is required (see go.mod)"
+	[[ "${check_only}" -eq 1 ]] && echo "missing  go  (need 1.26.9+)"
+	[[ "${check_only}" -eq 0 ]] && die "Go 1.26.9+ is required (see go.mod)"
 fi
 ensure_dir_on_path "${USER_BIN}"
 
