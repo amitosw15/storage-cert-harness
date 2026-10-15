@@ -92,14 +92,33 @@ func failureRecoveryValidate(tr core.TestRequirement) error {
 	if count := intParam(tr, "vm_count", 3); count <= 0 {
 		return fmt.Errorf("virtbench: %s: vm_count must be greater than zero", tr.ID)
 	}
-	mode := strParamOr(tr, "mode", "monitor")
+	// Default to an active failure trigger. A monitor-only run can otherwise
+	// report already-Running VMs as recovered without observing a failure.
+	mode := strParamOr(tr, "mode", "far-operator")
 	if mode != "monitor" && mode != "far-operator" {
 		return fmt.Errorf("virtbench: %s: unsupported failure-recovery mode %q", tr.ID, mode)
+	}
+	if mode == "monitor" && !boolParam(tr, "allow_monitor_mode") {
+		return fmt.Errorf("virtbench: %s: monitor mode requires allow_monitor_mode=true and an externally triggered node failure", tr.ID)
 	}
 	if mode == "far-operator" && strParamOr(tr, "far_config", "") == "" {
 		return fmt.Errorf("virtbench: %s: far_config is required for far-operator mode", tr.ID)
 	}
 	return nil
+}
+
+func boolParam(tr core.TestRequirement, key string) bool {
+	if tr.Params == nil {
+		return false
+	}
+	switch v := tr.Params[key].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true" || v == "1" || v == "yes"
+	default:
+		return false
+	}
 }
 
 // pickWorkerNode returns a randomly chosen Ready worker node name from the

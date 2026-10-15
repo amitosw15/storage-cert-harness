@@ -16,7 +16,8 @@ overrides:
     workload: pvc-density
     iterations: 1000
   TR-VIRT-007:
-    mode: monitor
+    mode: far-operator
+    far_config: /far-config.json
     # Replace with the worker node that will be failed/fenced.
     node: "<TARGET_NODE_FOR_FAILURE_RECOVERY>"
   TR-VIRT-008:
