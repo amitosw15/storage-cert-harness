@@ -709,6 +709,8 @@ func TestBuildArgsFailureRecovery(t *testing.T) {
 		ID: "TR-VIRT-007",
 		Params: map[string]any{
 			"node":                "worker-0",
+			"mode":                "far-operator",
+			"far_config":          "/far-config.json",
 			"vm_name":             "rhel-9-vm",
 			"namespace_prefix":    "failure-recovery",
 			"vm_recovery_timeout": 90,
@@ -759,17 +761,33 @@ func TestFailureRecoveryValidate(t *testing.T) {
 		{ID: "TR-VIRT-007", Params: map[string]any{"vm_count": -1}},
 		{ID: "TR-VIRT-007", Params: map[string]any{"mode": "unknown"}},
 		{ID: "TR-VIRT-007", Params: map[string]any{"mode": "far-operator"}},
+		{ID: "TR-VIRT-007", Params: map[string]any{"mode": "monitor"}},
 	} {
 		if err := failureRecoveryValidate(tr); err == nil {
 			t.Errorf("failureRecoveryValidate(%v) returned nil", tr.Params)
 		}
+	}
+	if err := failureRecoveryValidate(core.TestRequirement{ID: "TR-VIRT-007", Params: map[string]any{
+		"mode": "monitor", "allow_monitor_mode": true,
+	}}); err != nil {
+		t.Fatalf("explicit monitor mode rejected: %v", err)
+	}
+	if err := failureRecoveryValidate(core.TestRequirement{ID: "TR-VIRT-007", Params: map[string]any{
+		"mode": "monitor", "allow_monitor_mode": "TRUE",
+	}}); err != nil {
+		t.Fatalf("uppercase explicit monitor mode rejected: %v", err)
+	}
+	if err := failureRecoveryValidate(core.TestRequirement{ID: "TR-VIRT-007", Params: map[string]any{
+		"node": "worker-0", "far_config": "/far-config.json",
+	}}); err != nil {
+		t.Fatalf("default FAR mode rejected: %v", err)
 	}
 }
 
 func TestBuildArgsFailureRecoveryNodeFromBag(t *testing.T) {
 	b := core.NewBag()
 	b.Set("picked_node", "auto-worker-3")
-	tr := core.TestRequirement{ID: "TR-VIRT-007", Params: map[string]any{"storage_class": "sc"}}
+	tr := core.TestRequirement{ID: "TR-VIRT-007", Params: map[string]any{"storage_class": "sc", "far_config": "/far-config.json"}}
 	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, b, tr, "/work/res")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
@@ -790,6 +808,8 @@ func TestBuildArgsFailureRecoveryOptionalFlags(t *testing.T) {
 		ID: "TR-VIRT-007",
 		Params: map[string]any{
 			"node":                "worker-1",
+			"mode":                "far-operator",
+			"far_config":          "/far-config.json",
 			"vm_recovery_timeout": 300,
 		},
 	}

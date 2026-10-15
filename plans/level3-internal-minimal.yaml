@@ -63,7 +63,9 @@ overrides:
     max_iterations: 1
     skip_migration_job: true
   TR-VIRT-007:
+    # Internal smoke only: an external node failure must already be active.
     mode: monitor
+    allow_monitor_mode: true
     node: worker-0-0
 variants:
   TR-VIRT-004:

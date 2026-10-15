@@ -1007,7 +1007,9 @@ func failureRecoveryArgs(nsPrefix string) func(rc *core.RunCtx, bag *core.Bag, t
 			return nil, fmt.Errorf("virtbench: %s: worker node unknown (provisioning may have failed)", tr.ID)
 		}
 		args := clusterArgs(tr)
-		mode := strParamOr(tr, "mode", "monitor")
+		// A live certification run must trigger the failure. Monitor mode is
+		// reserved for explicitly authorized external-failure workflows.
+		mode := strParamOr(tr, "mode", "far-operator")
 		args = append(args, "failure-recovery",
 			"--mode", mode,
 			"--node", node,
