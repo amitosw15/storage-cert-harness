@@ -35,7 +35,7 @@ func newSimulateReportCmd() *cobra.Command {
 				if err := writeReportFiles(dir, rep, nil); err != nil {
 					return fmt.Errorf("write %s: %w", name, err)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", name, dir) //nolint:errcheck // CLI status output
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", name, dir)
 			}
 			return nil
 		},

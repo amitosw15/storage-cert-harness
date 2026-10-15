@@ -46,7 +46,7 @@ var version = "0.0.0-dev"
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err) //nolint:errcheck // follow-up: check CLI writes
+		slog.Error("error", "err", err)
 		os.Exit(1)
 	}
 }
@@ -60,10 +60,6 @@ func newRootCmd() *cobra.Command {
 	}
 	root.AddCommand(newVersionCmd(), newListCmd(), newValidateCmd(), newPreflightCmd(), newRunCmd(), newAttestCmd(), newRecoverCmd(), newSimulateReportCmd())
 	return root
-}
-
-func newLogger(verbose bool) *slog.Logger {
-	return newLoggerWithOutput(verbose, nil)
 }
 
 func newLoggerWithOutput(verbose bool, logOutput io.Writer) *slog.Logger {
@@ -87,7 +83,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the harness version",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fmt.Fprintln(cmd.OutOrStdout(), version) //nolint:errcheck // follow-up: check CLI writes
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), version)
 			return nil
 		},
 	}
@@ -100,20 +96,20 @@ func newListCmd() *cobra.Command {
 		Short: "List registered tools and (optionally) catalog test requirements",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
-			fmt.Fprintln(out, "Registered tools:") //nolint:errcheck // follow-up: check CLI writes
+			_, _ = fmt.Fprintln(out, "Registered tools:")
 			for _, name := range registry.Names() {
 				ti, _ := registry.Get(name)
-				fmt.Fprintf(out, "  - %s (image: %s) provides %v\n", ti.Name, ti.Image, ti.Provides) //nolint:errcheck // follow-up: check CLI writes
+				_, _ = fmt.Fprintf(out, "  - %s (image: %s) provides %v\n", ti.Name, ti.Image, ti.Provides)
 			}
 			if catalogPath != "" {
 				cat, err := catalog.Load(catalogPath)
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "\nCatalog test requirements (%d), schema %s, KB commit %s:\n", //nolint:errcheck // follow-up: check CLI writes
+				_, _ = fmt.Fprintf(out, "\nCatalog test requirements (%d), schema %s, KB commit %s:\n",
 					len(cat.TestRequirements), cat.SchemaVersion, cat.Provenance.KBGitCommit)
 				for _, tr := range cat.TestRequirements {
-					fmt.Fprintf(out, "  - %s L%d [tool=%s] %q (sla=%d/%s, checks=%d/%s)\n", //nolint:errcheck // follow-up: check CLI writes
+					_, _ = fmt.Fprintf(out, "  - %s L%d [tool=%s] %q (sla=%d/%s, checks=%d/%s)\n",
 						tr.ID, tr.PartnerLevel, tr.AutomationTool, tr.Title,
 						tr.SLACount, tr.SLAStatus, tr.ChecksCount, tr.ChecksStatus)
 				}
@@ -136,20 +132,20 @@ func newValidateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "catalog OK: %d test requirements, schema %s, KB commit %s\n", //nolint:errcheck // follow-up: check CLI writes
+			_, _ = fmt.Fprintf(out, "catalog OK: %d test requirements, schema %s, KB commit %s\n",
 				len(cat.TestRequirements), cat.SchemaVersion, cat.Provenance.KBGitCommit)
 			if thresholdsPath != "" {
 				th, err := thresholds.Load(thresholdsPath)
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "thresholds OK: %d test requirements, schema %s, KB commit %s\n", //nolint:errcheck // follow-up: check CLI writes
+				_, _ = fmt.Fprintf(out, "thresholds OK: %d test requirements, schema %s, KB commit %s\n",
 					len(th.TestRequirements), th.SchemaVersion, th.Provenance.KBGitCommit)
 				trs, err := kb.Join(cat, th)
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "join OK: %d joined test requirements (catalog + thresholds agree)\n", len(trs)) //nolint:errcheck // follow-up: check CLI writes
+				_, _ = fmt.Fprintf(out, "join OK: %d joined test requirements (catalog + thresholds agree)\n", len(trs))
 			}
 			return nil
 		},
@@ -173,7 +169,7 @@ func newPreflightCmd() *cobra.Command {
 		Use:   "preflight",
 		Short: "Run preflight checks for the tools selected by the catalog/filter",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			logger := newLogger(verbose)
+			logger := newLoggerTo(verbose, cmd.OutOrStdout(), nil)
 			cfg := config.Config{Filter: filter}
 			resolved, err := configureExecution(cmd, &cfg, planPath, backendsPath, &backendName, false, logger)
 			if err != nil {
@@ -238,7 +234,7 @@ func newPreflightCmd() *cobra.Command {
 				}
 			}
 			if len(trs) == 0 {
-				fmt.Fprintln(out, "No test requirements selected.") //nolint:errcheck // follow-up: check CLI writes
+				logger.Info("No test requirements selected.")
 			}
 			return results.finish()
 		},

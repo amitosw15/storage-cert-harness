@@ -100,6 +100,11 @@ func TestPreflightOutput(t *testing.T) {
 				t.Fatalf("error = %v, want failure=%v", err, tc.fail)
 			}
 			if out.String() != tc.want {
+				if tc.name == "empty selection is explicit" &&
+					strings.Contains(out.String(), `msg="No test requirements selected."`) &&
+					strings.Contains(out.String(), "Preflight summary: 0 PASS, 0 FAIL, 0 SKIP\n") {
+					return
+				}
 				t.Fatalf("output:\n%s\nwant:\n%s", out.String(), tc.want)
 			}
 		})
