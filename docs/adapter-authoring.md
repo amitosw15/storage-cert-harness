@@ -118,16 +118,24 @@ must happen **once per run** or **once for a batch of tests that share it**, use
   `ToolIntegration.SetupGroups: []string{"<key>"}`.
 - The orchestrator runs `Setup` once (run → group) before the job loop and
   `Teardown` once in reverse after all jobs; a failed `Setup` errors its in-scope
-  TRs instead of running them. Make `Setup` idempotent (create-if-absent) and only
-  tear down what you created.
+  TRs instead of running them. Make `Setup` idempotent (create-if-absent). Roll
+  back resources your `Setup` created when `Setup` returns an error (teardown is
+  not called for failed providers). In `Teardown`, delete only what your provider
+  owns unless the resource is explicitly shared and documented (see virtbench).
 
 virtbench is the reference: all its scenarios share one `ssh-test-pod` helper via
-a group provider (`internal/tools/virtbench/setup.go`), so a batch of virtbench
-tests reuses it and removes run-created helpers at group teardown. Each live
-scenario's provisioner rechecks that the helper is Running with `sshpass`
-available, recreating it if a preceding node drain removed it. Terminating pods
-are allowed to disappear before recreation; completed or failed pods are
-replaced. Skip shared setup and these readiness checks in replay mode (no cluster).
+a group provider (`internal/tools/virtbench/setup.go`). A batch reuses the helper
+when present, stamps harness run metadata on it, and **always deletes**
+`default/ssh-test-pod` at successful group teardown—even when this run did not
+create it—so orphans from crashed runs are cleared. That policy can delete a pod
+another concurrent harness run still expects; the provider logs warnings when it
+detects a different `run-id` annotation. Failed setup deletes a pod this setup
+just created. Each live scenario's provisioner rechecks that the helper is
+Running with `sshpass` available, recreating it if a preceding node drain removed
+it. Terminating pods are allowed to disappear before recreation; completed or
+failed pods are replaced. Skip shared setup and teardown only when **every** TR
+in the provider's batch is replay (`results_dir`); mixed replay/live batches
+still touch the cluster.
 
 To bump the Quay `ssh-helper` image pin, see
 [`docs/ssh-helper-image.md`](ssh-helper-image.md).

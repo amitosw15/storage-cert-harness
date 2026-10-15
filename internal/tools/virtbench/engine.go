@@ -959,6 +959,20 @@ func replayDir(trs []core.TestRequirement) string {
 	return ""
 }
 
+// allReplayTRs reports whether every TR in the batch is replay-only (each has
+// results_dir). Mixed replay/live batches still need live cluster setup/teardown.
+func allReplayTRs(trs []core.TestRequirement) bool {
+	if len(trs) == 0 {
+		return false
+	}
+	for _, tr := range trs {
+		if strParamOr(tr, "results_dir", "") == "" {
+			return false
+		}
+	}
+	return true
+}
+
 func strParamOr(tr core.TestRequirement, key, def string) string {
 	if tr.Params == nil {
 		return def
