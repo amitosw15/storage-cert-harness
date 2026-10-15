@@ -23,7 +23,6 @@ func newSimulateReportCmd() *cobra.Command {
 			if outputDir == "" {
 				return fmt.Errorf("--output is required")
 			}
-			logger := newLoggerTo(false, cmd.OutOrStdout(), nil)
 			scenarios := map[string]core.Report{
 				"clean-composed":         simulatedCleanReport(),
 				"complete-with-incident": simulatedIncidentReport(),
@@ -36,7 +35,7 @@ func newSimulateReportCmd() *cobra.Command {
 				if err := writeReportFiles(dir, rep, nil); err != nil {
 					return fmt.Errorf("write %s: %w", name, err)
 				}
-				logger.Info("report generated", "scenario", name, "directory", dir)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", name, dir)
 			}
 			return nil
 		},

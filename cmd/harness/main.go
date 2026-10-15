@@ -83,7 +83,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the harness version",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			newLoggerTo(false, cmd.OutOrStdout(), nil).Info("version", "value", version)
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), version)
 			return nil
 		},
 	}
@@ -96,22 +96,22 @@ func newListCmd() *cobra.Command {
 		Short: "List registered tools and (optionally) catalog test requirements",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
-			logger := newLoggerTo(false, out, nil)
-			logger.Info("Registered tools")
+			_, _ = fmt.Fprintln(out, "Registered tools:")
 			for _, name := range registry.Names() {
 				ti, _ := registry.Get(name)
-				logger.Info("tool", "name", ti.Name, "image", ti.Image, "provides", ti.Provides)
+				_, _ = fmt.Fprintf(out, "  - %s (image: %s) provides %v\n", ti.Name, ti.Image, ti.Provides)
 			}
 			if catalogPath != "" {
 				cat, err := catalog.Load(catalogPath)
 				if err != nil {
 					return err
 				}
-				logger.Info("Catalog test requirements", "count", len(cat.TestRequirements), "schema", cat.SchemaVersion, "kb_commit", cat.Provenance.KBGitCommit)
+				_, _ = fmt.Fprintf(out, "\nCatalog test requirements (%d), schema %s, KB commit %s:\n",
+					len(cat.TestRequirements), cat.SchemaVersion, cat.Provenance.KBGitCommit)
 				for _, tr := range cat.TestRequirements {
-					logger.Info("test requirement", "id", tr.ID, "partner_level", tr.PartnerLevel,
-						"tool", tr.AutomationTool, "title", tr.Title, "sla_count", tr.SLACount,
-						"sla_status", tr.SLAStatus, "checks_count", tr.ChecksCount, "checks_status", tr.ChecksStatus)
+					_, _ = fmt.Fprintf(out, "  - %s L%d [tool=%s] %q (sla=%d/%s, checks=%d/%s)\n",
+						tr.ID, tr.PartnerLevel, tr.AutomationTool, tr.Title,
+						tr.SLACount, tr.SLAStatus, tr.ChecksCount, tr.ChecksStatus)
 				}
 			}
 			return nil
@@ -128,23 +128,24 @@ func newValidateCmd() *cobra.Command {
 		Short: "Validate a catalog and (optionally) a thresholds bundle, verifying they join",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
-			logger := newLoggerTo(false, out, nil)
 			cat, err := catalog.Load(catalogPath)
 			if err != nil {
 				return err
 			}
-			logger.Info("catalog OK", "count", len(cat.TestRequirements), "schema", cat.SchemaVersion, "kb_commit", cat.Provenance.KBGitCommit)
+			_, _ = fmt.Fprintf(out, "catalog OK: %d test requirements, schema %s, KB commit %s\n",
+				len(cat.TestRequirements), cat.SchemaVersion, cat.Provenance.KBGitCommit)
 			if thresholdsPath != "" {
 				th, err := thresholds.Load(thresholdsPath)
 				if err != nil {
 					return err
 				}
-				logger.Info("thresholds OK", "count", len(th.TestRequirements), "schema", th.SchemaVersion, "kb_commit", th.Provenance.KBGitCommit)
+				_, _ = fmt.Fprintf(out, "thresholds OK: %d test requirements, schema %s, KB commit %s\n",
+					len(th.TestRequirements), th.SchemaVersion, th.Provenance.KBGitCommit)
 				trs, err := kb.Join(cat, th)
 				if err != nil {
 					return err
 				}
-				logger.Info("join OK", "count", len(trs))
+				_, _ = fmt.Fprintf(out, "join OK: %d joined test requirements (catalog + thresholds agree)\n", len(trs))
 			}
 			return nil
 		},
