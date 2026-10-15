@@ -200,7 +200,13 @@
       "id": "TR-VIRT-007",
       "params": {
         "mode": {
-          "default": "monitor"
+          "default": "far-operator"
+        },
+        "far_config": {
+          "required": true
+        },
+        "allow_monitor_mode": {
+          "default": false
         },
         "node": {
           "required": true

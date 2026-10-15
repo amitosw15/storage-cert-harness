@@ -111,14 +111,8 @@ func boolParam(tr core.TestRequirement, key string) bool {
 	if tr.Params == nil {
 		return false
 	}
-	switch v := tr.Params[key].(type) {
-	case bool:
-		return v
-	case string:
-		return v == "true" || v == "1" || v == "yes"
-	default:
-		return false
-	}
+	v, ok := core.AsBool(tr.Params[key])
+	return ok && v
 }
 
 // pickWorkerNode returns a randomly chosen Ready worker node name from the

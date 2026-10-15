@@ -773,6 +773,11 @@ func TestFailureRecoveryValidate(t *testing.T) {
 		t.Fatalf("explicit monitor mode rejected: %v", err)
 	}
 	if err := failureRecoveryValidate(core.TestRequirement{ID: "TR-VIRT-007", Params: map[string]any{
+		"mode": "monitor", "allow_monitor_mode": "TRUE",
+	}}); err != nil {
+		t.Fatalf("uppercase explicit monitor mode rejected: %v", err)
+	}
+	if err := failureRecoveryValidate(core.TestRequirement{ID: "TR-VIRT-007", Params: map[string]any{
 		"node": "worker-0", "far_config": "/far-config.json",
 	}}); err != nil {
 		t.Fatalf("default FAR mode rejected: %v", err)
