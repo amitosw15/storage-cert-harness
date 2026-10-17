@@ -131,7 +131,7 @@
           "operator": "<=",
           "percentile": "p99",
           "unit": "s",
-          "value": 15
+          "value": 25
         }
       ],
       "sla_status": "defined"
