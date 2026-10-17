@@ -52,6 +52,7 @@ func writeJUnit(w io.Writer, r core.Report, hardwareAtRoot bool) error {
 		base := "storageclass." + sc.Name
 		pfProps.add(base+".provisioner", sc.Provisioner)
 		pfProps.add(base+".is_default", strconv.FormatBool(sc.IsDefault))
+		pfProps.add(base+".under_test", strconv.FormatBool(sc.UnderTest))
 		pfProps.add(base+".volume_binding_mode", sc.VolumeBindingMode)
 	}
 	addFacts(pfProps, p.Facts)

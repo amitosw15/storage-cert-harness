@@ -368,6 +368,7 @@ type StorageClassInfo struct {
 	Name              string            `json:"name"`
 	Provisioner       string            `json:"provisioner"`
 	IsDefault         bool              `json:"is_default"`
+	UnderTest         bool              `json:"under_test,omitempty"`
 	ReclaimPolicy     string            `json:"reclaim_policy,omitempty"`
 	VolumeBindingMode string            `json:"volume_binding_mode,omitempty"`
 	Parameters        map[string]string `json:"parameters,omitempty"`
