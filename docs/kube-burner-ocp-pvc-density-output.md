@@ -1,7 +1,7 @@
 # PVC density: workload and KB contract
 
 TR-STOR-006 uses the `kube-burner-ocp pvc-density` adapter introduced in
-[MR !4](https://github.com/openshift-storage-cert/storage-cert-harness/-/merge_requests/4).
+[MR !4](https://gitlab.cee.redhat.com/eco-special-projects/storage-cert/storage-cert-harness/-/merge_requests/4).
 That MR predated the KB's numeric latency bar and named functional check.
 
 Verified against the released kube-burner-ocp v1.12.3 workload

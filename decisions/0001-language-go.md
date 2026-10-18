@@ -15,7 +15,7 @@ Kubernetes access and released images for upstream tools; do not vendor their
 source into the harness ([ADR-0003](0003-harness-architecture-ports-and-adapters.md)).
 
 The module starts as
-`github.com/openshift-storage-cert/storage-cert-harness`; rename it at
+`gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness`; rename it at
 the public GitHub migration ([ADR-0002](0002-repository-host-and-sdlc-workflow.md)).
 
 ## Decision notes
