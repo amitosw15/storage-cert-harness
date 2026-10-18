@@ -28,10 +28,11 @@ const (
 	sshPodName = "ssh-test-pod"
 	sshPodNS   = "default"
 
-	sshPodDeleteAttempts  = 3
-	sshPodDeleteRetryWait = 100 * time.Millisecond
-	sshPodRollbackPoll    = 50 * time.Millisecond
-	sshPodRollbackSettle  = time.Second
+	sshPodDeleteAttempts       = 3
+	sshPodDeleteRetryWait      = 100 * time.Millisecond
+	sshPodRollbackPoll         = 50 * time.Millisecond
+	sshPodRollbackPollDeleting = time.Second
+	sshPodRollbackSettle       = time.Second
 
 	// Pinned quay.io/virtarraycert/ssh-helper release (0.1.11; log wrappers in /opt/sshhelper/bin).
 	sshHelperImage = "quay.io/virtarraycert/ssh-helper@sha256:369697c3002c1971bb608189d343fe9ea4989d2b66fde1bd1b64e924416533d1"
@@ -116,10 +117,11 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	kubeconfig := kubeconfigOf(trs)
-	var applyAttemptedThisSetup bool
+	var createAttemptedThisSetup bool
+	var createdPodUID string
 	defer func() {
-		if err != nil && applyAttemptedThisSetup {
-			rollbackFailedSSHSetup(ctx, kubeconfig, rc)
+		if err != nil && createAttemptedThisSetup {
+			rollbackFailedSSHSetup(ctx, kubeconfig, rc, createdPodUID)
 		}
 	}()
 	avoidNodeNames, avoidHostnameLabels, err := sshHelperAvoidNodes(ctx, kubeconfig, trs)
@@ -146,16 +148,24 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 		switch {
 		case pod == nil:
 			rc.Logger.Info("virtbench: creating shared ssh helper pod", "pod", sshPodNS+"/"+sshPodName)
-			// Apply can create the pod before its command returns, so a timeout or
-			// partial failure must still trigger idempotent rollback.
-			applyAttemptedThisSetup = true
-			if err := kubectlApply(ctx, kubeconfig, sshPodManifestForNodes(avoidHostnameLabels, sshPodBootstrapAnnotations(rc))); err != nil {
+			// Create (not apply) so a pod another harness created between get and
+			// create is not patched with this run's annotations. Create can still
+			// commit before its command returns, so rollback reconciles by run-id/UID.
+			createAttemptedThisSetup = true
+			uid, err := kubectlCreateSSHPod(ctx, kubeconfig, sshPodManifestForNodes(avoidHostnameLabels, sshPodBootstrapAnnotations(rc)))
+			if err != nil {
+				if isKubectlAlreadyExists(err) {
+					continue
+				}
 				return fmt.Errorf("create ssh helper pod: %w", err)
+			}
+			if uid != "" {
+				createdPodUID = uid
 			}
 			continue
 		case pod.Metadata.DeletionTimestamp != "":
-			// Applying an existing terminating pod cannot revive it. Wait for
-			// deletion to complete, then create a fresh pod on the next poll.
+			// A terminating pod cannot be recreated until deletion finishes. Wait
+			// for it to disappear, then create a fresh pod on the next poll.
 		case pod.Status.Phase == "Failed" || pod.Status.Phase == "Succeeded":
 			rc.Logger.Info("virtbench: replacing stopped ssh helper pod", "phase", pod.Status.Phase)
 			out, ok, err := runKubectl(ctx, kubeconfig, "delete", "pod", sshPodName, "-n", sshPodNS, "--wait=false", "--ignore-not-found")
@@ -193,31 +203,30 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 // settled and the pod has remained absent. Cleanup uses a detached bounded
 // context because setup may already be cancelled when this deferred rollback
 // runs.
-func rollbackFailedSSHSetup(ctx context.Context, kubeconfig string, rc *core.RunCtx) {
+func rollbackFailedSSHSetup(ctx context.Context, kubeconfig string, rc *core.RunCtx, createdPodUID string) {
 	rc.Logger.Info("virtbench: rolling back ssh helper pod after failed setup", "pod", sshPodNS+"/"+sshPodName)
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownBudget)
 	defer cancel()
-	if err := rollbackSSHPod(cleanupCtx, kubeconfig, rc.RunID); err != nil {
+	if err := rollbackSSHPod(cleanupCtx, kubeconfig, rc.RunID, createdPodUID); err != nil {
 		rc.Logger.Warn("virtbench: failed to roll back ssh helper pod after failed setup", "err", err)
 	}
 }
 
-// rollbackSSHPod reconciles a failed apply without assuming that one delete
-// request is sufficient. It polls the API for the fixed-name pod, deletes only
-// when its run-id annotation matches this harness run, and leaves a pod owned
-// by another run untouched. A not-found result starts a stable-absence timer;
-// the function returns only after that timer expires, so an apply that commits
-// after its client timed out is observed and removed. deleteSSHPod handles
-// transient delete failures, while ctx bounds the entire reconciliation.
-func rollbackSSHPod(ctx context.Context, kubeconfig, runID string) error {
+// rollbackSSHPod reconciles a failed create without reissuing delete while the
+// pod is still visible. It deletes at most once, using a UID precondition on the
+// pod returned by getSSHPod, and only when the harness run-id matches. Another
+// run's pod or a same-name replacement is left alone. After delete, it polls
+// with a slower interval until the pod stays absent for sshPodRollbackSettle.
+func rollbackSSHPod(ctx context.Context, kubeconfig, runID, createdPodUID string) error {
 	if strings.TrimSpace(runID) == "" {
 		return fmt.Errorf("cannot roll back ssh helper pod without a harness run ID")
 	}
 
-	ticker := time.NewTicker(sshPodRollbackPoll)
-	defer ticker.Stop()
 	var absentSince time.Time
 	var lastErr error
+	var deleteIssued bool
+	ticker := time.NewTicker(sshPodRollbackPoll)
+	defer ticker.Stop()
 	for {
 		pod, err := getSSHPod(ctx, kubeconfig)
 		if err != nil {
@@ -235,8 +244,16 @@ func rollbackSSHPod(ctx context.Context, kubeconfig, runID string) error {
 			if sshPodHarnessRunID(pod) != runID {
 				return nil
 			}
-			if err := deleteSSHPod(ctx, kubeconfig); err != nil {
-				lastErr = err
+			if createdPodUID != "" && pod.Metadata.UID != createdPodUID {
+				return nil
+			}
+			if !deleteIssued {
+				if err := deleteSSHPodUID(ctx, kubeconfig, pod.Metadata.UID); err != nil {
+					lastErr = err
+				} else {
+					deleteIssued = true
+					ticker.Reset(sshPodRollbackPollDeleting)
+				}
 			}
 		}
 
@@ -429,6 +446,65 @@ func (s *sshPodSetup) Teardown(ctx context.Context, rc *core.RunCtx, trs []core.
 	return deleteSSHPod(ctx, kubeconfig)
 }
 
+func deleteSSHPodUID(ctx context.Context, kubeconfig, uid string) error {
+	uid = strings.TrimSpace(uid)
+	if uid == "" {
+		return fmt.Errorf("delete ssh helper pod: missing UID")
+	}
+	optsPath, err := writeSSHPodDeleteOptions(uid)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(optsPath) }()
+
+	rawPath := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s", sshPodNS, sshPodName)
+	var lastErr error
+	for attempt := 0; attempt < sshPodDeleteAttempts; attempt++ {
+		out, ok, err := runKubectl(ctx, kubeconfig, "delete", "--raw", rawPath, "-f", optsPath)
+		if err == nil && ok {
+			return nil
+		}
+		trimmed := strings.TrimSpace(out)
+		if !ok && (strings.Contains(trimmed, "does not match the UID") || strings.Contains(trimmed, "NotFound")) {
+			return nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("delete ssh helper pod: %s", trimmed)
+		}
+		if attempt+1 == sshPodDeleteAttempts {
+			break
+		}
+		timer := time.NewTimer(sshPodDeleteRetryWait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastErr
+}
+
+func writeSSHPodDeleteOptions(uid string) (string, error) {
+	body := fmt.Sprintf(`{"apiVersion":"v1","kind":"DeleteOptions","preconditions":{"uid":"%s"}}`, uid)
+	f, err := os.CreateTemp("", "ssh-pod-delete-*.json")
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.WriteString(body); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
+
 func deleteSSHPod(ctx context.Context, kubeconfig string) error {
 	var lastErr error
 	for attempt := 0; attempt < sshPodDeleteAttempts; attempt++ {
@@ -508,6 +584,34 @@ func kubectlAnnotatePod(ctx context.Context, kubeconfig string, annotations map[
 	return nil
 }
 
+func isKubectlAlreadyExists(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "AlreadyExists")
+}
+
+// kubectlCreateSSHPod creates the helper pod and returns its UID from the API response.
+func kubectlCreateSSHPod(ctx context.Context, kubeconfig, manifest string) (string, error) {
+	args := []string{"create", "-f", "-", "-o", "json"}
+	if kubeconfig != "" {
+		args = append([]string{"--kubeconfig", kubeconfig}, args...)
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd.Stdin = strings.NewReader(manifest)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", fmt.Errorf("kubectl create: %w", ctxErr)
+		}
+		return "", fmt.Errorf("kubectl create: %v: %s", err, strings.TrimSpace(buf.String()))
+	}
+	var pod sshPodState
+	if err := json.Unmarshal(buf.Bytes(), &pod); err != nil {
+		return "", fmt.Errorf("decode created ssh helper pod: %w", err)
+	}
+	return strings.TrimSpace(pod.Metadata.UID), nil
+}
+
 // kubectlApply pipes a manifest to `kubectl apply -f -`.
 func kubectlApply(ctx context.Context, kubeconfig, manifest string) error {
 	args := []string{"apply", "-f", "-"}
@@ -527,6 +631,7 @@ func kubectlApply(ctx context.Context, kubeconfig, manifest string) error {
 
 type sshPodState struct {
 	Metadata struct {
+		UID               string            `json:"uid"`
 		DeletionTimestamp string            `json:"deletionTimestamp"`
 		Labels            map[string]string `json:"labels"`
 		Annotations       map[string]string `json:"annotations"`
