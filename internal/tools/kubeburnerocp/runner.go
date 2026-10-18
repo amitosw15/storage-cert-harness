@@ -124,6 +124,9 @@ func (collector) Collect(_ context.Context, rc *core.RunCtx, bag *core.Bag, _ st
 
 	data := map[string][]byte{}
 	var refs []string
+	// This collector's job spans every kube-burner-ocp TR in the plan, so the
+	// references have to stay attributed per TR.
+	refsByTR := map[string][]string{}
 	for _, r := range runs {
 		if r.Skipped != "" {
 			continue
@@ -138,12 +141,13 @@ func (collector) Collect(_ context.Context, rc *core.RunCtx, bag *core.Bag, _ st
 			continue // Parse emits a fail verdict for this TR
 		}
 		refs = append(refs, files...)
+		refsByTR[r.TRID] = append(refsByTR[r.TRID], files...)
 		for name, content := range m {
 			data[r.TRID+"/"+name] = content
 		}
 	}
 	rc.Logger.Info("kube-burner-ocp: collected results", "trs", len(runs))
-	return core.LogBundle{Refs: refs, Data: data}, nil
+	return core.LogBundle{Refs: refs, RefsByTR: refsByTR, Data: data}, nil
 }
 
 // findCollectedMetrics returns the metric files under root keyed by base name,

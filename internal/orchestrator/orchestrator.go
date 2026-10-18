@@ -632,8 +632,6 @@ func schedule(concurrency int, jobs []job, run func(job)) {
 	wg.Wait()
 }
 
-// runJob drives one tool's stage pipeline over its selected TRs and grades the
-// results. Teardown always runs. Context cancellation short-circuits.
 // relativeTo rewrites artifact paths against the run's working directory. An
 // absolute path would pin the report to one operator's home directory, and the
 // report is published evidence, so a path that will not relativize is dropped
@@ -658,6 +656,8 @@ func relativeTo(workdir string, paths []string) (kept, dropped []string) {
 	return kept, dropped
 }
 
+// runJob drives one tool's stage pipeline over its selected TRs and grades the
+// results. Teardown always runs. Context cancellation short-circuits.
 func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verdicts []core.Verdict, measurements []core.Measurement) {
 	// Time the whole tool run for this job and stamp it onto every verdict, so the
 	// report always shows how long the test took — with or without an SLA bar.
@@ -719,7 +719,18 @@ func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verd
 			return errTRs(j.trs, "collect: "+err.Error()), nil
 		}
 		if rc.RecordArtifacts != nil {
-			rc.RecordArtifacts(j.trs, lb.Refs)
+			// A job can span several TRs, and then the flat Refs list mixes
+			// their files together; recording it wholesale would attribute
+			// every TR's results to all of them.
+			if len(lb.RefsByTR) > 0 {
+				for _, tr := range j.trs {
+					if refs := lb.RefsByTR[tr.ID]; len(refs) > 0 {
+						rc.RecordArtifacts([]core.TestRequirement{tr}, refs)
+					}
+				}
+			} else {
+				rc.RecordArtifacts(j.trs, lb.Refs)
+			}
 		}
 		logs = lb
 	}

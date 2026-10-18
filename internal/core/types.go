@@ -212,6 +212,11 @@ type LogBundle struct {
 	TRID string            `json:"tr_id,omitempty"`
 	Refs []string          `json:"refs,omitempty"` // artifact references (paths, object keys)
 	Data map[string][]byte `json:"-"`              // in-memory payloads keyed by name
+	// RefsByTR attributes references to individual TRs. A collector whose job
+	// covers several TRs must set it: Refs alone is a flat list, so recording
+	// it would hand every TR in the job every other TR's files — the same
+	// misattribution the per-execution results root exists to prevent.
+	RefsByTR map[string][]string `json:"refs_by_tr,omitempty"`
 }
 
 // TestResult is the normalized output of a ResultParser for one TR. Metrics feed
