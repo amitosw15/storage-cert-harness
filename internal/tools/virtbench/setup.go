@@ -30,6 +30,8 @@ const (
 
 	sshPodDeleteAttempts  = 3
 	sshPodDeleteRetryWait = 100 * time.Millisecond
+	sshPodRollbackPoll    = 50 * time.Millisecond
+	sshPodRollbackSettle  = time.Second
 
 	// Pinned quay.io/virtarraycert/ssh-helper release (0.1.11; log wrappers in /opt/sshhelper/bin).
 	sshHelperImage = "quay.io/virtarraycert/ssh-helper@sha256:369697c3002c1971bb608189d343fe9ea4989d2b66fde1bd1b64e924416533d1"
@@ -114,15 +116,10 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	kubeconfig := kubeconfigOf(trs)
-	var createdPodThisSetup bool
+	var applyAttemptedThisSetup bool
 	defer func() {
-		if err != nil && createdPodThisSetup {
-			rc.Logger.Info("virtbench: rolling back ssh helper pod after failed setup", "pod", sshPodNS+"/"+sshPodName)
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownBudget)
-			defer cancel()
-			if delErr := deleteSSHPod(cleanupCtx, kubeconfig); delErr != nil {
-				rc.Logger.Warn("virtbench: failed to roll back ssh helper pod after failed setup", "err", delErr)
-			}
+		if err != nil && applyAttemptedThisSetup {
+			rollbackFailedSSHSetup(ctx, kubeconfig, rc)
 		}
 	}()
 	avoidNodeNames, avoidHostnameLabels, err := sshHelperAvoidNodes(ctx, kubeconfig, trs)
@@ -151,7 +148,7 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 			rc.Logger.Info("virtbench: creating shared ssh helper pod", "pod", sshPodNS+"/"+sshPodName)
 			// Apply can create the pod before its command returns, so a timeout or
 			// partial failure must still trigger idempotent rollback.
-			createdPodThisSetup = true
+			applyAttemptedThisSetup = true
 			if err := kubectlApply(ctx, kubeconfig, sshPodManifestForNodes(avoidHostnameLabels, sshPodBootstrapAnnotations(rc))); err != nil {
 				return fmt.Errorf("create ssh helper pod: %w", err)
 			}
@@ -184,6 +181,72 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 		case <-ctx.Done():
 			return fmt.Errorf("wait for ssh helper pod %s/%s: %w", sshPodNS, sshPodName, ctx.Err())
 		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+// rollbackFailedSSHSetup reconciles cleanup after setup has attempted to apply
+// the shared helper pod. The apply may have created the pod before kubectl
+// reported a timeout, while another harness may have claimed the fixed pod
+// name after this setup observed it as absent. rollbackSSHPod therefore checks
+// the harness run ID before deleting and keeps polling until a delayed apply is
+// settled and the pod has remained absent. Cleanup uses a detached bounded
+// context because setup may already be cancelled when this deferred rollback
+// runs.
+func rollbackFailedSSHSetup(ctx context.Context, kubeconfig string, rc *core.RunCtx) {
+	rc.Logger.Info("virtbench: rolling back ssh helper pod after failed setup", "pod", sshPodNS+"/"+sshPodName)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownBudget)
+	defer cancel()
+	if err := rollbackSSHPod(cleanupCtx, kubeconfig, rc.RunID); err != nil {
+		rc.Logger.Warn("virtbench: failed to roll back ssh helper pod after failed setup", "err", err)
+	}
+}
+
+// rollbackSSHPod reconciles a failed apply without assuming that one delete
+// request is sufficient. It polls the API for the fixed-name pod, deletes only
+// when its run-id annotation matches this harness run, and leaves a pod owned
+// by another run untouched. A not-found result starts a stable-absence timer;
+// the function returns only after that timer expires, so an apply that commits
+// after its client timed out is observed and removed. deleteSSHPod handles
+// transient delete failures, while ctx bounds the entire reconciliation.
+func rollbackSSHPod(ctx context.Context, kubeconfig, runID string) error {
+	if strings.TrimSpace(runID) == "" {
+		return fmt.Errorf("cannot roll back ssh helper pod without a harness run ID")
+	}
+
+	ticker := time.NewTicker(sshPodRollbackPoll)
+	defer ticker.Stop()
+	var absentSince time.Time
+	var lastErr error
+	for {
+		pod, err := getSSHPod(ctx, kubeconfig)
+		if err != nil {
+			lastErr = err
+			absentSince = time.Time{}
+		} else if pod == nil {
+			if absentSince.IsZero() {
+				absentSince = time.Now()
+			}
+			if time.Since(absentSince) >= sshPodRollbackSettle {
+				return nil
+			}
+		} else {
+			absentSince = time.Time{}
+			if sshPodHarnessRunID(pod) != runID {
+				return nil
+			}
+			if err := deleteSSHPod(ctx, kubeconfig); err != nil {
+				lastErr = err
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("reconcile ssh helper pod rollback: %w", lastErr)
+			}
+			return ctx.Err()
+		case <-ticker.C:
 		}
 	}
 }

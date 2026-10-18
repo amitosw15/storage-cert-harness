@@ -20,30 +20,52 @@ func fakeSSHCluster(t *testing.T, state string) (setState func(string), commands
 	t.Helper()
 	dir := t.TempDir()
 	statePath, logPath, annotPath := filepath.Join(dir, "state"), filepath.Join(dir, "commands"), filepath.Join(dir, "annotations")
-	deleteFailuresPath := filepath.Join(dir, "delete-failures")
+	deleteFailuresPath, getCountPath := filepath.Join(dir, "delete-failures"), filepath.Join(dir, "get-count")
 	t.Setenv("SSH_TEST_STATE", statePath)
 	t.Setenv("SSH_TEST_LOG", logPath)
 	t.Setenv("SSH_TEST_ANNOTATIONS", annotPath)
 	t.Setenv("SSH_TEST_DELETE_FAILURES_FILE", deleteFailuresPath)
+	t.Setenv("SSH_TEST_GET_COUNT_FILE", getCountPath)
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$SSH_TEST_LOG"
 if [ "$1" = --kubeconfig ]; then shift 2; fi
 read -r state < "$SSH_TEST_STATE"
 case "$1" in
 get)
+	if [ "$state" = delayed ]; then
+		if [ ! -f "$SSH_TEST_GET_COUNT_FILE" ]; then printf '%s\n' 0 > "$SSH_TEST_GET_COUNT_FILE"; fi
+		read -r gets < "$SSH_TEST_GET_COUNT_FILE"
+		gets=$((gets + 1))
+		printf '%s\n' "$gets" > "$SSH_TEST_GET_COUNT_FILE"
+		if [ "$gets" -ge 3 ]; then
+			state="${SSH_TEST_APPLY_STATE:-Running}"
+			printf '%s\n' "$state" > "$SSH_TEST_STATE"
+		else
+			exit 0
+		fi
+	fi
   case "$state" in
   forbidden) echo 'Error from server (Forbidden): cannot get pods' >&2; exit 1 ;;
   missing) exit 0 ;;
   terminating)
     printf '%s\n' '{"metadata":{"deletionTimestamp":"2026-09-27T00:00:00Z"},"status":{"phase":"Running"}}'
     printf '%s\n' missing > "$SSH_TEST_STATE" ;;
-  *) printf '{"status":{"phase":"%s"}}\n' "$state" ;;
+	*)
+		if [ -n "${SSH_TEST_POD_RUN_ID:-}" ]; then
+			printf '{"metadata":{"annotations":{"storage-cert-harness.redhat.com/run-id":"%s"}},"status":{"phase":"%s"}}\n' "$SSH_TEST_POD_RUN_ID" "$state"
+		else
+			printf '{"status":{"phase":"%s"}}\n' "$state"
+		fi ;;
   esac ;;
 apply)
   /bin/cat >/dev/null
   post="${SSH_TEST_APPLY_STATE:-Running}"
-	printf '%s\n' "$post" > "$SSH_TEST_STATE"
-	if [ -n "${SSH_TEST_APPLY_DELAY:-}" ]; then sleep "$SSH_TEST_APPLY_DELAY"; fi ;;
+	if [ -n "${SSH_TEST_APPLY_DELAY:-}" ]; then
+	  printf '%s\n' delayed > "$SSH_TEST_STATE"
+	  sleep "$SSH_TEST_APPLY_DELAY"
+	else
+	  printf '%s\n' "$post" > "$SSH_TEST_STATE"
+	fi ;;
 delete)
 	if [ ! -f "$SSH_TEST_DELETE_FAILURES_FILE" ]; then printf '%s\n' "${SSH_TEST_DELETE_FAILURES:-0}" > "$SSH_TEST_DELETE_FAILURES_FILE"; fi
 	read -r failures < "$SSH_TEST_DELETE_FAILURES_FILE"
@@ -252,10 +274,13 @@ func TestSSHHelperTeardownWithMixedReplayAndLive(t *testing.T) {
 
 func TestSSHHelperFailedSetupRollsBackCreatedPod(t *testing.T) {
 	t.Setenv("SSH_TEST_APPLY_STATE", "Pending")
+	t.Setenv("SSH_TEST_POD_RUN_ID", "run-rollback")
 	_, commands := fakeSSHCluster(t, "missing")
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
-	if err := (&sshPodSetup{}).Setup(ctx, sshTestRunCtx(t), nil); err == nil {
+	rc := sshTestRunCtx(t)
+	rc.RunID = "run-rollback"
+	if err := (&sshPodSetup{}).Setup(ctx, rc, nil); err == nil {
 		t.Fatal("want setup failure while pod stays non-ready")
 	}
 	got := commands()
@@ -269,16 +294,42 @@ func TestSSHHelperFailedSetupRollsBackCreatedPod(t *testing.T) {
 
 func TestSSHHelperApplyTimeoutRollsBackPartiallyCreatedPod(t *testing.T) {
 	t.Setenv("SSH_TEST_APPLY_STATE", "Pending")
-	t.Setenv("SSH_TEST_APPLY_DELAY", "1")
+	t.Setenv("SSH_TEST_APPLY_DELAY", "500ms")
+	t.Setenv("SSH_TEST_POD_RUN_ID", "run-timeout")
 	_, commands := fakeSSHCluster(t, "missing")
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
-	if err := (&sshPodSetup{}).Setup(ctx, sshTestRunCtx(t), nil); err == nil {
+	rc := sshTestRunCtx(t)
+	rc.RunID = "run-timeout"
+	if err := (&sshPodSetup{}).Setup(ctx, rc, nil); err == nil {
 		t.Fatal("want setup failure when apply times out")
 	}
 	got := commands()
-	if strings.Count(got, "apply -f -") != 1 || strings.Count(got, "delete pod") != 1 {
+	if strings.Count(got, "apply -f -") != 1 || strings.Count(got, "delete pod") < 1 {
 		t.Fatalf("expected timed-out apply to be rolled back: %s", got)
+	}
+	state, err := os.ReadFile(os.Getenv("SSH_TEST_STATE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(state)) != "missing" {
+		t.Fatalf("delayed apply recreated helper after rollback: %q", state)
+	}
+}
+
+func TestSSHHelperFailedSetupDoesNotDeleteAnotherRunPod(t *testing.T) {
+	t.Setenv("SSH_TEST_APPLY_STATE", "Pending")
+	t.Setenv("SSH_TEST_POD_RUN_ID", "run-other")
+	_, commands := fakeSSHCluster(t, "missing")
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	rc := sshTestRunCtx(t)
+	rc.RunID = "run-this"
+	if err := (&sshPodSetup{}).Setup(ctx, rc, nil); err == nil {
+		t.Fatal("want setup failure while another run owns the helper pod")
+	}
+	if got := strings.Count(commands(), "delete pod"); got != 0 {
+		t.Fatalf("deleted another run's helper pod %d times", got)
 	}
 }
 
