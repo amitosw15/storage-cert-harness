@@ -3,14 +3,14 @@ name: harness-smoke
 description: >-
   Internal smoke-scale selection covering all runtime tools in the
   storage-cert-harness image. This is not a certification-scale run.
-backend: tlvbm
+backend: oc-edge-112
 concurrency: 1
 select:
   ids:
     - TR-VIRT-001  # Boot Storm; virtbench
     - TR-STOR-006  # Provisioning Density; kube-burner-ocp
     - TR-VIRT-010  # Snapshot Creation; kube-burner
-    # - TR-VIRT-019  # Parallel VM Lifecycle; kube-burner-ocp (disabled: importer failure)
+    - TR-VIRT-019  # Parallel VM Lifecycle; kube-burner-ocp
 overrides:
   TR-VIRT-001:
     num_vms: 3
@@ -25,3 +25,14 @@ overrides:
     snapshot_count: 3
     namespace: harness-smoke-snap
     max_wait: 15m
+  TR-VIRT-019:
+    workload: virt-parallel
+    vms: 2
+    initial_vms: 2
+    increment: 0
+    data_volume_count: 1
+    max_iterations: 1
+    skip_migration_job: false
+    qps: 5
+    burst: 10
+    timeout: 20m

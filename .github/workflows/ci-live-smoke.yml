@@ -1,0 +1,301 @@
+# Live cluster smoke — disabled until operators set repository variable
+# CI_LIVE_SMOKE_ENABLED=true and configure the live-smoke environment.
+# See docs/design/storage-cert-harness-ci-smoke-test.md
+#
+# PR trees are bundled on ubuntu-latest. Self-hosted jobs check out trusted
+# default-branch CI glue only, download the PR artifact to pr-src/, and invoke
+# ci/scripts/live-cluster-smoke.sh from main via bash (never execute PR scripts).
+
+name: CI Live Smoke
+
+on:
+  pull_request:
+    types: [opened]
+    branches: [main]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Same-repo pull request number to smoke
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  resolve-pr-open:
+    if: >-
+      vars.CI_LIVE_SMOKE_ENABLED == 'true' &&
+      github.repository == 'openshift-storage-cert/storage-cert-harness' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(github.event.pull_request.title, '[skip live-smoke]') &&
+      !contains(github.event.pull_request.body, '[skip live-smoke]')
+    runs-on: ubuntu-latest
+    outputs:
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+    steps:
+      - id: resolve
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            const canonical = `${context.repo.owner}/${context.repo.repo}`;
+            if (pr.head.repo.full_name !== canonical) {
+              core.setFailed(`fork PR smoke is not allowed (${pr.head.repo.full_name})`);
+              return;
+            }
+            const body = pr.body || '';
+            const title = pr.title || '';
+            if (title.includes('[skip live-smoke]') || body.includes('[skip live-smoke]')) {
+              core.setFailed('PR has [skip live-smoke]');
+              return;
+            }
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('pr_number', String(pr.number));
+
+  bundle-pr-open:
+    needs: resolve-pr-open
+    if: needs.resolve-pr-open.result == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      src_artifact: ${{ steps.meta.outputs.name }}
+    steps:
+      - id: meta
+        run: echo "name=live-smoke-src-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve-pr-open.outputs.head_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.meta.outputs.name }}
+          retention-days: 1
+          path: .
+
+  live-smoke-pr-open:
+    needs: [resolve-pr-open, bundle-pr-open]
+    if: >-
+      needs.resolve-pr-open.result == 'success' &&
+      needs.bundle-pr-open.result == 'success'
+    runs-on: [self-hosted, storage-cert-smoke]
+    environment: live-smoke
+    timeout-minutes: 240
+    concurrency:
+      group: live-smoke-pr-${{ needs.resolve-pr-open.outputs.pr_number }}
+      cancel-in-progress: false
+    env:
+      LIVE_SMOKE_HEAD_SHA: ${{ needs.resolve-pr-open.outputs.head_sha }}
+      LIVE_SMOKE_PR_NUMBER: ${{ needs.resolve-pr-open.outputs.pr_number }}
+      LIVE_SMOKE_SRC_DIR: ${{ github.workspace }}/pr-src
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/heads/main
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.bundle-pr-open.outputs.src_artifact }}
+          path: pr-src
+      - name: Run live cluster smoke
+        run: |
+          set -euo pipefail
+          if [[ ! -f ci/scripts/live-cluster-smoke.sh ]]; then
+            echo "::warning::ci/scripts/live-cluster-smoke.sh is not on main; skipping live smoke"
+            exit 0
+          fi
+          bash ci/scripts/live-cluster-smoke.sh
+
+  resolve-comment:
+    if: >-
+      vars.CI_LIVE_SMOKE_ENABLED == 'true' &&
+      github.repository == 'openshift-storage-cert/storage-cert-harness' &&
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/run-live-smoke') &&
+      contains(fromJSON('["MEMBER","OWNER","COLLABORATOR","MAINTAINER"]'),
+        github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    outputs:
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+    steps:
+      - id: resolve
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const canonical = `${context.repo.owner}/${context.repo.repo}`;
+            if (pr.data.head.repo.full_name !== canonical) {
+              core.setFailed(`fork PR smoke is not allowed (${pr.data.head.repo.full_name})`);
+              return;
+            }
+            const body = pr.data.body || '';
+            const title = pr.data.title || '';
+            if (title.includes('[skip live-smoke]') || body.includes('[skip live-smoke]')) {
+              core.setFailed('PR has [skip live-smoke]');
+              return;
+            }
+            core.setOutput('head_sha', pr.data.head.sha);
+            core.setOutput('pr_number', String(pr.data.number));
+
+  bundle-comment:
+    needs: resolve-comment
+    if: needs.resolve-comment.result == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      src_artifact: ${{ steps.meta.outputs.name }}
+    steps:
+      - id: meta
+        run: echo "name=live-smoke-src-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve-comment.outputs.head_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.meta.outputs.name }}
+          retention-days: 1
+          path: .
+
+  live-smoke-comment:
+    needs: [resolve-comment, bundle-comment]
+    if: >-
+      needs.resolve-comment.result == 'success' &&
+      needs.bundle-comment.result == 'success'
+    runs-on: [self-hosted, storage-cert-smoke]
+    environment: live-smoke
+    timeout-minutes: 240
+    concurrency:
+      group: live-smoke-pr-${{ needs.resolve-comment.outputs.pr_number }}
+      cancel-in-progress: false
+    env:
+      LIVE_SMOKE_HEAD_SHA: ${{ needs.resolve-comment.outputs.head_sha }}
+      LIVE_SMOKE_PR_NUMBER: ${{ needs.resolve-comment.outputs.pr_number }}
+      LIVE_SMOKE_SRC_DIR: ${{ github.workspace }}/pr-src
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/heads/main
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.bundle-comment.outputs.src_artifact }}
+          path: pr-src
+      - name: Run live cluster smoke
+        run: |
+          set -euo pipefail
+          if [[ ! -f ci/scripts/live-cluster-smoke.sh ]]; then
+            echo "::warning::ci/scripts/live-cluster-smoke.sh is not on main; skipping live smoke"
+            exit 0
+          fi
+          bash ci/scripts/live-cluster-smoke.sh
+
+  resolve-dispatch:
+    if: >-
+      vars.CI_LIVE_SMOKE_ENABLED == 'true' &&
+      github.repository == 'openshift-storage-cert/storage-cert-harness' &&
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+    steps:
+      - id: resolve
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = Number(context.payload.inputs.pr_number);
+            if (!Number.isInteger(prNumber) || prNumber < 1) {
+              core.setFailed('pr_number must be a positive integer');
+              return;
+            }
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            const canonical = `${context.repo.owner}/${context.repo.repo}`;
+            if (pr.data.head.repo.full_name !== canonical) {
+              core.setFailed(`fork PR smoke is not allowed (${pr.data.head.repo.full_name})`);
+              return;
+            }
+            const body = pr.data.body || '';
+            const title = pr.data.title || '';
+            if (title.includes('[skip live-smoke]') || body.includes('[skip live-smoke]')) {
+              core.setFailed('PR has [skip live-smoke]');
+              return;
+            }
+            core.setOutput('head_sha', pr.data.head.sha);
+            core.setOutput('pr_number', String(pr.data.number));
+
+  bundle-dispatch:
+    needs: resolve-dispatch
+    if: needs.resolve-dispatch.result == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      src_artifact: ${{ steps.meta.outputs.name }}
+    steps:
+      - id: meta
+        run: echo "name=live-smoke-src-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve-dispatch.outputs.head_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.meta.outputs.name }}
+          retention-days: 1
+          path: .
+
+  live-smoke-dispatch:
+    needs: [resolve-dispatch, bundle-dispatch]
+    if: >-
+      needs.resolve-dispatch.result == 'success' &&
+      needs.bundle-dispatch.result == 'success'
+    runs-on: [self-hosted, storage-cert-smoke]
+    environment: live-smoke
+    timeout-minutes: 240
+    concurrency:
+      group: live-smoke-pr-${{ needs.resolve-dispatch.outputs.pr_number }}
+      cancel-in-progress: false
+    env:
+      LIVE_SMOKE_HEAD_SHA: ${{ needs.resolve-dispatch.outputs.head_sha }}
+      LIVE_SMOKE_PR_NUMBER: ${{ needs.resolve-dispatch.outputs.pr_number }}
+      LIVE_SMOKE_SRC_DIR: ${{ github.workspace }}/pr-src
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/heads/main
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.bundle-dispatch.outputs.src_artifact }}
+          path: pr-src
+      - name: Run live cluster smoke
+        run: |
+          set -euo pipefail
+          if [[ ! -f ci/scripts/live-cluster-smoke.sh ]]; then
+            echo "::warning::ci/scripts/live-cluster-smoke.sh is not on main; skipping live smoke"
+            exit 0
+          fi
+          bash ci/scripts/live-cluster-smoke.sh

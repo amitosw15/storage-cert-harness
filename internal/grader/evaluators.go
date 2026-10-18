@@ -50,7 +50,7 @@ func gradeSLAs(tr core.TestRequirement, res core.TestResult) []core.Verdict {
 
 		if m == nil {
 			out = append(out, core.Verdict{TR: tr.ID, Item: item, Outcome: core.OutcomeError,
-				Reason: fmt.Sprintf("metric %q not found in result", metricLabel(d.Metric, d.Percentile))})
+				Reason: fmt.Sprintf("missing required metric %q for graded SLA", metricLabel(d.Metric, d.Percentile))})
 			continue
 		}
 
@@ -102,7 +102,7 @@ func gradeChecks(tr core.TestRequirement, res core.TestResult) []core.Verdict {
 		native, ok := res.Checks[c.ID]
 		if !ok {
 			out = append(out, core.Verdict{TR: tr.ID, Item: item, Outcome: core.OutcomeError,
-				Reason: reasonWithExpectation(fmt.Sprintf("tool produced no outcome for %s check", c.Kind), c.Expectation)})
+				Reason: reasonWithExpectation(fmt.Sprintf("missing required outcome for %s check", c.Kind), c.Expectation)})
 			continue
 		}
 		outcome := native

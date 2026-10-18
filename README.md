@@ -145,6 +145,39 @@ Lint, unit tests, secret-scan, supply-chain, offline replay-smoke, binary build
 (linux/amd64 artifact), and container image build/scan (podman locally):
 [`docs/ci.md`](docs/ci.md). One-time: `./ci/scripts/install-tools.sh`.
 
+### Live cluster smoke (contributor responsibility)
+
+Shared-cluster CI smoke is defined in
+[`docs/design/storage-cert-harness-ci-smoke-test.md`](docs/design/storage-cert-harness-ci-smoke-test.md)
+and implemented by [`.github/workflows/ci-live-smoke.yml`](.github/workflows/ci-live-smoke.yml)
+when the repository variable `CI_LIVE_SMOKE_ENABLED` is `true` and the `live-smoke`
+environment is configured. Until then, run smoke **locally** (below).
+
+When CI live smoke is enabled: it runs **once** per PR to `main` on open; a
+**failed** run **blocks merge** until you investigate and get a passing on-demand
+re-run. That does not replace validation on **your own** cluster before you open
+the PR.
+
+If your change touches paths that **trigger** CI live smoke (`cmd/`, `internal/`,
+`catalog.json`, `Containerfile`, image/tool pins, etc. — **not** `vendor/` or
+`go.mod` alone), you **must** run the smoke plan at least **once** on a
+**dedicated lab cluster you control** (not the CI edge cluster) before you rely on
+upstream CI:
+
+```sh
+# kubeconfig + backends for your lab — see docs/cluster-setup-guide.md
+make build
+make image-build-local
+KUBECONFIG=/path/to/kubeconfig \
+  BACKEND=oc-edge-112 \
+  make run-harness-smoke
+```
+
+Use the same plan as CI: `plans/harness-smoke-plan.yaml` (`backend: oc-edge-112` —
+your `work/backends.local.yaml` must define that name). When CI live smoke is
+enabled, see [`docs/contributing.md`](docs/contributing.md) for on-demand re-runs
+(`/run-live-smoke`, GitHub Actions UI, or `gh pr comment`).
+
 ## License
 
 Apache-2.0 (see `LICENSE`).

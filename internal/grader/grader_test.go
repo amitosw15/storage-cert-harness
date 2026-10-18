@@ -90,9 +90,13 @@ func TestGradeSLAMissingMetricErrors(t *testing.T) {
 	tr := core.TestRequirement{ID: "TR-1", AutomationTool: tool,
 		SLAs: []core.SLA{{Metric: "latency_ms", MeasuredBy: []string{tool}}},
 		Bars: []core.SLA{{Metric: "latency_ms", Operator: "<=", Value: f64(2)}}}
-	got := outcomes(g.GradeTR(context.Background(), tr, core.TestResult{TRID: "TR-1"}, nil))
-	if got["sla:latency_ms"] != core.OutcomeError {
-		t.Errorf("bar present but metric not measured should error, got %s", got["sla:latency_ms"])
+	vs := g.GradeTR(context.Background(), tr, core.TestResult{TRID: "TR-1"}, nil)
+	v := verdictByItem(vs, "sla:latency_ms")
+	if v == nil || v.Outcome != core.OutcomeError {
+		t.Fatalf("missing metric for a graded SLA should error, got %+v", vs)
+	}
+	if v.Reason != "missing required metric \"latency_ms\" for graded SLA" {
+		t.Errorf("unexpected missing metric reason: %q", v.Reason)
 	}
 }
 
@@ -183,8 +187,12 @@ func TestGradeCheckMissingOutcomeErrors(t *testing.T) {
 	g := New()
 	tr := core.TestRequirement{ID: "TR-1",
 		Checks: []core.Check{{ID: "cap", Kind: core.CheckCapability, Status: core.StatusDefined}}}
-	got := outcomes(g.GradeTR(context.Background(), tr, core.TestResult{TRID: "TR-1"}, nil))
-	if got["check:cap"] != core.OutcomeError {
-		t.Errorf("check with no tool outcome should error, got %s", got["check:cap"])
+	vs := g.GradeTR(context.Background(), tr, core.TestResult{TRID: "TR-1"}, nil)
+	v := verdictByItem(vs, "check:cap")
+	if v == nil || v.Outcome != core.OutcomeError {
+		t.Fatalf("missing check outcome should error, got %+v", vs)
+	}
+	if v.Reason != "missing required outcome for capability check" {
+		t.Errorf("unexpected missing check reason: %q", v.Reason)
 	}
 }

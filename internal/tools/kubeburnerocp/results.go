@@ -2,6 +2,7 @@ package kubeburnerocp
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
@@ -13,6 +14,7 @@ const (
 	virtParallelCheck     = "parallel-lifecycle-20"
 	virtParallelMetric    = "lifecycle_completion_time"
 	virtParallelJobPrefix = "virt-parallel-"
+	virtParallelCheckVMs  = 20
 )
 
 func mapPVCDensityResults(summaries []jobSummary, data map[string][]byte, result *core.TestResult) error {
@@ -60,8 +62,14 @@ func mapVirtMigrationResults(summaries []jobSummary, _ map[string][]byte, result
 	return nil
 }
 
+// mapVirtParallelResults maps the results of the virt-parallel workload to the test result.
+// It checks if the workload reached the required scale and calculates the total lifecycle duration.
 func mapVirtParallelResults(summaries []jobSummary, _ map[string][]byte, result *core.TestResult) error {
-	result.Checks[virtParallelCheck] = result.Native
+	if virtParallelReachesCheckScale(summaries) {
+		result.Checks[virtParallelCheck] = result.Native
+	} else {
+		result.Checks[virtParallelCheck] = core.OutcomeSkip
+	}
 
 	var lifecycleSeconds float64
 	for _, s := range summaries {
@@ -76,4 +84,23 @@ func mapVirtParallelResults(summaries []jobSummary, _ map[string][]byte, result 
 			core.Metric{Name: virtParallelMetric, Value: lifecycleSeconds, Unit: "s"})
 	}
 	return nil
+}
+
+// virtParallelReachesCheckScale determines if the virt-parallel workload reached the scale required for the check.
+func virtParallelReachesCheckScale(summaries []jobSummary) bool {
+	for _, summary := range summaries {
+		initialVMS, err := strconv.Atoi(summary.WorkloadFlags["initialVms"])
+		if err != nil {
+			continue
+		}
+		increment, _ := strconv.Atoi(summary.WorkloadFlags["increment"])
+		iterations, _ := strconv.Atoi(summary.WorkloadFlags["maxIterations"])
+		if iterations < 1 {
+			iterations = 1
+		}
+		if initialVMS+increment*(iterations-1) >= virtParallelCheckVMs {
+			return true
+		}
+	}
+	return false
 }

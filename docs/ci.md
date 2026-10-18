@@ -583,12 +583,78 @@ output.
 
 ### Dedicated CI cluster (live smoke)
 
-Today's jobs use hosted GitHub runners (no cluster). A later live-smoke job
-should use GitHub environment secrets for `CI_CLUSTER_KUBECONFIG` and
-`HARNESS_THRESHOLDS_JSON`. Never echo them (`set +x`); write kubeconfig to a
-`0600` temp file and delete it in `trap`. Do not artifact full graded reports
-that contain real SLA bars. Track follow-up as ECOPROJECT-5331 (or a new issue)
-once `internal/kube` and virtbench exist.
+Workflow [ci-live-smoke.yml](../.github/workflows/ci-live-smoke.yml) is **off**
+until repository variable `CI_LIVE_SMOKE_ENABLED` is set to `true` and the
+`live-smoke` environment has cluster secrets. Until then, use local
+`make run-harness-smoke`.
+
+Today's other jobs use hosted GitHub runners (no cluster). The **live-smoke** job
+(planned; see design doc below) runs against a real OpenShift cluster using the
+harness smoke plan. It will use GitHub environment secrets for
+`CI_CLUSTER_KUBECONFIG` and `HARNESS_THRESHOLDS_JSON`. Never echo them (`set +x`);
+write kubeconfig to a `0600` temp file and delete it in `trap`. Do not artifact
+full graded reports that contain real SLA bars.
+
+Design: [storage-cert-harness-ci-smoke-test.md](design/storage-cert-harness-ci-smoke-test.md)
+(in this repository).
+
+**What live smoke affects.** When implemented, the live-smoke workflow runs on PR
+open (and on demand). A **failed** smoke run is a **merge gate**: branch
+protection should require a passing live-smoke check before merging to `main`.
+Investigate failures and re-run smoke after fixes. Lint, unit test, build, image
+scan, and publish jobs are unchanged; only merge is blocked on smoke failure.
+
+#### Skip live smoke (`[skip live-smoke]`)
+
+Full-catalog live smoke can add hours to a PR pipeline. To skip **scheduling**
+live-cluster smoke (for example lab outage), include this token in the **PR title
+or description** (or merge commit message on squash):
+
+```text
+[skip live-smoke]
+```
+
+| Rule | Detail |
+|------|--------|
+| Case sensitivity | The token is **case-sensitive**. `[Skip live-smoke]` does **not** skip. |
+| Squash merges | GitHub uses the PR title and description for the squash commit message — put `[skip live-smoke]` in the PR title or description when you need a skipped smoke on merge. |
+| Without token | Live smoke runs on PR open when path filters match (see design doc). |
+| Failed smoke job | **Blocks PR merge** until a passing re-run; skip token does not override a failed run |
+| Cluster lease | Skipped runs must not acquire the cluster lease. |
+| CI behavior (when implemented) | Log that smoke was skipped; GitHub check conclusion **Skipped** (not Success); workflow summary includes SHA, actor, token, and `live_smoke_skipped=true` for audit and follow-up (nightly or manual smoke). |
+
+Do **not** use `[skip ci]` for this — it is too broad. Skipping smoke should be
+exceptional; note the reason in the PR. Optional policy: disallow skip when
+image-changing paths are touched unless a maintainer approves (see design doc).
+
+Implementation tracking: [ECOPROJECT-5536](https://redhat.atlassian.net/browse/ECOPROJECT-5536).
+
+#### Forks and cluster secrets
+
+Live-cluster smoke is **upstream-only**. A GitHub **fork** must not trigger live
+smoke or receive the upstream kubeconfig.
+
+| Scenario | Live smoke | Cluster secrets (`CI_CLUSTER_KUBECONFIG`, etc.) |
+|----------|------------|--------------------------------------------------|
+| Pull request **from a fork** into upstream | Not run (live-smoke workflow has no `pull_request` trigger) | Not passed to fork PR workflows ([GitHub fork PR secret rules](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions#accessing-your-secrets-in-forked-pull-requests)) |
+| Push to **fork** `main` | Not run — job requires `github.repository == 'openshift-storage-cert/storage-cert-harness'` | Upstream secrets are **not** available on the fork; only secrets the fork owner configures locally |
+| Push to **upstream** `main` | Runs when path filters match (unless `[skip live-smoke]`) | Only via GitHub **environment** `live-smoke` on the canonical repo |
+
+**Required when implementing live smoke:**
+
+1. Dedicated workflow with `on.push.branches: [main]` and `workflow_dispatch` only
+   — never `pull_request` or `pull_request_target` for cluster access.
+2. Store kubeconfig, thresholds, and CI backends as **environment secrets** on
+   `live-smoke`, deployment branch `main` on upstream — not shared via broad
+   `secrets: inherit` on the default CI workflow.
+3. Job `if` includes the canonical repository guard (update the org/repo string if
+   the GitHub home changes).
+4. Self-hosted runners with cluster network access are registered on the **upstream**
+   organization only.
+
+Standard `CI` on fork PRs (lint, test, build) continues without cluster credentials.
+See the design doc section **Forks and untrusted repositories** in
+[storage-cert-harness-ci-smoke-test.md](design/storage-cert-harness-ci-smoke-test.md).
 
 ### AI agent files must not go to public GitHub
 

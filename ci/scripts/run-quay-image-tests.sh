@@ -11,8 +11,8 @@ Usage:
 
 Pull and run quay.io/virtarraycert/storage-cert-harness:<version>.
 VERSION defaults to latest and KUBECONFIG defaults to work/kubeconfig.
-BACKEND optionally overrides the first backend in work/backends.local.yaml.
-The YAML parser `yq` is required when BACKEND is not set.
+BACKEND defaults to oc-edge-112 and can be used to select another configured backend.
+The YAML parser `yq` is required to validate the selected backend.
 Assumption: Podman has access to valid quay.io credentials, such as an
 existing Docker-compatible auth configuration, a Quay token, or `podman login`.
 EOF
@@ -52,17 +52,17 @@ KUBECONFIG="${2:-work/kubeconfig}"
 	exit 1
 }
 
-backend="${BACKEND:-}"
-if [[ -z "${backend}" ]]; then
-	command -v yq >/dev/null 2>&1 || {
-		echo "error: yq is required to read the backend from work/backends.local.yaml; set BACKEND explicitly or install yq" >&2
-		exit 1
-	}
-	if ! backend="$(yq e -r '.backends[0].name // ""' work/backends.local.yaml)"; then
-		echo "error: could not parse backend configuration: work/backends.local.yaml" >&2
-		exit 1
-	fi
-fi
+backend="${BACKEND:-oc-edge-112}"
+command -v yq >/dev/null 2>&1 || {
+	echo "error: yq is required to validate backend '${backend}' in work/backends.local.yaml" >&2
+	exit 1
+}
+export YQ_BACKEND="${backend}"
+backend_name="$(yq e -r '.backends[] | select(.name == strenv(YQ_BACKEND)) | .name' work/backends.local.yaml)"
+[[ "${backend_name}" == "${backend}" ]] || {
+	echo "error: backend '${backend}' is not defined in work/backends.local.yaml" >&2
+	exit 1
+}
 [[ -n "${backend}" ]] || {
 	echo "error: no backend name found in work/backends.local.yaml; set BACKEND explicitly" >&2
 	exit 1

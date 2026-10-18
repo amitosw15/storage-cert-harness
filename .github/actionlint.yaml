@@ -1,0 +1,4 @@
+# Self-hosted runner labels for live-cluster smoke (see ci-live-smoke.yml).
+self-hosted-runner:
+  labels:
+    - storage-cert-smoke

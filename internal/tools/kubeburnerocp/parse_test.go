@@ -81,8 +81,8 @@ func TestParseResults_VirtParallel_Golden(t *testing.T) {
 	if res.Native != core.OutcomePass {
 		t.Errorf("native=%s, want pass", res.Native)
 	}
-	if got := res.Checks[virtParallelCheck]; got != core.OutcomePass {
-		t.Errorf("%s=%s, want pass", virtParallelCheck, got)
+	if res.Checks[virtParallelCheck] != core.OutcomeSkip {
+		t.Fatalf("%s=%v, want skip for a two-VM smoke run", virtParallelCheck, res.Checks[virtParallelCheck])
 	}
 	want := map[string]float64{"vmiLatency_VMReady": 10}
 	got := p99s(res)
@@ -108,11 +108,34 @@ func TestParseResults_VirtParallelFailedGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseResults: %v", err)
 	}
-	if res.Native != core.OutcomeFail || res.Checks[virtParallelCheck] != core.OutcomeFail {
+	if res.Native != core.OutcomeFail {
 		t.Fatalf("failed result = native %q checks %+v", res.Native, res.Checks)
+	}
+	if res.Checks[virtParallelCheck] != core.OutcomeSkip {
+		t.Fatalf("%s=%v, want skip for a two-VM smoke run", virtParallelCheck, res.Checks[virtParallelCheck])
 	}
 	if got := res.Metrics[0].Value; got != 128 {
 		t.Fatalf("lifecycle metric = %v, want 128", got)
+	}
+}
+
+func TestParseResults_VirtParallelFullScaleCheck(t *testing.T) {
+	data := readFixtures(t, "virt-parallel", "jobSummary.json")
+	var summaries []jobSummary
+	if err := json.Unmarshal(data["jobSummary.json"], &summaries); err != nil {
+		t.Fatal(err)
+	}
+	for i := range summaries {
+		summaries[i].WorkloadFlags["initialVms"] = "20"
+	}
+	data["jobSummary.json"], _ = json.Marshal(summaries)
+
+	res, err := ParseResults(WorkloadVirtParallel, "TR-VIRT-019", data)
+	if err != nil {
+		t.Fatalf("ParseResults: %v", err)
+	}
+	if res.Checks[virtParallelCheck] != core.OutcomePass {
+		t.Fatalf("%s=%s, want pass", virtParallelCheck, res.Checks[virtParallelCheck])
 	}
 }
 
