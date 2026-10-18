@@ -73,8 +73,11 @@ type Scenario struct {
 	// Nil means the shared preflight checks are sufficient.
 	Validate func(core.TestRequirement) error
 	// DetailFile, when set, is a second (per-VM) result file the collector reads
-	// best-effort so DetailParse can derive metrics the summary can't (e.g. a real
-	// percentile from raw samples). Absence is not fatal.
+	// so DetailParse can derive metrics the summary can't (e.g. a real
+	// percentile from raw samples). Without DetailParse it is supplementary and
+	// absence is not fatal; with DetailParse the scenario is graded from it, so
+	// a file that cannot be found — or named unambiguously — fails the
+	// execution rather than quietly dropping the metric it gates.
 	DetailFile string
 	// DetailParse turns DetailFile's bytes into extra metrics appended to the
 	// TR's result. Only called when DetailFile was collected.

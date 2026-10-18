@@ -157,7 +157,17 @@ func Run(ctx context.Context, cfg config.Config, trs []core.TestRequirement, pro
 	}
 	externalArtifactRecorder := rc.RecordArtifacts
 	rc.RecordArtifacts = func(trs []core.TestRequirement, refs []string) {
-		rel := relativeTo(rc.WorkDir, refs)
+		rel, dropped := relativeTo(rc.WorkDir, refs)
+		if len(dropped) > 0 {
+			// A reference that is not a path under the working directory cannot
+			// be published (an absolute one would leak the operator's home).
+			// Some collectors legitimately return a handle rather than a file,
+			// so this is debug rather than a warning, but a collector emitting
+			// real paths from the wrong place is visible here instead of just
+			// producing an execution with no artifacts.
+			rc.Logger.Debug("artifact references not recorded; not under the working directory",
+				"refs", dropped, "workdir", rc.WorkDir)
+		}
 		if len(rel) > 0 {
 			stateMu.Lock()
 			for _, tr := range trs {
@@ -628,23 +638,24 @@ func schedule(concurrency int, jobs []job, run func(job)) {
 // absolute path would pin the report to one operator's home directory, and the
 // report is published evidence, so a path that will not relativize is dropped
 // rather than recorded.
-func relativeTo(workdir string, paths []string) []string {
+func relativeTo(workdir string, paths []string) (kept, dropped []string) {
 	if workdir == "" {
-		return nil
+		return nil, paths
 	}
-	out := make([]string, 0, len(paths))
 	for _, p := range paths {
 		abs, err := filepath.Abs(p)
 		if err != nil {
+			dropped = append(dropped, p)
 			continue
 		}
 		rel, err := filepath.Rel(workdir, abs)
 		if err != nil || strings.HasPrefix(rel, "..") {
+			dropped = append(dropped, p)
 			continue
 		}
-		out = append(out, filepath.ToSlash(rel))
+		kept = append(kept, filepath.ToSlash(rel))
 	}
-	return out
+	return kept, dropped
 }
 
 func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verdicts []core.Verdict, measurements []core.Measurement) {

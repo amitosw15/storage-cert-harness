@@ -92,3 +92,52 @@ func TestJUnitExport(t *testing.T) {
 		}
 	}
 }
+
+// A verdict should be traceable to the files it was graded from in JUnit too,
+// not only in the JSON report: the catalog accepts either format. Artifacts are
+// recorded per execution, so every item of that execution carries them.
+func TestJUnitCarriesExecutionArtifacts(t *testing.T) {
+	r := core.Report{
+		SchemaVersion: "2.0",
+		Executions: []core.RunExecution{{
+			TR: "TR-VIRT-018", State: core.ExecutionCompleted, Outcome: core.OutcomeFail,
+			Artifacts: []string{
+				"virtbench/TR-VIRT-018/20261018-180304/2-disk/run/summary_vm_creation_results.json",
+				"virtbench/TR-VIRT-018/20261018-180304/2-disk/run/vm_creation_results.json",
+			},
+		}},
+		Verdicts: []core.Verdict{
+			{TR: "TR-VIRT-018", Item: "sla:clone_duration@p99", Outcome: core.OutcomeFail, Level: 3},
+		},
+	}
+	var buf bytes.Buffer
+	if err := (JUnitExporter{}).Export(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		`name="artifacts"`,
+		"virtbench/TR-VIRT-018/20261018-180304/2-disk/run/vm_creation_results.json",
+		`name="harness.junit_profile_version" value="1"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("junit output missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+// An execution with no recorded artifacts must not emit an empty property.
+func TestJUnitOmitsArtifactsWhenNoneRecorded(t *testing.T) {
+	r := core.Report{
+		SchemaVersion: "2.0",
+		Executions:    []core.RunExecution{{TR: "TR-VIRT-018", State: core.ExecutionCompleted}},
+		Verdicts:      []core.Verdict{{TR: "TR-VIRT-018", Item: "sla:clone_duration@p99", Outcome: core.OutcomePass, Level: 3}},
+	}
+	var buf bytes.Buffer
+	if err := (JUnitExporter{}).Export(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), `name="artifacts"`) {
+		t.Errorf("emitted an empty artifacts property\n---\n%s", buf.String())
+	}
+}
