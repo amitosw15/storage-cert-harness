@@ -11,7 +11,7 @@ package stages
 import (
 	"context"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 // RunHandle identifies an in-flight or completed run of a tool, so a

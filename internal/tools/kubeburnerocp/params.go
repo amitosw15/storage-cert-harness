@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 const (

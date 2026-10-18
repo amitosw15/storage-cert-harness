@@ -21,8 +21,8 @@ import (
 	"strconv"
 	"strings"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/safefs"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
 //go:embed templates/rhel9-vm-drain.yaml

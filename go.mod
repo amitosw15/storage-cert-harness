@@ -1,4 +1,4 @@
-module gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness
+module github.com/openshift-storage-cert/storage-cert-harness
 
 go 1.26.9
 

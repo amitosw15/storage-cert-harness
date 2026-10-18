@@ -15,9 +15,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/registry"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/stages"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/registry"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
 // sampleResults stands in for output a real Runner's image would produce and a

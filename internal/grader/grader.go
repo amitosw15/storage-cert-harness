@@ -7,8 +7,8 @@ package grader
 import (
 	"context"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/stages"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
 // Grader applies the built-in v2.0 scoring rules.

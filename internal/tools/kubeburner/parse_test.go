@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/plan"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/registry"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/plan"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/registry"
 )
 
 func readFixtures(t *testing.T, names ...string) map[string][]byte {

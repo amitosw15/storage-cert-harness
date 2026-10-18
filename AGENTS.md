@@ -17,7 +17,7 @@ the KB export **v2.0 two-file contract** — `catalog.json` (publishable) +
 `thresholds.json` (sensitive), joined on TR id (ADR-0006). See `decisions/` for
 the "why".
 
-- Module: `gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness`
+- Module: `github.com/openshift-storage-cert/storage-cert-harness`
   (renamed on the GitHub migration — ADR-0002).
 - Jira: ECOPROJECT (5273 KB integration, 5328 language, 5329 repo, 5331 first e2e).
 

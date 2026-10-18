@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/stages"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
 var (

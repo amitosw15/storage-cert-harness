@@ -6,7 +6,7 @@ package artifacts
 import (
 	"path/filepath"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/safefs"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
 // Store persists run artifacts.

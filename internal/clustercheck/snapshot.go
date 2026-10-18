@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 // SnapshotSelection is a validated selection. Kubeconfig is kept out of reports.

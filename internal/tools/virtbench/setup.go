@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/stages"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
 // The virtbench scenarios all need one shared ssh helper pod: datasource-clone /

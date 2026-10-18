@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/safefs"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/stages"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
 // kboRun records one workload execution (one TR) so Collect/Parse can handle a

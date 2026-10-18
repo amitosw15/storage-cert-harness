@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 // fakeSSHCluster models pod state across separate kubectl invocations, including

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 // MetricSnapshotReadyTime is the normalized VolumeSnapshot time-to-Ready metric (kube-burner emits ms; the grader unit-normalizes, ADR-0008).

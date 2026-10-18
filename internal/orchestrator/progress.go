@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 // progressTracker reports plan execution progress at the Test Requirement

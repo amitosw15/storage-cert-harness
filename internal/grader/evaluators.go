@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 // gradeSLAs scores each catalog SLA descriptor of a TR against the thresholds
