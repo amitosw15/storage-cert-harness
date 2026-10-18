@@ -155,6 +155,23 @@ func Run(ctx context.Context, cfg config.Config, trs []core.TestRequirement, pro
 			externalStageRecorder(stage, trs)
 		}
 	}
+	externalArtifactRecorder := rc.RecordArtifacts
+	rc.RecordArtifacts = func(trs []core.TestRequirement, refs []string) {
+		rel := relativeTo(rc.WorkDir, refs)
+		if len(rel) > 0 {
+			stateMu.Lock()
+			for _, tr := range trs {
+				label := core.ExecutionLabel(tr.ID, tr.Variant)
+				execution := executionStates[label]
+				execution.Artifacts = append(execution.Artifacts, rel...)
+				executionStates[label] = execution
+			}
+			stateMu.Unlock()
+		}
+		if externalArtifactRecorder != nil {
+			externalArtifactRecorder(trs, refs)
+		}
+	}
 	progress.onStateChange = func(label string, state progressState, outcome core.Outcome) {
 		stateMu.Lock()
 		execution := executionStates[label]
@@ -603,6 +620,29 @@ func schedule(concurrency int, jobs []job, run func(job)) {
 
 // runJob drives one tool's stage pipeline over its selected TRs and grades the
 // results. Teardown always runs. Context cancellation short-circuits.
+// relativeTo rewrites artifact paths against the run's working directory. An
+// absolute path would pin the report to one operator's home directory, and the
+// report is published evidence, so a path that will not relativize is dropped
+// rather than recorded.
+func relativeTo(workdir string, paths []string) []string {
+	if workdir == "" {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(workdir, abs)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		out = append(out, filepath.ToSlash(rel))
+	}
+	return out
+}
+
 func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verdicts []core.Verdict, measurements []core.Measurement) {
 	// Time the whole tool run for this job and stamp it onto every verdict, so the
 	// report always shows how long the test took — with or without an SLA bar.
@@ -662,6 +702,9 @@ func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verd
 		lb, err := ti.LogCollector.Collect(ctx, rc, bag, handle)
 		if err != nil {
 			return errTRs(j.trs, "collect: "+err.Error()), nil
+		}
+		if rc.RecordArtifacts != nil {
+			rc.RecordArtifacts(j.trs, lb.Refs)
 		}
 		logs = lb
 	}

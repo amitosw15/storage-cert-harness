@@ -86,6 +86,10 @@ type Scenario struct {
 	DeriveMetrics func(tr core.TestRequirement, res core.TestResult) []core.Metric
 }
 
+// resultsSubdir is this tool's directory under the run's working directory;
+// each execution gets its own subtree beneath it (core.RunCtx.ExecutionDir).
+const resultsSubdir = "virtbench"
+
 // Result file names virtbench writes with --save-results (see the tool's
 // save_results()). Each scenario has its own; SummaryFileName is kept exported for
 // the existing datasource-clone golden test.

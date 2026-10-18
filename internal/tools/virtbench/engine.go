@@ -161,11 +161,15 @@ func (p provisioner) Provision(ctx context.Context, rc *core.RunCtx, bag *core.B
 	if err := sharedSSHSetup.Setup(ctx, rc, trs); err != nil {
 		return fmt.Errorf("virtbench: ensure ssh helper pod: %w", err)
 	}
-	root := rc.WorkDir
-	if root == "" {
-		root = "."
+	// Every execution gets its own root. Several scenarios write the same
+	// filenames (datasource-clone writes vm_creation_results.json whether it
+	// runs for TR-VIRT-001, -002, -013, -018 or the drain provisioning step),
+	// so a root shared across TRs lets Collect pick up another test's results.
+	var trID, variant string
+	if len(trs) > 0 {
+		trID, variant = trs[0].ID, trs[0].Variant
 	}
-	root = filepath.Join(root, "virtbench")
+	root := rc.ExecutionDir(resultsSubdir, trID, variant)
 	if err := safefs.MkdirAll(root, 0o755); err != nil {
 		return fmt.Errorf("virtbench: create results dir: %w", err)
 	}
@@ -330,31 +334,25 @@ func collectFIOResults(root string, replay bool) ([]string, []byte, error) {
 }
 
 // findResult returns the path to the scenario's result file: root/<name> if
-// present, else the first match found walking root (virtbench may nest results in
-// a subdir).
+// present, else the one match found walking root (virtbench nests results in a
+// <n>-disk/<timestamp>_<prefix>_<range> subdir). root is one execution's own
+// directory, so exactly one match is expected; several would mean results from
+// more than one execution are in scope, and grading the wrong test silently is
+// worse than failing, so refuse rather than choose.
 func findResult(root, name string) (string, error) {
 	direct := filepath.Join(root, name)
 	if _, err := os.Stat(direct); err == nil {
 		return direct, nil
 	}
-	var found string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && d.Name() == name {
-			found = path
-			return filepath.SkipAll
-		}
-		return nil
-	})
+	found, err := findResults(root, name)
 	if err != nil {
-		return "", fmt.Errorf("virtbench: search %s: %w", root, err)
+		return "", err
 	}
-	if found == "" {
-		return "", fmt.Errorf("virtbench: %s not found under %s", name, root)
+	if len(found) > 1 {
+		return "", fmt.Errorf("virtbench: %d copies of %s under %s (%s); cannot tell which belongs to this execution",
+			len(found), name, root, strings.Join(found, ", "))
 	}
-	return found, nil
+	return found[0], nil
 }
 
 func findResults(root, name string) ([]string, error) {
