@@ -42,7 +42,8 @@ get)
 apply)
   /bin/cat >/dev/null
   post="${SSH_TEST_APPLY_STATE:-Running}"
-  printf '%s\n' "$post" > "$SSH_TEST_STATE" ;;
+	printf '%s\n' "$post" > "$SSH_TEST_STATE"
+	if [ -n "${SSH_TEST_APPLY_DELAY:-}" ]; then sleep "$SSH_TEST_APPLY_DELAY"; fi ;;
 delete)
 	if [ ! -f "$SSH_TEST_DELETE_FAILURES_FILE" ]; then printf '%s\n' "${SSH_TEST_DELETE_FAILURES:-0}" > "$SSH_TEST_DELETE_FAILURES_FILE"; fi
 	read -r failures < "$SSH_TEST_DELETE_FAILURES_FILE"
@@ -263,6 +264,21 @@ func TestSSHHelperFailedSetupRollsBackCreatedPod(t *testing.T) {
 	}
 	if strings.Count(got, "delete pod") != 1 {
 		t.Fatalf("expected rollback delete after failed setup, got: %s", got)
+	}
+}
+
+func TestSSHHelperApplyTimeoutRollsBackPartiallyCreatedPod(t *testing.T) {
+	t.Setenv("SSH_TEST_APPLY_STATE", "Pending")
+	t.Setenv("SSH_TEST_APPLY_DELAY", "1")
+	_, commands := fakeSSHCluster(t, "missing")
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if err := (&sshPodSetup{}).Setup(ctx, sshTestRunCtx(t), nil); err == nil {
+		t.Fatal("want setup failure when apply times out")
+	}
+	got := commands()
+	if strings.Count(got, "apply -f -") != 1 || strings.Count(got, "delete pod") != 1 {
+		t.Fatalf("expected timed-out apply to be rolled back: %s", got)
 	}
 }
 

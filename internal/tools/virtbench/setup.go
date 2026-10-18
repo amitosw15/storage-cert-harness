@@ -149,10 +149,12 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 		switch {
 		case pod == nil:
 			rc.Logger.Info("virtbench: creating shared ssh helper pod", "pod", sshPodNS+"/"+sshPodName)
+			// Apply can create the pod before its command returns, so a timeout or
+			// partial failure must still trigger idempotent rollback.
+			createdPodThisSetup = true
 			if err := kubectlApply(ctx, kubeconfig, sshPodManifestForNodes(avoidHostnameLabels, sshPodBootstrapAnnotations(rc))); err != nil {
 				return fmt.Errorf("create ssh helper pod: %w", err)
 			}
-			createdPodThisSetup = true
 			continue
 		case pod.Metadata.DeletionTimestamp != "":
 			// Applying an existing terminating pod cannot revive it. Wait for
