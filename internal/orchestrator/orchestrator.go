@@ -167,6 +167,10 @@ func Run(ctx context.Context, cfg config.Config, trs []core.TestRequirement, pro
 				executionStates[label] = execution
 			}
 			stateMu.Unlock()
+			// Persist immediately: a run that stops between collection and the
+			// next stage change would otherwise leave a report that cannot say
+			// which results had already been gathered.
+			checkpoint(core.RunStatusRunning)
 		}
 		if externalArtifactRecorder != nil {
 			externalArtifactRecorder(trs, refs)

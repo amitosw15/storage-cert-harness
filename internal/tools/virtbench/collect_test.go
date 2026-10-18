@@ -118,3 +118,58 @@ func TestCollectRefusesAmbiguousResults(t *testing.T) {
 		}
 	}
 }
+
+// A copy sitting directly in the results root must not short-circuit the search
+// past nested copies: that path returned early before, so the competing results
+// below it were never noticed.
+func TestCollectRefusesRootCopyShadowingNestedResults(t *testing.T) {
+	root := t.TempDir()
+	writeResults(t, root, ".", atScaleSummary, atScaleDetail)
+	writeResults(t, root, singleNodeDir, singleNodeSummary, singleNodeDetail)
+
+	bag := core.NewBag()
+	bag.Set("results_root", root)
+	rc := &core.RunCtx{RunID: "20261018-060401", WorkDir: root, Logger: slog.New(slog.DiscardHandler)}
+	if _, err := (collector{sc: cloneAtScaleScenario()}).Collect(context.Background(), rc, bag, stages.RunHandle{ID: "test"}); err == nil {
+		t.Fatal("a copy in the root hid the nested one; the search must consider both")
+	}
+}
+
+// TR-VIRT-018 is gated on a percentile computed from the per-VM samples, which
+// only the detail file carries. Collecting summary-only would drop the gated
+// metric, so a detail lookup that cannot name one file has to stop the
+// execution rather than be logged and skipped.
+func TestCollectFailsWhenRequiredDetailIsAmbiguous(t *testing.T) {
+	workdir := t.TempDir()
+	rc := &core.RunCtx{RunID: "20261018-060401", WorkDir: workdir, Logger: slog.New(slog.DiscardHandler)}
+	root := rc.ExecutionDir(resultsSubdir, "TR-VIRT-018", "")
+	// One summary, but two detail files: the summary alone would grade.
+	writeResults(t, root, atScaleDir, atScaleSummary, atScaleDetail)
+	stale := filepath.Join(root, "2-disk/20261018-090511_virtbench_1-2")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, DetailCloneFileName), []byte(singleNodeDetail), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	bag := core.NewBag()
+	bag.Set("results_root", root)
+	sc := cloneAtScaleScenario()
+	sc.DetailParse = func(data []byte) ([]core.Metric, error) { return ClonePercentiles(data, []string{"p99"}) }
+	if _, err := (collector{sc: sc}).Collect(context.Background(), rc, bag, stages.RunHandle{ID: "test"}); err == nil {
+		t.Fatal("collected summary-only when the gated detail file was ambiguous; the execution must fail instead")
+	}
+}
+
+// A result file that is simply absent is a collection error, not a crash.
+func TestCollectReportsMissingResults(t *testing.T) {
+	root := t.TempDir()
+	bag := core.NewBag()
+	bag.Set("results_root", root)
+	rc := &core.RunCtx{RunID: "20261018-060401", WorkDir: root, Logger: slog.New(slog.DiscardHandler)}
+	_, err := (collector{sc: cloneAtScaleScenario()}).Collect(context.Background(), rc, bag, stages.RunHandle{ID: "test"})
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("err = %v, want a not-found collection error", err)
+	}
+}

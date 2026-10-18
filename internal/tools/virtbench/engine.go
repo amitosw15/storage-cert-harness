@@ -284,13 +284,27 @@ func (c collector) Collect(_ context.Context, rc *core.RunCtx, bag *core.Bag, h 
 	refs := []string{path}
 	bundle := map[string][]byte{c.sc.ResultFile: data}
 	if c.sc.DetailFile != "" {
-		if dp, err := findResult(root, c.sc.DetailFile); err == nil {
-			if dd, err := safefs.ReadUnder(root, dp); err == nil {
+		// A scenario with DetailParse is graded from these per-VM samples (the
+		// summary carries only avg/max/min), so a lookup that cannot name one
+		// file must stop the execution. Degrading to summary-only would drop
+		// the gated metric, and an ambiguous detail file is the very case this
+		// collector must not guess at. Where no DetailParse is set the file is
+		// supplementary and stays best-effort.
+		dp, err := findResult(root, c.sc.DetailFile)
+		switch {
+		case err != nil && c.sc.DetailParse != nil:
+			return core.LogBundle{}, fmt.Errorf("virtbench: detail results: %w", err)
+		case err != nil:
+			rc.Logger.Warn("virtbench: detail results not found", "file", c.sc.DetailFile, "err", err)
+		default:
+			dd, readErr := safefs.ReadUnder(root, dp)
+			if readErr != nil && c.sc.DetailParse != nil {
+				return core.LogBundle{}, fmt.Errorf("virtbench: read detail results %s: %w", dp, readErr)
+			}
+			if readErr == nil {
 				bundle[c.sc.DetailFile] = dd
 				refs = append(refs, dp)
 			}
-		} else {
-			rc.Logger.Warn("virtbench: detail results not found", "file", c.sc.DetailFile)
 		}
 	}
 	return core.LogBundle{Refs: refs, Data: bundle}, nil
@@ -340,10 +354,9 @@ func collectFIOResults(root string, replay bool) ([]string, []byte, error) {
 // more than one execution are in scope, and grading the wrong test silently is
 // worse than failing, so refuse rather than choose.
 func findResult(root, name string) (string, error) {
-	direct := filepath.Join(root, name)
-	if _, err := os.Stat(direct); err == nil {
-		return direct, nil
-	}
+	// The walk covers root's own files too, so a copy sitting directly in root
+	// is one candidate among the nested ones rather than a short circuit past
+	// them: returning it early would skip the check this function exists for.
 	found, err := findResults(root, name)
 	if err != nil {
 		return "", err
