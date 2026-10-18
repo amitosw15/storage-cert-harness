@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,6 +40,9 @@ const (
 
 	sshPodAnnotPrefix = "storage-cert-harness.redhat.com/"
 )
+
+// errSSHPodUIDPreconditionFailed means delete targeted a different object instance.
+var errSSHPodUIDPreconditionFailed = errors.New("ssh helper pod delete UID precondition failed")
 
 // sshPodManifest is the helper pod virtbench uses for ping and in-VM SSH checks.
 // Keep in sync with container-patches/virtbench/examples/utilities/ssh-pod.yaml.
@@ -249,6 +253,9 @@ func rollbackSSHPod(ctx context.Context, kubeconfig, runID, createdPodUID string
 			}
 			if !deleteIssued {
 				if err := deleteSSHPodUID(ctx, kubeconfig, pod.Metadata.UID); err != nil {
+					if errors.Is(err, errSSHPodUIDPreconditionFailed) {
+						return nil
+					}
 					lastErr = err
 				} else {
 					deleteIssued = true
@@ -465,8 +472,13 @@ func deleteSSHPodUID(ctx context.Context, kubeconfig, uid string) error {
 			return nil
 		}
 		trimmed := strings.TrimSpace(out)
-		if !ok && (strings.Contains(trimmed, "does not match the UID") || strings.Contains(trimmed, "NotFound")) {
-			return nil
+		if !ok {
+			if strings.Contains(trimmed, "does not match the UID") {
+				return fmt.Errorf("%w: %s", errSSHPodUIDPreconditionFailed, trimmed)
+			}
+			if strings.Contains(trimmed, "NotFound") {
+				return nil
+			}
 		}
 		if err != nil {
 			lastErr = err
@@ -596,17 +608,17 @@ func kubectlCreateSSHPod(ctx context.Context, kubeconfig, manifest string) (stri
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 	cmd.Stdin = strings.NewReader(manifest)
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return "", fmt.Errorf("kubectl create: %w", ctxErr)
 		}
-		return "", fmt.Errorf("kubectl create: %v: %s", err, strings.TrimSpace(buf.String()))
+		return "", fmt.Errorf("kubectl create: %v: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	var pod sshPodState
-	if err := json.Unmarshal(buf.Bytes(), &pod); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &pod); err != nil {
 		return "", fmt.Errorf("decode created ssh helper pod: %w", err)
 	}
 	return strings.TrimSpace(pod.Metadata.UID), nil

@@ -68,9 +68,30 @@ create)
 	  printf '%s\n' "$post" > "$SSH_TEST_STATE"
 	fi
 	run_id="${SSH_TEST_POD_RUN_ID:-run-create}"
+	if [ -n "${SSH_TEST_CREATE_STDERR:-}" ]; then
+		echo "$SSH_TEST_CREATE_STDERR" >&2
+	fi
 	printf '{"metadata":{"uid":"ssh-test-pod-uid","annotations":{"storage-cert-harness.redhat.com/run-id":"%s"}},"status":{"phase":"%s"}}\n' "$run_id" "$post" ;;
 delete)
 	if [ "$2" = --raw ]; then
+		opts_file=""
+		shift 2
+		while [ $# -gt 0 ]; do
+			case "$1" in
+			-f) opts_file="$2"; shift 2 ;;
+			*) shift ;;
+			esac
+		done
+		if [ -z "$opts_file" ] || [ ! -f "$opts_file" ]; then
+			echo 'Error from server (BadRequest): delete requires DeleteOptions' >&2
+			exit 1
+		fi
+		want_uid=$(/usr/bin/sed -n 's/.*"uid":"\([^"]*\)".*/\1/p' "$opts_file" | /usr/bin/head -1)
+		pod_uid="${SSH_TEST_POD_UID:-ssh-test-pod-uid}"
+		if [ -z "$want_uid" ] || [ "$want_uid" != "$pod_uid" ]; then
+			echo "Error from server (Conflict): the UID in the precondition ($want_uid) does not match the UID in record ($pod_uid)" >&2
+			exit 1
+		fi
 		if [ ! -f "$SSH_TEST_DELETE_FAILURES_FILE" ]; then printf '%s\n' "${SSH_TEST_DELETE_FAILURES:-0}" > "$SSH_TEST_DELETE_FAILURES_FILE"; fi
 		read -r failures < "$SSH_TEST_DELETE_FAILURES_FILE"
 		if [ "$failures" -gt 0 ]; then
@@ -209,6 +230,32 @@ func TestSSHHelperTeardownRetriesTransientDeleteFailure(t *testing.T) {
 	}
 	if got := strings.Count(commands(), "delete pod"); got != 2 {
 		t.Fatalf("expected one retry after transient delete failure, got %d attempts: %s", got, commands())
+	}
+}
+
+func TestDeleteSSHPodUIDEnforcesPreconditionInFake(t *testing.T) {
+	_, commands := fakeSSHCluster(t, "Pending")
+	if err := deleteSSHPodUID(t.Context(), "", "ssh-test-pod-uid"); err != nil {
+		t.Fatalf("matching UID precondition: %v\n%s", err, commands())
+	}
+	fakeSSHCluster(t, "Pending")
+	err := deleteSSHPodUID(t.Context(), "", "other-uid")
+	if err == nil {
+		t.Fatal("want error when UID precondition does not match the pod")
+	}
+	if !errors.Is(err, errSSHPodUIDPreconditionFailed) {
+		t.Fatalf("want UID precondition error, got: %v", err)
+	}
+}
+
+func TestSSHHelperCreateSucceedsDespiteStderrWarning(t *testing.T) {
+	t.Setenv("SSH_TEST_CREATE_STDERR", "Warning: admission webhook warning")
+	_, commands := fakeSSHCluster(t, "missing")
+	if err := (&sshPodSetup{}).Setup(t.Context(), sshTestRunCtx(t), nil); err != nil {
+		t.Fatalf("create should succeed when stderr has warnings: %v", err)
+	}
+	if strings.Count(commands(), "create -f -") != 1 {
+		t.Fatalf("expected one create: %s", commands())
 	}
 }
 
