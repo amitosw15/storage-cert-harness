@@ -447,7 +447,11 @@ func newRunCmd() *cobra.Command {
 				runCtx, cancelRun = context.WithTimeout(ctx, runTimeout)
 				defer cancelRun()
 			}
-			rep, err := orchestrator.Run(runCtx, cfg, trs, cat.Provenance, cat.SchemaVersion, rc)
+			// selected, not trs: --continue-from narrows this list to the
+			// executions still outstanding, and handing the orchestrator the
+			// full catalog instead would re-derive the selection and re-run
+			// everything the prior report had already completed.
+			rep, err := orchestrator.Run(runCtx, cfg, selected, cat.Provenance, cat.SchemaVersion, rc)
 			if err != nil {
 				return err
 			}
