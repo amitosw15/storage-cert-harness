@@ -2,9 +2,9 @@
 package kubeburnerocp
 
 import (
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/grader"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/registry"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/stages"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/grader"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/registry"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
 func init() {

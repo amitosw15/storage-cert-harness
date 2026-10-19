@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 //go:embed templates/rhel9-vm-failure-recovery.yaml

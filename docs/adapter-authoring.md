@@ -69,7 +69,7 @@ independently-ownable tasks — great for parallel work.
 7. **Compile it in.** Add one blank import to `cmd/harness/main.go`:
 
    ```go
-   _ "gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/tools/<tool>"
+   _ "github.com/openshift-storage-cert/storage-cert-harness/internal/tools/<tool>"
    ```
 
 8. **Verify:** `make unittest && ./bin/harness list` should show your tool and

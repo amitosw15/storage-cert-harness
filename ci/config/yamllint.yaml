@@ -4,6 +4,7 @@ ignore: |
   vendor/
   logs/
   dist/
+  work/
   .git/
 
 rules:

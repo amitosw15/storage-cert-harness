@@ -10,7 +10,7 @@ variables:
   BUILDAH_IMAGE: "quay.io/buildah/stable:v1.39"
   CI_TOOLS_IMAGE: "quay.io/virtarraycert/ci_tools"
   QUAY_IMAGE: "quay.io/virtarraycert/storage-cert-harness"
-  GOLANGCI_LINT_VERSION: "v2.13.2"
+  GOLANGCI_LINT_VERSION: "v2.15.0"
   TRIVY_VERSION: "v0.74.0"
   DIVE_VERSION: "v0.13.1"
   HADOLINT_VERSION: "v2.14.0"

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/schemas/catalog.schema.json",
+  "$id": "https://github.com/openshift-storage-cert/storage-cert-harness/schemas/catalog.schema.json",
   "title": "KB Catalog (v2.0)",
   "description": "Publishable KB export: per-Test-Requirement metadata and summary counts, with no threshold numbers. Safe to ship in the public harness repo. Joins with thresholds.json on id and shared provenance.kb_git_commit. See decisions/0006 and 5273.",
   "type": "object",

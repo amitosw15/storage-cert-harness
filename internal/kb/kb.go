@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"sort"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/catalog"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/thresholds"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/catalog"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/thresholds"
 )
 
 // FromCatalog builds TRs from the catalog alone (no sla/checks). Used by

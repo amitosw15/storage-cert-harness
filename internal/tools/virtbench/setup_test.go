@@ -3,6 +3,7 @@ package virtbench
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 // fakeSSHCluster models pod state across separate kubectl invocations, including
@@ -20,30 +21,87 @@ func fakeSSHCluster(t *testing.T, state string) (setState func(string), commands
 	t.Helper()
 	dir := t.TempDir()
 	statePath, logPath, annotPath := filepath.Join(dir, "state"), filepath.Join(dir, "commands"), filepath.Join(dir, "annotations")
-	deleteFailuresPath := filepath.Join(dir, "delete-failures")
+	deleteFailuresPath, getCountPath := filepath.Join(dir, "delete-failures"), filepath.Join(dir, "get-count")
 	t.Setenv("SSH_TEST_STATE", statePath)
 	t.Setenv("SSH_TEST_LOG", logPath)
 	t.Setenv("SSH_TEST_ANNOTATIONS", annotPath)
 	t.Setenv("SSH_TEST_DELETE_FAILURES_FILE", deleteFailuresPath)
+	t.Setenv("SSH_TEST_GET_COUNT_FILE", getCountPath)
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$SSH_TEST_LOG"
 if [ "$1" = --kubeconfig ]; then shift 2; fi
 read -r state < "$SSH_TEST_STATE"
 case "$1" in
 get)
+	if [ "$state" = delayed ]; then
+		if [ ! -f "$SSH_TEST_GET_COUNT_FILE" ]; then printf '%s\n' 0 > "$SSH_TEST_GET_COUNT_FILE"; fi
+		read -r gets < "$SSH_TEST_GET_COUNT_FILE"
+		gets=$((gets + 1))
+		printf '%s\n' "$gets" > "$SSH_TEST_GET_COUNT_FILE"
+		if [ "$gets" -ge 3 ]; then
+			state="${SSH_TEST_APPLY_STATE:-Running}"
+			printf '%s\n' "$state" > "$SSH_TEST_STATE"
+		else
+			exit 0
+		fi
+	fi
   case "$state" in
   forbidden) echo 'Error from server (Forbidden): cannot get pods' >&2; exit 1 ;;
   missing) exit 0 ;;
   terminating)
     printf '%s\n' '{"metadata":{"deletionTimestamp":"2026-09-27T00:00:00Z"},"status":{"phase":"Running"}}'
     printf '%s\n' missing > "$SSH_TEST_STATE" ;;
-  *) printf '{"status":{"phase":"%s"}}\n' "$state" ;;
+	*)
+		if [ -n "${SSH_TEST_POD_RUN_ID:-}" ]; then
+			printf '{"metadata":{"uid":"ssh-test-pod-uid","annotations":{"storage-cert-harness.redhat.com/run-id":"%s"}},"status":{"phase":"%s"}}\n' "$SSH_TEST_POD_RUN_ID" "$state"
+		else
+			printf '{"metadata":{"uid":"ssh-test-pod-uid"},"status":{"phase":"%s"}}\n' "$state"
+		fi ;;
   esac ;;
-apply)
+create)
   /bin/cat >/dev/null
   post="${SSH_TEST_APPLY_STATE:-Running}"
-  printf '%s\n' "$post" > "$SSH_TEST_STATE" ;;
+	if [ -n "${SSH_TEST_APPLY_DELAY:-}" ]; then
+	  printf '%s\n' delayed > "$SSH_TEST_STATE"
+	  /bin/sleep "$SSH_TEST_APPLY_DELAY"
+	else
+	  printf '%s\n' "$post" > "$SSH_TEST_STATE"
+	fi
+	run_id="${SSH_TEST_POD_RUN_ID:-run-create}"
+	if [ -n "${SSH_TEST_CREATE_STDERR:-}" ]; then
+		echo "$SSH_TEST_CREATE_STDERR" >&2
+	fi
+	printf '{"metadata":{"uid":"ssh-test-pod-uid","annotations":{"storage-cert-harness.redhat.com/run-id":"%s"}},"status":{"phase":"%s"}}\n' "$run_id" "$post" ;;
 delete)
+	if [ "$2" = --raw ]; then
+		opts_file=""
+		shift 2
+		while [ $# -gt 0 ]; do
+			case "$1" in
+			-f) opts_file="$2"; shift 2 ;;
+			*) shift ;;
+			esac
+		done
+		if [ -z "$opts_file" ] || [ ! -f "$opts_file" ]; then
+			echo 'Error from server (BadRequest): delete requires DeleteOptions' >&2
+			exit 1
+		fi
+		want_uid=$(/usr/bin/sed -n 's/.*"uid":"\([^"]*\)".*/\1/p' "$opts_file" | /usr/bin/head -1)
+		pod_uid="${SSH_TEST_POD_UID:-ssh-test-pod-uid}"
+		if [ -z "$want_uid" ] || [ "$want_uid" != "$pod_uid" ]; then
+			echo "Error from server (Conflict): the UID in the precondition ($want_uid) does not match the UID in record ($pod_uid)" >&2
+			exit 1
+		fi
+		if [ ! -f "$SSH_TEST_DELETE_FAILURES_FILE" ]; then printf '%s\n' "${SSH_TEST_DELETE_FAILURES:-0}" > "$SSH_TEST_DELETE_FAILURES_FILE"; fi
+		read -r failures < "$SSH_TEST_DELETE_FAILURES_FILE"
+		if [ "$failures" -gt 0 ]; then
+			printf '%s\n' $((failures - 1)) > "$SSH_TEST_DELETE_FAILURES_FILE"
+			echo 'Error from server (InternalError): transient delete failure' >&2
+			exit 1
+		fi
+		printf '%s\n' missing > "$SSH_TEST_STATE"
+		exit 0
+	fi
 	if [ ! -f "$SSH_TEST_DELETE_FAILURES_FILE" ]; then printf '%s\n' "${SSH_TEST_DELETE_FAILURES:-0}" > "$SSH_TEST_DELETE_FAILURES_FILE"; fi
 	read -r failures < "$SSH_TEST_DELETE_FAILURES_FILE"
 	if [ "$failures" -gt 0 ]; then
@@ -100,7 +158,7 @@ func TestProvisionRecoversSSHHelperBetweenScenarios(t *testing.T) {
 			t.Fatalf("%s started with a missing SSH helper", id)
 		}
 	}
-	if got := strings.Count(commands(), "apply -f -"); got != 3 {
+	if got := strings.Count(commands(), "create -f -"); got != 3 {
 		t.Fatalf("recreated helper %d times, want 3", got)
 	}
 }
@@ -114,7 +172,7 @@ func TestSSHHelperReplacesTerminalPods(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := commands()
-			if strings.Count(got, "delete pod") != 1 || strings.Count(got, "apply -f -") != 1 {
+			if strings.Count(got, "delete pod") != 1 || strings.Count(got, "create -f -") != 1 {
 				t.Fatalf("terminal pod was not replaced exactly once: %s", got)
 			}
 		})
@@ -129,9 +187,9 @@ func TestSSHHelperWaitsForTerminatingPod(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := commands()
-	firstApply := strings.Index(got, "apply -f -")
-	if firstApply < 0 || strings.Count(got[:firstApply], "get pod") < 2 {
-		t.Fatalf("applied before waiting for terminating pod to disappear: %s", got)
+	firstCreate := strings.Index(got, "create -f -")
+	if firstCreate < 0 || strings.Count(got[:firstCreate], "get pod") < 2 {
+		t.Fatalf("created before waiting for terminating pod to disappear: %s", got)
 	}
 }
 
@@ -175,6 +233,32 @@ func TestSSHHelperTeardownRetriesTransientDeleteFailure(t *testing.T) {
 	}
 }
 
+func TestDeleteSSHPodUIDEnforcesPreconditionInFake(t *testing.T) {
+	_, commands := fakeSSHCluster(t, "Pending")
+	if err := deleteSSHPodUID(t.Context(), "", "ssh-test-pod-uid"); err != nil {
+		t.Fatalf("matching UID precondition: %v\n%s", err, commands())
+	}
+	fakeSSHCluster(t, "Pending")
+	err := deleteSSHPodUID(t.Context(), "", "other-uid")
+	if err == nil {
+		t.Fatal("want error when UID precondition does not match the pod")
+	}
+	if !errors.Is(err, errSSHPodUIDPreconditionFailed) {
+		t.Fatalf("want UID precondition error, got: %v", err)
+	}
+}
+
+func TestSSHHelperCreateSucceedsDespiteStderrWarning(t *testing.T) {
+	t.Setenv("SSH_TEST_CREATE_STDERR", "Warning: admission webhook warning")
+	_, commands := fakeSSHCluster(t, "missing")
+	if err := (&sshPodSetup{}).Setup(t.Context(), sshTestRunCtx(t), nil); err != nil {
+		t.Fatalf("create should succeed when stderr has warnings: %v", err)
+	}
+	if strings.Count(commands(), "create -f -") != 1 {
+		t.Fatalf("expected one create: %s", commands())
+	}
+}
+
 func TestSSHHelperHealthyPodIsReused(t *testing.T) {
 	_, commands := fakeSSHCluster(t, "Running")
 	s := &sshPodSetup{}
@@ -187,7 +271,7 @@ func TestSSHHelperHealthyPodIsReused(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := commands()
-	if strings.Contains(got, "apply") {
+	if strings.Contains(got, "create -f -") {
 		t.Fatalf("healthy pre-existing pod was recreated: %s", got)
 	}
 	if strings.Count(got, "delete pod") != 1 {
@@ -203,7 +287,7 @@ func TestSSHHelperLookupErrorIsNotTreatedAsMissing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "Forbidden") {
 		t.Fatalf("want actionable lookup error, got %v", err)
 	}
-	if got := commands(); strings.Contains(got, "apply") || strings.Contains(got, "delete") {
+	if got := commands(); strings.Contains(got, "create -f -") || strings.Contains(got, "delete") {
 		t.Fatalf("API failure triggered mutation: %s", got)
 	}
 }
@@ -251,18 +335,73 @@ func TestSSHHelperTeardownWithMixedReplayAndLive(t *testing.T) {
 
 func TestSSHHelperFailedSetupRollsBackCreatedPod(t *testing.T) {
 	t.Setenv("SSH_TEST_APPLY_STATE", "Pending")
+	t.Setenv("SSH_TEST_POD_RUN_ID", "run-rollback")
 	_, commands := fakeSSHCluster(t, "missing")
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
-	if err := (&sshPodSetup{}).Setup(ctx, sshTestRunCtx(t), nil); err == nil {
+	rc := sshTestRunCtx(t)
+	rc.RunID = "run-rollback"
+	if err := (&sshPodSetup{}).Setup(ctx, rc, nil); err == nil {
 		t.Fatal("want setup failure while pod stays non-ready")
 	}
 	got := commands()
-	if strings.Count(got, "apply -f -") != 1 {
+	if strings.Count(got, "create -f -") != 1 {
 		t.Fatalf("expected one pod create, got: %s", got)
 	}
-	if strings.Count(got, "delete pod") != 1 {
+	if strings.Count(got, "delete --raw") != 1 {
 		t.Fatalf("expected rollback delete after failed setup, got: %s", got)
+	}
+}
+
+func TestSSHHelperApplyTimeoutRollsBackPartiallyCreatedPod(t *testing.T) {
+	t.Setenv("SSH_TEST_APPLY_STATE", "Pending")
+	t.Setenv("SSH_TEST_APPLY_DELAY", "0.5")
+	t.Setenv("SSH_TEST_POD_RUN_ID", "run-timeout")
+	_, commands := fakeSSHCluster(t, "missing")
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	rc := sshTestRunCtx(t)
+	rc.RunID = "run-timeout"
+	err := (&sshPodSetup{}).Setup(ctx, rc, nil)
+	if err == nil {
+		t.Fatal("want setup failure when create times out")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) && !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("want context deadline from timed-out create, got: %v", err)
+	}
+	got := commands()
+	if strings.Count(got, "create -f -") != 1 || strings.Count(got, "delete --raw") < 1 {
+		t.Fatalf("expected timed-out create to be rolled back: %s", got)
+	}
+	state, err := os.ReadFile(os.Getenv("SSH_TEST_STATE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(state)) != "missing" {
+		t.Fatalf("delayed apply recreated helper after rollback: %q", state)
+	}
+}
+
+func TestSSHHelperFailedSetupDoesNotDeleteAnotherRunPod(t *testing.T) {
+	t.Setenv("SSH_TEST_APPLY_STATE", "Pending")
+	t.Setenv("SSH_TEST_POD_RUN_ID", "run-other")
+	_, commands := fakeSSHCluster(t, "missing")
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	rc := sshTestRunCtx(t)
+	rc.RunID = "run-this"
+	if err := (&sshPodSetup{}).Setup(ctx, rc, nil); err == nil {
+		t.Fatal("want setup failure while another run owns the helper pod")
+	}
+	got := commands()
+	if strings.Count(got, "create -f -") != 1 {
+		t.Fatalf("expected create before rollback, got: %s", got)
+	}
+	if strings.Count(got, "get pod") < 2 {
+		t.Fatalf("expected rollback to inspect the helper pod, got: %s", got)
+	}
+	if strings.Count(got, "delete pod")+strings.Count(got, "delete --raw") != 0 {
+		t.Fatalf("deleted another run's helper pod: %s", got)
 	}
 }
 

@@ -1,6 +1,6 @@
 package report
 
-import "gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+import "github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 
 func mergeStorageSelections(base, next []core.StorageSelection) []core.StorageSelection {
 	out := append([]core.StorageSelection(nil), base...)

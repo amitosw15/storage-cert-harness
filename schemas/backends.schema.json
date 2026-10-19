@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/schemas/backends.schema.json",
+  "$id": "https://github.com/openshift-storage-cert/storage-cert-harness/schemas/backends.schema.json",
   "title": "Storage Backends",
   "description": "Named storage-array configurations. Credentials are references (file / k8s_secret / inline), never committed plaintext. Authored in YAML; this schema describes the parsed structure. See decisions/0005.",
   "type": "object",

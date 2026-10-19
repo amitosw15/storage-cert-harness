@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 func TestStorageSelectionExportAndMerge(t *testing.T) {

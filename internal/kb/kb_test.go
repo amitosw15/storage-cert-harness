@@ -3,9 +3,9 @@ package kb
 import (
 	"testing"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/catalog"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/thresholds"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/catalog"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/thresholds"
 )
 
 func prov(commit string) core.Provenance {

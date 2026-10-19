@@ -7,9 +7,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/clustercheck"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/safefs"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
 type preflight struct{}

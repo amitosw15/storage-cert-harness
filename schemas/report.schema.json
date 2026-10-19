@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/schemas/report.schema.json",
+  "$id": "https://github.com/openshift-storage-cert/storage-cert-harness/schemas/report.schema.json",
   "title": "Certification Report",
   "description": "Graded run output: one verdict per scorable item (each sla and each check) within a TR. Provenance is stamped for auditability. See decisions/0006.",
   "type": "object",

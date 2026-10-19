@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 // SelectMeasurements keeps catalog SLA metrics plus explicitly requested extras.

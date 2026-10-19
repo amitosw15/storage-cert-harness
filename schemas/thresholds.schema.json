@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/schemas/thresholds.schema.json",
+  "$id": "https://github.com/openshift-storage-cert/storage-cert-harness/schemas/thresholds.schema.json",
   "title": "KB Thresholds Bundle (v2.0)",
   "description": "Runtime-supplied SENSITIVE KB export: per-Test-Requirement sla[] numbers and full check definitions. Never committed in the clear (decisions/0004, 5273); delivered at test time only. Joins with catalog.json on id and shared provenance.kb_git_commit.",
   "type": "object",

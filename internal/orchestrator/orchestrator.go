@@ -18,12 +18,12 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/config"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/grader"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/registry"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/report"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/stages"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/config"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/grader"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/registry"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/report"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
 // job is one unit of scheduling: all selected TRs for a single automation tool.

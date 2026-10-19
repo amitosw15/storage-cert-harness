@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/plan"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/plan"
 )
 
 // update regenerates the golden file: go test ./internal/tools/virtbench -update

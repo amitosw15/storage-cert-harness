@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/schemas/plan.schema.json",
+  "$id": "https://github.com/openshift-storage-cert/storage-cert-harness/schemas/plan.schema.json",
   "title": "Test Plan",
   "description": "A curated, parameterized selection of catalog test requirements plus run settings, per-tool scheduling, and the active backend. Authored in YAML; this schema describes the parsed structure. See decisions/0005 and 0006.",
   "type": "object",

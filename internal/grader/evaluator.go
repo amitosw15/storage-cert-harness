@@ -3,8 +3,8 @@ package grader
 import (
 	"context"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/stages"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
 // NativeOrGraded returns an Evaluator that grades a TR's SLAs/Checks with the

@@ -3,8 +3,8 @@ package kubeburner
 import (
 	"context"
 
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
-	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/grader"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/grader"
 )
 
 // snapshotEvaluator scores TR-VIRT-010: it emits the kube-burner native batch verdict, then defers SLA/check scoring to the generic grader (measured_by + when-scoped bars, ADR-0013). See decisions/0012.
