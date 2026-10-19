@@ -55,8 +55,8 @@ exit 0
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 9 {
-		t.Fatalf("findings = %+v, want parameters, storage config, binary, 3 CRDs, storage existence, snapshot class, populator", got)
+	if len(got) != 10 {
+		t.Fatalf("findings = %+v, want parameters, storage config, binary, 3 CRDs, storage existence, snapshot class, wait --for=create support, populator", got)
 	}
 	for _, f := range got {
 		if f.Level != "info" {

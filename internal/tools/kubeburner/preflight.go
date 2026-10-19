@@ -63,6 +63,8 @@ func (preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs 
 		} else {
 			bag.Set("snapshot_selection", selection)
 			findings = append(findings, selection.Finding())
+			// Provisioning this storage uses "wait --for=create".
+			findings = append(findings, clustercheck.WaitForCreateSupported(ctx, ""))
 		}
 	}
 	cli := clustercheck.KubeCLI()
