@@ -136,6 +136,32 @@ func (s SnapshotSelection) Finding() core.Finding {
 	return core.Finding{Level: "info", Message: fmt.Sprintf("storage_class=%s snapshot_class=%s", s.StorageClass, s.SnapshotClass)}
 }
 
+// WaitForCreateSupported reports whether the local client can run
+// "wait --for=create", which PrepareVMStorage depends on. The condition
+// arrived in kubectl 1.31; an older client gets through preflight and then
+// fails partway into provisioning, after the run has started and cluster
+// objects exist.
+//
+// This probes the condition rather than comparing versions on purpose:
+// "oc version --client" reports an OpenShift release (4.17.3), not the
+// Kubernetes version the condition belongs to, so there is no number to
+// compare. Waiting on an object that does not exist is side-effect free, and
+// a zero timeout returns immediately either way.
+func WaitForCreateSupported(ctx context.Context, kubeconfig string) core.Finding {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	_, err := SnapshotCommand(ctx, kubeconfig, nil,
+		"wait", "--for=create", "storageprofile/storage-cert-preflight-probe", "--timeout=0s")
+	if err != nil && strings.Contains(err.Error(), `unrecognized condition: "create"`) {
+		return core.Finding{Level: "error", Message: "kubectl/oc is too old for snapshot storage preparation: " +
+			`it does not support "wait --for=create" (kubectl 1.31+ / a matching oc). ` +
+			"Provisioning would fail partway through the run."}
+	}
+	// Any other outcome — a timeout, a missing object, no cluster reach — means
+	// the condition itself was understood, which is all this checks.
+	return core.Finding{Level: "info", Message: `client supports "wait --for=create"`}
+}
+
 // PrepareVMStorage gives KubeVirt a private StorageProfile, because its VM
 // snapshot API has no per-request class selector. The copied StorageClass keeps
 // all provisioning settings, but never carries default annotations. No existing

@@ -36,8 +36,22 @@ func (p Params) validate() error {
 	if p.Workload == "" {
 		return fmt.Errorf("kube-burner-ocp: missing required param %q", "workload")
 	}
-	if _, ok := workloadSpecs[p.Workload]; !ok {
+	spec, ok := workloadSpecs[p.Workload]
+	if !ok {
 		return fmt.Errorf("kube-burner-ocp: unknown workload %q", p.Workload)
+	}
+	// Render the workload's flags against the same specs the runner uses, and
+	// throw the result away. Checking only that the workload name is known let
+	// a plan missing a required param pass preflight and then die seconds into
+	// the run, once namespaces and VMs already existed. The catalog's declared
+	// params are not necessarily the ones a workload consumes, so the spec is
+	// the only thing that can answer this.
+	for _, set := range [][]argSpec{spec.args, globalArgs} {
+		for _, a := range set {
+			if _, err := renderArg(p.Raw, a); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
