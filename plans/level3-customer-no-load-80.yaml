@@ -26,7 +26,7 @@ overrides:
     num_vms: 50
     start: 1
     end: 50
-  TR-VIRT-010:
+  TR-VIRT-010: {}
   # Required: choose the customer batch size for snapshot creation.
   # replicas: <NUMBER_OF_VM_REPLICAS>
   # snapshot_count: <NUMBER_OF_SNAPSHOTS>
@@ -36,15 +36,16 @@ overrides:
   TR-VIRT-018:
     iteration_clones: 100
     use_snapshot: true
-  # TR-VIRT-019 is temporarily disabled; re-enable this block together with the
-  # select entry below once the lifecycle migration-evidence fix has landed.
-  # TR-VIRT-019:
-  #   # Keep the catalog SLA selector and workload parameters aligned.
-  #   vms: 20
-  #   workload: virt-parallel
-  #   initial_vms: 20
-  #   increment: 0
-  #   max_iterations: 1
+
+    # TR-VIRT-019 is temporarily disabled; re-enable this block together with the
+    # select entry below once the lifecycle migration-evidence fix has landed.
+    # TR-VIRT-019:
+    #   # Keep the catalog SLA selector and workload parameters aligned.
+    #   vms: 20
+    #   workload: virt-parallel
+    #   initial_vms: 20
+    #   increment: 0
+    #   max_iterations: 1
 select:
   ids:
     - TR-VIRT-001  # Boot Storm
