@@ -36,15 +36,13 @@ overrides:
   TR-VIRT-018:
     iteration_clones: 100
     use_snapshot: true
-  # TR-VIRT-019 is temporarily disabled; re-enable this block together with the
-  # select entry below once the lifecycle migration-evidence fix has landed.
-  # TR-VIRT-019:
-  #   # Keep the catalog SLA selector and workload parameters aligned.
-  #   vms: 20
-  #   workload: virt-parallel
-  #   initial_vms: 20
-  #   increment: 0
-  #   max_iterations: 1
+  TR-VIRT-019:
+    # Keep the catalog SLA selector and workload parameters aligned.
+    vms: 20
+    workload: virt-parallel
+    initial_vms: 20
+    increment: 0
+    max_iterations: 1
 select:
   ids:
     - TR-VIRT-001  # Boot Storm
@@ -55,7 +53,7 @@ select:
     - TR-VIRT-010  # Snapshot Creation
     - TR-VIRT-013  # Per-Node Ceiling
     - TR-VIRT-018  # Clone at Scale (VDI)
-    # - TR-VIRT-019  # Parallel VM Lifecycle (temporarily disabled)
+    - TR-VIRT-019  # Parallel VM Lifecycle
     - TR-VIRT-027  # Snapshot Depth per Volume
 
 # Optional: uncomment this block to run TR-VIRT-004 as two named executions
