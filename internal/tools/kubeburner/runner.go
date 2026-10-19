@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -106,20 +107,24 @@ type collector struct{}
 func (collector) Collect(_ context.Context, rc *core.RunCtx, bag *core.Bag, _ stages.RunHandle) (core.LogBundle, error) {
 	subdir, _ := core.GetAs[string](bag, "kb_subdir")
 	trID, _ := core.GetAs[string](bag, "kb_trid")
-	m, err := findCollectedMetrics(subdir)
+	m, files, err := findCollectedMetrics(subdir)
 	if err != nil {
 		rc.Logger.Warn("kube-burner: no results collected", "tr", trID, "err", err)
 		return core.LogBundle{}, nil // Parse emits a fail verdict
 	}
 	rc.Logger.Info("kube-burner: collected results", "tr", trID, "files", len(m))
-	return core.LogBundle{Refs: []string{subdir}, Data: m}, nil
+	return core.LogBundle{Refs: files, Data: m}, nil
 }
 
-func findCollectedMetrics(root string) (map[string][]byte, error) {
+// findCollectedMetrics returns the metric files under root keyed by base name,
+// alongside the path of each one read, so a report can cite the files a verdict
+// came from rather than the directory that held them.
+func findCollectedMetrics(root string) (map[string][]byte, []string, error) {
 	data := map[string][]byte{}
+	var paths []string
 	rootFS, err := os.OpenRoot(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = rootFS.Close() }()
 	err = fs.WalkDir(rootFS.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
@@ -133,16 +138,18 @@ func findCollectedMetrics(root string) (map[string][]byte, error) {
 				return err
 			}
 			data[name] = content
+			paths = append(paths, filepath.Join(root, path))
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(data) == 0 {
-		return nil, fmt.Errorf("kube-burner: no collected-metrics under %s", root)
+		return nil, nil, fmt.Errorf("kube-burner: no collected-metrics under %s", root)
 	}
-	return data, nil
+	sort.Strings(paths)
+	return data, paths, nil
 }
 
 type parser struct{}

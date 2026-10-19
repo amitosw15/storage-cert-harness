@@ -85,7 +85,12 @@
           "stage": { "type": "string" },
           "started_at": { "type": "string" },
           "ended_at": { "type": "string" },
-          "reason": { "type": "string" }
+          "reason": { "type": "string" },
+          "artifacts": {
+            "description": "Result files this execution was graded from, relative to the run working directory.",
+            "type": "array",
+            "items": { "type": "string" }
+          }
         }
       }
     },

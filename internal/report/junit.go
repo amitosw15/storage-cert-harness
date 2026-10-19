@@ -69,6 +69,16 @@ func writeJUnit(w io.Writer, r core.Report, hardwareAtRoot bool) error {
 	}
 	root.Suites = append(root.Suites, juSuite{Name: "environment-platform", Properties: pfProps})
 
+	// Artifacts are recorded per execution; JUnit groups by partner level and
+	// carries the execution identity on each case's classname, so the paths ride
+	// along on every item of that execution rather than on a suite of their own.
+	artifactsByExecution := map[string]string{}
+	for _, e := range r.Executions {
+		if len(e.Artifacts) > 0 {
+			artifactsByExecution[core.ExecutionLabel(e.TR, e.Variant)] = join(e.Artifacts)
+		}
+	}
+
 	// --- verdicts grouped by partner level ---
 	byLevel := map[int][]core.Verdict{}
 	var levels []int
@@ -100,6 +110,9 @@ func writeJUnit(w io.Writer, r core.Report, hardwareAtRoot bool) error {
 			}
 			if v.Actual != "" {
 				props.add("actual", v.Actual)
+			}
+			if a := artifactsByExecution[core.ExecutionLabel(v.TR, v.Variant)]; a != "" {
+				props.add("artifacts", a)
 			}
 			if len(props.Property) > 0 {
 				tc.Properties = props
@@ -196,6 +209,9 @@ func writeJUnit(w io.Writer, r core.Report, hardwareAtRoot bool) error {
 // source for incident diagnostics and full run composition.
 func runProperties(r core.Report) *juProps {
 	p := &juProps{}
+	// Stays at 1: the artifacts property is additive and consumers read
+	// properties by name, so a reader that does not know it is unaffected.
+	// Reserve a bump for a change that actually breaks one.
 	p.add("harness.junit_profile_version", "1")
 	p.add("harness.run_id", r.RunID)
 	p.add("harness.status", string(r.Status))

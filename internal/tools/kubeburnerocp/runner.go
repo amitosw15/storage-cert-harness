@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -123,6 +124,9 @@ func (collector) Collect(_ context.Context, rc *core.RunCtx, bag *core.Bag, _ st
 
 	data := map[string][]byte{}
 	var refs []string
+	// This collector's job spans every kube-burner-ocp TR in the plan, so the
+	// references have to stay attributed per TR.
+	refsByTR := map[string][]string{}
 	for _, r := range runs {
 		if r.Skipped != "" {
 			continue
@@ -131,25 +135,30 @@ func (collector) Collect(_ context.Context, rc *core.RunCtx, bag *core.Bag, _ st
 			rc.Logger.Warn("kube-burner-ocp: run produced no result directory", "tr", r.TRID, "err", r.RunErr)
 			continue
 		}
-		m, err := findCollectedMetrics(r.Subdir)
+		m, files, err := findCollectedMetrics(r.Subdir)
 		if err != nil {
 			rc.Logger.Warn("kube-burner-ocp: no results collected", "tr", r.TRID, "err", err)
 			continue // Parse emits a fail verdict for this TR
 		}
-		refs = append(refs, r.Subdir)
+		refs = append(refs, files...)
+		refsByTR[r.TRID] = append(refsByTR[r.TRID], files...)
 		for name, content := range m {
 			data[r.TRID+"/"+name] = content
 		}
 	}
 	rc.Logger.Info("kube-burner-ocp: collected results", "trs", len(runs))
-	return core.LogBundle{Refs: refs, Data: data}, nil
+	return core.LogBundle{Refs: refs, RefsByTR: refsByTR, Data: data}, nil
 }
 
-func findCollectedMetrics(root string) (map[string][]byte, error) {
+// findCollectedMetrics returns the metric files under root keyed by base name,
+// alongside the path of each one read, so a report can cite the files a verdict
+// came from rather than the directory that held them.
+func findCollectedMetrics(root string) (map[string][]byte, []string, error) {
 	data := make(map[string][]byte)
+	var paths []string
 	rootFS, err := os.OpenRoot(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = rootFS.Close() }()
 	err = fs.WalkDir(rootFS.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
@@ -163,16 +172,18 @@ func findCollectedMetrics(root string) (map[string][]byte, error) {
 				return err
 			}
 			data[name] = content
+			paths = append(paths, filepath.Join(root, path))
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(data) == 0 {
-		return nil, fmt.Errorf("kube-burner-ocp: no collected-metrics under %s", root)
+		return nil, nil, fmt.Errorf("kube-burner-ocp: no collected-metrics under %s", root)
 	}
-	return data, nil
+	sort.Strings(paths)
+	return data, paths, nil
 }
 
 type parser struct{}

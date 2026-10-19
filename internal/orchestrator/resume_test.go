@@ -1,7 +1,14 @@
 package orchestrator
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"testing"
+
+	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/config"
+	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/registry"
+	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/stages"
 
 	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
 )
@@ -62,4 +69,34 @@ func TestResumeExecutionsRerunsAbortedExecutionDespiteCancellationVerdicts(t *te
 	if len(got) != 1 || got[0].ID != "TR-A" {
 		t.Fatalf("aborted resumed selection = %+v, want TR-A", got)
 	}
+}
+
+// Run must execute exactly the TRs it is handed. The CLI narrows that list for
+// --continue-from, so re-deriving it from the full catalog would re-run every
+// execution the prior report had already completed — while the resume log
+// still claimed they were skipped.
+func TestRunExecutesOnlyTheGivenTRs(t *testing.T) {
+	registry.Register(stages.ToolIntegration{Name: "resume-scope-test", Runner: countingRunner{}})
+	all := []core.TestRequirement{
+		{ID: "TR-RESUME-A", AutomationTool: "resume-scope-test"},
+		{ID: "TR-RESUME-B", AutomationTool: "resume-scope-test"},
+		{ID: "TR-RESUME-C", AutomationTool: "resume-scope-test"},
+	}
+	// What ResumeExecutionsWithOptions would hand back: only the outstanding one.
+	outstanding := all[1:2]
+
+	rc := &core.RunCtx{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	rep, err := Run(context.Background(), config.Config{}, outstanding, core.Provenance{}, "2.0", rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Executions) != 1 || rep.Executions[0].TR != "TR-RESUME-B" {
+		t.Fatalf("executions = %+v, want only TR-RESUME-B", rep.Executions)
+	}
+}
+
+type countingRunner struct{}
+
+func (countingRunner) Run(_ context.Context, _ *core.RunCtx, _ *core.Bag, _ []core.TestRequirement) (stages.RunHandle, error) {
+	return stages.RunHandle{}, nil
 }

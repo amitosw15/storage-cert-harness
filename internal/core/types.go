@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"path/filepath"
 )
 
 // Outcome is the result of scoring a single item after evaluation.
@@ -63,6 +64,10 @@ type RunExecution struct {
 	StartedAt string         `json:"started_at,omitempty"`
 	EndedAt   string         `json:"ended_at,omitempty"`
 	Reason    string         `json:"reason,omitempty"`
+	// Artifacts are the result files this execution was graded from, relative
+	// to the run's working directory. They tie a verdict to the bytes behind
+	// it; absolute paths are never recorded (they leak the operator's home).
+	Artifacts []string `json:"artifacts,omitempty"`
 }
 
 // RunPart identifies one harness process/invocation that contributed to a
@@ -207,6 +212,11 @@ type LogBundle struct {
 	TRID string            `json:"tr_id,omitempty"`
 	Refs []string          `json:"refs,omitempty"` // artifact references (paths, object keys)
 	Data map[string][]byte `json:"-"`              // in-memory payloads keyed by name
+	// RefsByTR attributes references to individual TRs. A collector whose job
+	// covers several TRs must set it: Refs alone is a flat list, so recording
+	// it would hand every TR in the job every other TR's files — the same
+	// misattribution the per-execution results root exists to prevent.
+	RefsByTR map[string][]string `json:"refs_by_tr,omitempty"`
 }
 
 // TestResult is the normalized output of a ResultParser for one TR. Metrics feed
@@ -412,6 +422,29 @@ type RunCtx struct {
 	// SetStage marks the stage currently executing for one or more TRs. The
 	// callback is used to make a stale checkpoint explain where the run stopped.
 	SetStage func(string, []TestRequirement)
+	// RecordArtifacts records the result files an execution was graded from, so
+	// a verdict in the report can be traced to the bytes behind it. The
+	// receiver makes the paths relative to WorkDir.
+	RecordArtifacts func([]TestRequirement, []string)
+}
+
+// ExecutionDir is the results root for one execution of one TR under one tool.
+// Every execution gets its own directory so a collector can never reach another
+// execution's output: the TR/variant segment separates tests within a run, and
+// the RunID segment separates a --retry-failed attempt from the attempt it
+// replaces, while leaving the earlier attempt on disk as evidence.
+func (r *RunCtx) ExecutionDir(toolSubdir, trID, variant string) string {
+	base := r.WorkDir
+	if base == "" {
+		base = "."
+	}
+	leaf := trID
+	if variant != "" {
+		// Dots appear in neither a TR id nor a variant name, so the join stays
+		// unambiguous in both directions.
+		leaf = trID + "." + variant
+	}
+	return filepath.Join(base, toolSubdir, leaf, r.RunID)
 }
 
 // ToolOutput mirrors a subprocess stream to the terminal and, when configured,

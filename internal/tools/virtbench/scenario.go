@@ -73,8 +73,11 @@ type Scenario struct {
 	// Nil means the shared preflight checks are sufficient.
 	Validate func(core.TestRequirement) error
 	// DetailFile, when set, is a second (per-VM) result file the collector reads
-	// best-effort so DetailParse can derive metrics the summary can't (e.g. a real
-	// percentile from raw samples). Absence is not fatal.
+	// so DetailParse can derive metrics the summary can't (e.g. a real
+	// percentile from raw samples). Without DetailParse it is supplementary and
+	// absence is not fatal; with DetailParse the scenario is graded from it, so
+	// a file that cannot be found — or named unambiguously — fails the
+	// execution rather than quietly dropping the metric it gates.
 	DetailFile string
 	// DetailParse turns DetailFile's bytes into extra metrics appended to the
 	// TR's result. Only called when DetailFile was collected.
@@ -85,6 +88,10 @@ type Scenario struct {
 	// successful VMs × num_disks. Nil adds nothing.
 	DeriveMetrics func(tr core.TestRequirement, res core.TestResult) []core.Metric
 }
+
+// resultsSubdir is this tool's directory under the run's working directory;
+// each execution gets its own subtree beneath it (core.RunCtx.ExecutionDir).
+const resultsSubdir = "virtbench"
 
 // Result file names virtbench writes with --save-results (see the tool's
 // save_results()). Each scenario has its own; SummaryFileName is kept exported for
