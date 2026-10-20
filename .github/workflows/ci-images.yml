@@ -33,7 +33,7 @@ jobs:
       success: ${{ steps.report-success.outputs.success }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: harness-binary
           path: bin
@@ -64,7 +64,7 @@ jobs:
     needs: [image-build]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: harness-image
           path: dist
@@ -106,7 +106,7 @@ jobs:
     needs: [image-build]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: harness-image
           path: dist

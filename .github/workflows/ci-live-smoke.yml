@@ -104,7 +104,7 @@ jobs:
           ref: refs/heads/main
           fetch-depth: 1
           persist-credentials: false
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.bundle-pr-open.outputs.src_artifact }}
           path: pr-src
@@ -195,7 +195,7 @@ jobs:
           ref: refs/heads/main
           fetch-depth: 1
           persist-credentials: false
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.bundle-comment.outputs.src_artifact }}
           path: pr-src
@@ -287,7 +287,7 @@ jobs:
           ref: refs/heads/main
           fetch-depth: 1
           persist-credentials: false
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.bundle-dispatch.outputs.src_artifact }}
           path: pr-src
