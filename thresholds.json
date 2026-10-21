@@ -144,7 +144,10 @@
           "metric": "max_vms_per_node",
           "operator": ">=",
           "unit": "count",
-          "value": 50
+          "value": 50,
+          "when": {
+            "attempt_vms": 100
+          }
         }
       ],
       "sla_status": "defined"
@@ -190,7 +193,10 @@
           "metric": "snapshots_per_volume",
           "operator": ">=",
           "unit": "count",
-          "value": 250
+          "value": 250,
+          "when": {
+            "snapshot_count": 250
+          }
         }
       ],
       "sla_status": "defined"

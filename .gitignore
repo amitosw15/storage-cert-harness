@@ -31,6 +31,9 @@ report.md
 /logs/**
 !/logs/README.md
 
+# Local TR-STOR-002 / smoke diagnostics (not part of CI)
+/ci/scripts/tests/
+
 # Local CI scratch (layout-check, image-contents-check, etc.)
 /ci-local/
 

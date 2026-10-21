@@ -674,7 +674,8 @@ func fioProfile(tr core.TestRequirement) (string, error) {
 }
 
 // runFIO avoids Virtbench's fixed five-minute VM boot wait. FIO starts during
-// guest boot; this runner waits for every VM to be Running, then gathers results.
+// guest boot; this runner waits for every VM to be Running, then runs gather-results
+// with collect retries (virtbench SSH from the helper pod — not duplicated in harness).
 func runFIO(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error) {
 	if len(trs) == 0 {
 		return stages.RunHandle{}, fmt.Errorf("virtbench: no FIO test requirement")
@@ -877,7 +878,10 @@ func fioValidate(tr core.TestRequirement) error {
 		return err
 	}
 	_, err := fioTemplate(tr)
-	return err
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // stageFIOTemplate stages the embedded default or a caller-supplied custom

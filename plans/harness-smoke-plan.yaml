@@ -1,30 +1,56 @@
 schema_version: "1"
 name: harness-smoke
 description: >-
-  Internal smoke-scale selection covering all runtime tools in the
-  storage-cert-harness image. This is not a certification-scale run.
+  Internal smoke-scale selection for run-image-tests.sh / make run-harness-smoke.
+  All non-disruptive catalog TRs at minimal scale; excludes TR-VIRT-007 (HA /
+  node failure) and TR-VIRT-008 (node drain / cordon). Backend oc-edge-112.
 backend: oc-edge-112
 concurrency: 1
 select:
   ids:
-    - TR-VIRT-001  # Boot Storm; virtbench
-    - TR-STOR-006  # Provisioning Density; kube-burner-ocp
-    - TR-VIRT-010  # Snapshot Creation; kube-burner
-    - TR-VIRT-019  # Parallel VM Lifecycle; kube-burner-ocp
+    # - TR-STOR-002  # FIO storage IO; virtbench
+    - TR-STOR-006  # Provisioning density; kube-burner-ocp
+    - TR-VIRT-001  # Boot storm; virtbench
+    - TR-VIRT-004  # Live migration (minimal); kube-burner-ocp
+    - TR-VIRT-010  # VM snapshot; kube-burner
+    - TR-VIRT-013  # Per-node scale ceiling; virtbench
+    - TR-VIRT-018  # Clone at scale; virtbench
+    - TR-VIRT-019  # Parallel VM lifecycle; kube-burner-ocp
+    - TR-VIRT-027  # Snapshot depth per volume; kube-burner
 overrides:
-  TR-VIRT-001:
+  TR-STOR-002:
     num_vms: 3
+    concurrency: 3
+    profile: load-80
+    fio_runtime: 50
+    # Max collect wait ≈ (retries-1)*delay; budget ~170s post-VMI-ready + fio_runtime + 90s (smoke).
+    fio_collect_retries: 26
+    fio_collect_retry_delay: 15
   TR-STOR-006:
     workload: pvc-density
     iterations: 3
     claim_size: 256Mi
     qps: 5
     burst: 10
+  TR-VIRT-001:
+    num_vms: 3
+  TR-VIRT-004:
+    workload: virt-migration
+    iterations: 1
+    concurrency: 1
+    iteration_vms: 1
+    migration_qps: 1
   TR-VIRT-010:
     replicas: 3
     snapshot_count: 3
     namespace: harness-smoke-snap
     max_wait: 15m
+  TR-VIRT-013:
+    attempt_vms: 3
+    num_disks: 1
+  TR-VIRT-018:
+    iteration_clones: 3
+    use_snapshot: true
   TR-VIRT-019:
     workload: virt-parallel
     vms: 2
@@ -32,7 +58,10 @@ overrides:
     increment: 0
     data_volume_count: 1
     max_iterations: 1
-    skip_migration_job: false
+    skip_migration_job: true
     qps: 5
     burst: 10
-    timeout: 20m
+    timeout: 25m
+  TR-VIRT-027:
+    snapshot_count: 3
+    replicas: 1

@@ -351,16 +351,14 @@ CI writes `dist/harness-image.tar` for scan jobs.
 
 ### Local image build lock
 
-`build.sh`, `clean.sh`, `image-build.sh`, `image-build-local.sh`,
-`clean-image-cache.sh`, `image-contents-check.sh`, `image-scan-trivy.sh`,
-`image-scan-dive.sh`, `image-push.sh`, and `run-image-tests.sh` acquire an
-exclusive `flock` on `work/local-image.lock`. The lock serializes access to
-`bin/harness`, `work/local-image-ref`, image tarballs/tags, and the shared
-`dist/*-version.txt` metadata so a binary build, `make clean`, scan, push, or
-validation cannot overlap an image build or cache prune. `make build` and
-`make clean` use those scripts. `make image-build-local` rebuilds the binary
-while holding the lock (the child `build.sh` sees `LOCAL_IMAGE_LOCK_HELD=1` and
-does not re-acquire).
+`clean.sh`, `image-build.sh`, `image-build-local.sh`, `clean-image-cache.sh`,
+`image-contents-check.sh`, `image-scan-trivy.sh`, `image-scan-dive.sh`, and
+`image-push.sh` acquire an exclusive `flock` on `work/local-image.lock`. The
+lock serializes access to `work/local-image-ref`, image tarballs/tags, and the
+shared `dist/*-version.txt` metadata so `make clean`, scan, push, or validation
+cannot overlap an image build or cache prune. `make build` (`build.sh`) does
+**not** take this lock; only image-related scripts do. `make image-build-local`
+rebuilds the binary under the same image lock for the full rebuild.
 `make image-build-fresh` prunes cache and rebuilds in the same locked
 `image-build.sh` process (`IMAGE_BUILD_FRESH=1`). `image-build.sh` and
 `image-build-local.sh` call `invalidate_previous_local_image_build` before
@@ -370,10 +368,17 @@ always runs the local image with Podman and preserves its native platform;
 `image-contents-check.sh` and `run-image-tests.sh` refuse a stale ref when the
 named image is not present in Podman.
 
-The lock is released automatically when the owning process exits, including
-when a command fails. It is not a transaction: a failed build can leave partial
-engine layers, so rerun the relevant build before validation after an error.
-The lock file itself may remain on disk and is reused by subsequent runs.
+### Smoke run lock
+
+`run-image-tests.sh` acquires a separate exclusive `flock` on
+`work/smoke-run.lock` so two local smoke runs cannot overlap (log archive,
+`work/harness-smoke-work`, and `work/harness-smoke-report`). Smoke does not
+hold the image lock; `make build` and a long smoke run may proceed in parallel.
+
+Both locks are released automatically when the owning process exits, including
+when a command fails. The image lock is not a transaction: a failed build can
+leave partial engine layers, so rerun the relevant build before validation after
+an error. Lock files may remain on disk and are reused by subsequent runs.
 
 ## Job images (no Docker Hub)
 
