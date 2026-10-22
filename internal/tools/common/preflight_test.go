@@ -161,6 +161,39 @@ func assertSingleFindingLevel(t *testing.T, findings []core.Finding, want string
 	}
 }
 
+func TestToolIdentityCheckLegacyCatalogNames(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		expected core.ToolName
+		valid    bool
+	}{
+		{"", core.ToolKubeBurner, true},
+		{"kube-burner", core.ToolKubeBurner, true},
+		{"kube-burner (volumeSnapshotLatency)", core.ToolKubeBurner, true},
+		{"kube-burner-ocp", core.ToolKubeBurnerOCP, true},
+		{"kube-burner-ocp pvc-density", core.ToolKubeBurnerOCP, true},
+		{"kube-burner-ocp virt-migration", core.ToolKubeBurnerOCP, true},
+		{"kube-burner-ocp virt-parallel", core.ToolKubeBurnerOCP, true},
+		{"virtbench fio", core.ToolVirtbench, true},
+		{"virtbench datasource-clone --num-disks 2", core.ToolVirtbench, true},
+		{"kube-burner-ocp pvc-density", core.ToolKubeBurner, false},
+		{"kube-burner (volumeSnapshotLatency)", core.ToolKubeBurnerOCP, false},
+		{"virtbench fio", core.ToolKubeBurner, false},
+		{"other", core.ToolKubeBurner, false},
+	} {
+		t.Run(tc.name+"/"+string(tc.expected), func(t *testing.T) {
+			findings := ToolIdentityCheck(core.TestRequirement{ID: "TR-1", AutomationTool: tc.name}, tc.expected).Run(context.Background())
+			if tc.valid {
+				if len(findings) != 0 {
+					t.Fatalf("findings = %+v, want no identity error", findings)
+				}
+			} else {
+				assertSingleFindingLevel(t, findings, "error")
+			}
+		})
+	}
+}
+
 func TestIdentityStorageClassAndBinaryChecks(t *testing.T) {
 	identity := ToolIdentityCheck(core.TestRequirement{ID: "TR-1"}, core.ToolVirtbench)
 	if findings := identity.Run(context.Background()); len(findings) != 0 {
