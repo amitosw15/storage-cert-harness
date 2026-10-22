@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,17 +20,19 @@ func TestPreflightContinuesAfterInvalidParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 9 {
-		t.Fatalf("findings = %+v, want all 9 checks", got)
-	}
-	for i, level := range []string{"error", "info", "error", "error", "skip", "skip", "skip", "skip", "skip"} {
-		if got[i].Level != level {
-			t.Errorf("check %d = %+v, want %s", i, got[i], level)
+	for _, want := range []struct{ level, text string }{
+		{"error", "TR-VIRT-010 parameters:"},
+		{"info", "TR-VIRT-027 parameters valid"},
+		{"error", "storage_class required"},
+		{"error", "kube-burner"},
+		{"skip", "CDI VolumeImportSource populator"},
+		{"error", "expected exactly 1 TR"},
+	} {
+		if !slices.ContainsFunc(got, func(f core.Finding) bool { return f.Level == want.level && strings.Contains(f.Message, want.text) }) {
+			t.Errorf("findings = %+v, missing %s containing %q", got, want.level, want.text)
 		}
 	}
-	if !strings.Contains(got[1].Message, "TR-VIRT-027") {
-		t.Fatal("missing later TR's parameter check")
-	}
+
 }
 
 func TestPreflightSuccessfulSnapshot(t *testing.T) {

@@ -15,7 +15,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -47,44 +46,6 @@ const (
 // drainPreflight adds the drain-specific checks on top of the generic ones
 // (binary, storage_class): kubectl present, a target_node named, and a second
 // schedulable worker to live-migrate onto. Reports skips in replay.
-func drainPreflight(ctx context.Context, _ *core.RunCtx, trs []core.TestRequirement) []core.Finding {
-	var findings []core.Finding
-	replay := replayDir(trs) != ""
-	_, cliErr := exec.LookPath("kubectl")
-	if replay {
-		findings = append(findings, core.Finding{Level: "skip", Message: "kubectl on PATH: replay mode"})
-	} else if cliErr != nil {
-		findings = append(findings, core.Finding{Level: "error", Message: "kubectl not found on PATH (needed to drain the target node)"})
-	} else {
-		findings = append(findings, core.Finding{Level: "info", Message: "kubectl found on PATH"})
-	}
-	for _, tr := range trs {
-		if replay {
-			findings = append(findings, core.Finding{Level: "skip", Message: tr.ID + " target_node: replay mode"})
-		} else if target := strParamOr(tr, "target_node", ""); target == "" {
-			findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: %s requires a target_node param (the worker to drain)", tr.ID)})
-		} else {
-			findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " target_node=" + target})
-		}
-	}
-	if replay {
-		return append(findings, core.Finding{Level: "skip", Message: "schedulable workers for drain: replay mode"})
-	}
-	if cliErr != nil {
-		return append(findings, core.Finding{Level: "skip", Message: "schedulable workers for drain: kubectl not found on PATH"})
-	}
-	kc := kubeconfigOf(trs)
-	schedulable, _, err := listWorkers(ctx, kc)
-	if err != nil {
-		return append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: cannot list worker nodes: %v", err)})
-	}
-	if len(schedulable) < 2 {
-		findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: node drain needs >=2 schedulable workers (a migration target); found %d", len(schedulable))})
-	} else {
-		findings = append(findings, core.Finding{Level: "info", Message: fmt.Sprintf("virtbench: %d schedulable workers available for drain", len(schedulable))})
-	}
-	return findings
-}
 
 // --- Provision hook ----------------------------------------------------------
 

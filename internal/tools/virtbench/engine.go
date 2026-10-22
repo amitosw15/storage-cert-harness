@@ -70,76 +70,6 @@ var fioVMTemplate string
 // it still happens when the run ctx was cancelled.
 const teardownBudget = 120 * time.Second
 
-// --- Preflight ---------------------------------------------------------------
-
-type preflight struct{ sc Scenario }
-
-func (p preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) ([]core.Finding, error) {
-	var findings []core.Finding
-	// Replay grades pre-collected results — no binary or cluster needed.
-	dir := replayDir(trs)
-	if dir != "" {
-		if _, err := os.Stat(dir); err != nil {
-			findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: replay results_dir %q not accessible: %v", dir, err)})
-		} else {
-			findings = append(findings, core.Finding{Level: "info", Message: "virtbench: replay results_dir accessible: " + dir})
-		}
-	}
-
-	if dir != "" {
-		findings = append(findings, core.Finding{Level: "skip", Message: "virtbench CLI on PATH: replay mode"})
-		if len(p.sc.CommandCheck) > 0 {
-			findings = append(findings, core.Finding{Level: "skip", Message: "virtbench command " + p.sc.CommandCheck[0] + ": replay mode"})
-		}
-	} else if _, err := exec.LookPath(binary); err != nil {
-		findings = append(findings, core.Finding{Level: "error", Message: "virtbench CLI not found on PATH (install per https://portworx.github.io/kubevirt-benchmark/install/, or use replay mode via the results_dir param)"})
-		if len(p.sc.CommandCheck) > 0 {
-			findings = append(findings, core.Finding{Level: "skip", Message: "virtbench command " + p.sc.CommandCheck[0] + ": virtbench CLI not found on PATH"})
-		}
-	} else {
-		findings = append(findings, core.Finding{Level: "info", Message: "virtbench CLI found on PATH"})
-		if len(p.sc.CommandCheck) > 0 {
-			cmd := exec.CommandContext(ctx, binary, p.sc.CommandCheck...) // #nosec G204 -- command checks are declared by built-in scenarios.
-			if output, err := cmd.CombinedOutput(); err != nil {
-				findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: required command %q unavailable: %v: %s", p.sc.CommandCheck[0], err, strings.TrimSpace(string(output)))})
-			} else {
-				findings = append(findings, core.Finding{Level: "info", Message: "virtbench command available: " + p.sc.CommandCheck[0]})
-			}
-		}
-	}
-	for _, tr := range trs {
-		if dir == "" && usesSnapshot(tr) && strings.HasPrefix(p.sc.AutomationTool, "virtbench datasource-clone") {
-			clone, err := snapshotClonePreflight(ctx, rc, tr)
-			if err != nil {
-				findings = append(findings, core.Finding{Level: "error", Message: tr.ID + " snapshot clone: " + err.Error()})
-			} else {
-				bag.Set("snapshot_clone", clone)
-				findings = append(findings, clone.Selection.Finding())
-			}
-		}
-		if dir != "" {
-			findings = append(findings, core.Finding{Level: "skip", Message: tr.ID + " storage_class: replay mode"})
-		} else if sc := storageClass(rc, tr); sc == "" && !p.sc.StorageClassOptional {
-			findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: %s has no storage_class (select a --backend or set the TR 'storage_class' param)", tr.ID)})
-		} else {
-			findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " storage_class=" + sc})
-		}
-		if p.sc.Validate != nil {
-			if dir != "" {
-				findings = append(findings, core.Finding{Level: "skip", Message: tr.ID + " scenario parameters: replay mode"})
-			} else if err := p.sc.Validate(tr); err != nil {
-				findings = append(findings, core.Finding{Level: "error", Message: tr.ID + " scenario parameters: " + err.Error()})
-			} else {
-				findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " scenario parameters valid"})
-			}
-		}
-	}
-	if p.sc.Preflight != nil {
-		findings = append(findings, p.sc.Preflight(ctx, rc, trs)...)
-	}
-	return findings, nil
-}
-
 // --- Provision ---------------------------------------------------------------
 
 type provisioner struct{ sc Scenario }
@@ -437,7 +367,7 @@ func (t teardown) Teardown(_ context.Context, rc *core.RunCtx, bag *core.Bag) er
 	// uncordons the workers it cordoned).
 	if t.sc.Teardown != nil {
 		if err := t.sc.Teardown(ctx, rc, bag); err != nil {
-			rc.Logger.Warn("virtbench: scenario teardown failed", "tool", t.sc.AutomationTool, "err", err)
+			rc.Logger.Warn("virtbench: scenario teardown failed", "tool", t.sc.IntegrationName(), "err", err)
 		}
 	}
 
@@ -868,20 +798,6 @@ func fioVMIHasIP(item fioVMI) bool {
 		}
 	}
 	return false
-}
-
-func fioValidate(tr core.TestRequirement) error {
-	if _, _, err := fioVMRange(tr); err != nil {
-		return err
-	}
-	if _, err := fioProfile(tr); err != nil {
-		return err
-	}
-	_, err := fioTemplate(tr)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 // stageFIOTemplate stages the embedded default or a caller-supplied custom

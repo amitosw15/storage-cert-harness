@@ -85,7 +85,7 @@ func ParseResults(trID string, data map[string][]byte) (core.TestResult, error) 
 
 // parseResults normalizes configured snapshot metrics.
 func parseResults(trID string, data map[string][]byte, requestedSnapshots int) (core.TestResult, error) {
-	return parseResultsWithScenario(trID, data, requestedSnapshots, scenarioFor(trID))
+	return parseResultsWithScenario(trID, data, requestedSnapshots, snapshotScenarios[trID])
 }
 
 func parseResultsWithScenario(trID string, data map[string][]byte, requestedSnapshots int, scenario snapshotScenario) (core.TestResult, error) {

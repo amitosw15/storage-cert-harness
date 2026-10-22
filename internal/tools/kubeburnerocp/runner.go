@@ -49,13 +49,13 @@ func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []cor
 	cmds := make([]*exec.Cmd, len(trs))
 	seen := map[string]bool{}
 	for i, tr := range trs {
-		p := resolveParams([]core.TestRequirement{tr})
+		p := resolveParams(tr)
 		if err := p.validate(); err != nil {
 			runs[i] = kboRun{TRID: tr.ID, RunErr: err.Error()}
 			continue
 		}
 		runs[i] = kboRun{TRID: tr.ID, Workload: p.Workload}
-		runs[i].Iterations, _ = asInt(p.Raw["iterations"])
+		runs[i].Iterations, _ = core.AsInt(p.Raw["iterations"])
 		if seen[p.Workload] {
 			runs[i].Skipped = "duplicate workload in job; only the first runs (shared namespace)"
 			continue

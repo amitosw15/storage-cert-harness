@@ -7,7 +7,8 @@
   "schema_version": "2.0",
   "test_requirements": [
     {
-      "automation_tool": "virtbench fio",
+      "automation_tool": "virtbench",
+      "scenario": "fio",
       "category": "Data path",
       "checks": [],
       "checks_count": 0,
@@ -27,7 +28,7 @@
       "sla": [
         {
           "measured_by": [
-            "virtbench fio"
+            "virtbench"
           ],
           "metric": "read_latency",
           "percentile": "p99",
@@ -36,7 +37,7 @@
         },
         {
           "measured_by": [
-            "virtbench fio"
+            "virtbench"
           ],
           "metric": "write_latency",
           "percentile": "p99",
@@ -50,7 +51,7 @@
       "verified": "accepted"
     },
     {
-      "automation_tool": "kube-burner-ocp pvc-density",
+      "automation_tool": "kube-burner-ocp",
       "category": "Control path",
       "checks": [
         {
@@ -81,7 +82,7 @@
       "sla": [
         {
           "measured_by": [
-            "kube-burner-ocp pvc-density"
+            "kube-burner-ocp"
           ],
           "metric": "pvc_bind_latency",
           "percentile": "p99",
@@ -95,7 +96,8 @@
       "verified": "accepted"
     },
     {
-      "automation_tool": "virtbench datasource-clone --boot-storm",
+      "automation_tool": "virtbench",
+      "scenario": "datasource-clone --boot-storm",
       "category": "Scale",
       "checks": [],
       "checks_count": 0,
@@ -115,7 +117,7 @@
       "sla": [
         {
           "measured_by": [
-            "virtbench datasource-clone --boot-storm"
+            "virtbench"
           ],
           "metric": "vm_boot_time",
           "type": "duration"
@@ -127,7 +129,7 @@
       "verified": "accepted"
     },
     {
-      "automation_tool": "kube-burner-ocp virt-migration",
+      "automation_tool": "kube-burner-ocp",
       "category": "Scale",
       "checks": [
         {
@@ -153,7 +155,7 @@
       "sla": [
         {
           "measured_by": [
-            "kube-burner-ocp virt-migration"
+            "kube-burner-ocp"
           ],
           "metric": "total_migration_duration",
           "type": "duration",
@@ -166,7 +168,8 @@
       "verified": "accepted"
     },
     {
-      "automation_tool": "virtbench failure-recovery",
+      "automation_tool": "virtbench",
+      "scenario": "failure-recovery",
       "category": "Life-cycle",
       "checks": [
         {
@@ -216,7 +219,7 @@
       "sla": [
         {
           "measured_by": [
-            "virtbench failure-recovery"
+            "virtbench"
           ],
           "metric": "vm_ha_restart_time",
           "type": "duration",
@@ -229,7 +232,8 @@
       "verified": "accepted"
     },
     {
-      "automation_tool": "virtbench vm-ops drain-nodes",
+      "automation_tool": "virtbench",
+      "scenario": "vm-ops drain-nodes",
       "category": "Life-cycle",
       "checks": [
         {
@@ -254,7 +258,7 @@
       "sla": [
         {
           "measured_by": [
-            "virtbench vm-ops drain-nodes"
+            "virtbench"
           ],
           "metric": "evacuation_time",
           "type": "duration",
@@ -267,7 +271,7 @@
       "verified": "accepted"
     },
     {
-      "automation_tool": "kube-burner (volumeSnapshotLatency)",
+      "automation_tool": "kube-burner",
       "category": "Control path",
       "checks": [],
       "checks_count": 0,
@@ -298,7 +302,7 @@
       "sla": [
         {
           "measured_by": [
-            "kube-burner (volumeSnapshotLatency)"
+            "kube-burner"
           ],
           "metric": "snapshot_ready_time",
           "percentile": "p99",
@@ -312,7 +316,8 @@
       "verified": "accepted"
     },
     {
-      "automation_tool": "virtbench datasource-clone --single-node",
+      "automation_tool": "virtbench",
+      "scenario": "datasource-clone --single-node",
       "category": "Scale",
       "checks": [],
       "checks_count": 0,
@@ -334,7 +339,7 @@
       "sla": [
         {
           "measured_by": [
-            "virtbench datasource-clone --single-node"
+            "virtbench"
           ],
           "metric": "max_vms_per_node",
           "type": "count",
@@ -342,7 +347,7 @@
         },
         {
           "measured_by": [
-            "virtbench datasource-clone --single-node"
+            "virtbench"
           ],
           "metric": "max_luns_per_node",
           "type": "count",
@@ -355,7 +360,8 @@
       "verified": "accepted"
     },
     {
-      "automation_tool": "virtbench datasource-clone --num-disks 2",
+      "automation_tool": "virtbench",
+      "scenario": "datasource-clone --num-disks 2",
       "category": "Control path",
       "checks": [],
       "checks_count": 0,
@@ -367,6 +373,9 @@
           "default": 100,
           "required": true
         },
+        "num_disks": {
+          "default": 2
+        },
         "use_snapshot": {
           "default": true
         }
@@ -375,7 +384,7 @@
       "sla": [
         {
           "measured_by": [
-            "virtbench datasource-clone --num-disks 2"
+            "virtbench"
           ],
           "metric": "clone_duration",
           "percentile": "p99",
@@ -389,7 +398,7 @@
       "verified": "accepted"
     },
     {
-      "automation_tool": "kube-burner-ocp virt-parallel",
+      "automation_tool": "kube-burner-ocp",
       "category": "Life-cycle",
       "checks": [
         {
@@ -422,7 +431,7 @@
       "sla": [
         {
           "measured_by": [
-            "kube-burner-ocp virt-parallel"
+            "kube-burner-ocp"
           ],
           "metric": "lifecycle_completion_time",
           "type": "duration",

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -268,13 +269,14 @@ func TestPreflightChecksFIOCommand(t *testing.T) {
 		t.Fatalf("write fake virtbench: %v", err)
 	}
 	t.Setenv("PATH", dir)
-	findings, err := (preflight{sc: Scenario{CommandCheck: []string{"fio", "--help"}}}).Check(
-		context.Background(), &core.RunCtx{}, nil, nil,
-	)
+	trs := []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}}}
+	findings, err := checkPreflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
-	if len(findings) != 2 || findings[1].Level != "error" {
+	if !slices.ContainsFunc(findings, func(f core.Finding) bool {
+		return f.Level == "error" && strings.Contains(f.Message, "command")
+	}) {
 		t.Fatalf("findings = %+v, want FIO command error", findings)
 	}
 }
@@ -286,17 +288,13 @@ func TestPreflightUsesEmbeddedFIOP99Template(t *testing.T) {
 		t.Fatalf("write fake virtbench: %v", err)
 	}
 	t.Setenv("PATH", dir)
-	findings, err := (preflight{sc: Scenario{Validate: fioValidate}}).Check(
-		context.Background(), &core.RunCtx{}, nil, []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}}},
-	)
+	trs := []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}}}
+	findings, err := checkPreflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
-	if len(findings) != 3 {
-		t.Fatalf("findings = %+v, want binary, storage class, and parameter checks", findings)
-	}
 	for _, f := range findings {
-		if f.Level != "info" {
+		if f.Level == "error" {
 			t.Fatalf("findings = %+v, want all checks to pass", findings)
 		}
 	}
@@ -329,7 +327,7 @@ func TestScenarioEvaluatorLabelsFIOFleetP99(t *testing.T) {
 		{Name: "vms_total", Value: 2},
 		{Name: "read_latency", Value: 3, Unit: "ms", Percentile: "p99"},
 	}}
-	verdicts, err := (scenarioEvaluator{sc: Scenario{AutomationTool: "virtbench fio"}}).Evaluate(context.Background(), tr, result)
+	verdicts, err := (scenarioEvaluator{sc: Scenario{AutomationTool: core.ToolVirtbench, ScenarioName: WorkloadFIO}}).Evaluate(context.Background(), tr, result)
 	if err != nil {
 		t.Fatalf("evaluate fleet FIO: %v", err)
 	}
@@ -576,7 +574,7 @@ func TestFIOVMStates(t *testing.T) {
 
 func TestFIOUsesCustomRunnerOnly(t *testing.T) {
 	for _, sc := range scenarios {
-		if sc.AutomationTool == "virtbench fio" {
+		if sc.ScenarioName == WorkloadFIO {
 			if sc.Run == nil {
 				t.Error("FIO custom runner is nil")
 			}

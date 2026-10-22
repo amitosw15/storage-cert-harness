@@ -14,6 +14,7 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/tools/common"
 )
 
 type cloneSource struct {
@@ -230,5 +231,19 @@ func (c *snapshotClone) cleanup(ctx context.Context, rc *core.RunCtx) {
 		if _, err := clustercheck.SnapshotCommand(ctx, c.Selection.Kubeconfig, nil, "delete", "volumesnapshot", source.Name, "-n", source.Namespace, "--ignore-not-found", "--wait=false"); err != nil {
 			rc.Logger.Warn("virtbench: delete source snapshot", "name", source.Name, "err", err)
 		}
+	}
+}
+
+func snapshotCloneBinding(rc *core.RunCtx, bag *core.Bag, tr core.TestRequirement) common.PreflightCheck {
+	return common.PreflightCheck{
+		Name: tr.ID + " snapshot clone",
+		Run: func(ctx context.Context) []core.Finding {
+			clone, err := snapshotClonePreflight(ctx, rc, tr)
+			if err != nil {
+				return []core.Finding{{Level: "error", Message: tr.ID + " snapshot clone: " + err.Error()}}
+			}
+			bag.Set("snapshot_clone", clone)
+			return []core.Finding{clone.Selection.Finding()}
+		},
 	}
 }

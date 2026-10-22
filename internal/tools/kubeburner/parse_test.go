@@ -317,7 +317,7 @@ func TestPreflight_RequiresStorageClass(t *testing.T) {
 }
 
 func TestParams_ReplicaAndSnapshotCounts(t *testing.T) {
-	p := resolveParams([]core.TestRequirement{{Params: map[string]any{"replicas": 5, "snapshot_count": 3}}})
+	p := resolveParams(core.TestRequirement{Params: map[string]any{"replicas": 5, "snapshot_count": 3}})
 	if p.Replicas != 5 || p.SnapshotCount != 3 {
 		t.Fatalf("params = %+v, want replicas=5 snapshot_count=3", p)
 	}
@@ -332,17 +332,17 @@ func TestParams_ReplicaAndSnapshotCounts(t *testing.T) {
 }
 
 func TestParams_SnapshotCountDefaultsToReplicas(t *testing.T) {
-	p := resolveParams([]core.TestRequirement{{Params: map[string]any{"replicas": 3}}})
+	p := resolveParams(core.TestRequirement{Params: map[string]any{"replicas": 3}})
 	if p.Replicas != 3 || p.SnapshotCount != 3 || p.validate() != nil {
 		t.Fatalf("replica default = %+v, want valid replicas=3 snapshot_count=3", p)
 	}
 }
 
 func TestParams_TR027UsesCanonicalSnapshotNames(t *testing.T) {
-	p := resolveParams([]core.TestRequirement{{Params: map[string]any{
+	p := resolveParams(core.TestRequirement{Params: map[string]any{
 		"replicas":       1,
 		"snapshot_count": 250,
-	}}})
+	}})
 	if p.Replicas != 1 || p.SnapshotCount != 250 || !p.snapshotCountSet {
 		t.Fatalf("params = %+v, want replicas=1 snapshot_count=250", p)
 	}
@@ -352,10 +352,10 @@ func TestParams_TR027UsesCanonicalSnapshotNames(t *testing.T) {
 }
 
 func TestParams_TR027RequiresSingleSourceVolume(t *testing.T) {
-	p := resolveParams([]core.TestRequirement{{Params: map[string]any{
+	p := resolveParams(core.TestRequirement{Params: map[string]any{
 		"replicas":       2,
 		"snapshot_count": 250,
-	}}})
+	}})
 	if err := p.validateFor("TR-VIRT-027"); err == nil {
 		t.Fatal("TR-VIRT-027 accepted replicas=2, want single-source rejection")
 	}
@@ -476,7 +476,7 @@ func TestSnapshotPlansUseReplicaAndSnapshotCounts(t *testing.T) {
 		if replicas != tc.replicas || snapshotCount != tc.snapshotCount {
 			t.Errorf("%s counts = replicas=%d snapshot_count=%d, want %d and %d", tc.name, replicas, snapshotCount, tc.replicas, tc.snapshotCount)
 		}
-		if err := resolveParams([]core.TestRequirement{{Params: params}}).validate(); err != nil {
+		if err := resolveParams(core.TestRequirement{Params: params}).validate(); err != nil {
 			t.Errorf("%s has invalid counts: %v", tc.name, err)
 		}
 	}
@@ -584,7 +584,7 @@ func TestWriteConfig_EmbedsAssets(t *testing.T) {
 
 func TestWriteConfig_PreservesLegacySnapshotJob(t *testing.T) {
 	dir := t.TempDir()
-	p := resolveParams([]core.TestRequirement{{Params: map[string]any{"replicas": 2}}})
+	p := resolveParams(core.TestRequirement{Params: map[string]any{"replicas": 2}})
 	if _, err := writeConfig(dir, p); err != nil {
 		t.Fatalf("writeConfig: %v", err)
 	}

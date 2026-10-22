@@ -34,7 +34,7 @@ func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []cor
 	if resultsDir == "" {
 		return stages.RunHandle{}, fmt.Errorf("kube-burner: results_dir missing (provision first)")
 	}
-	p := resolveParams(trs)
+	p := resolveParams(tr)
 	if configured, ok := core.GetAs[Params](bag, "params"); ok {
 		p.UsePopulator = configured.UsePopulator
 	}
@@ -168,7 +168,7 @@ func (parser) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, logs core.
 	if !ok {
 		return nil, fmt.Errorf("kube-burner: params missing (preflight first)")
 	}
-	res, err := parseResultsWithScenario(trID, logs.Data, p.SnapshotCount, scenarioFor(trID))
+	res, err := parseResultsWithScenario(trID, logs.Data, p.SnapshotCount, snapshotScenarios[trID])
 	if err != nil {
 		return nil, err
 	}

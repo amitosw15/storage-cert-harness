@@ -1,40 +1,18 @@
 package kubeburnerocp
 
 import (
-	"fmt"
-	"strconv"
-
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/tools/common"
 )
 
-type argType int
-
-const (
-	argString argType = iota
-	argInt
-	argBool
-)
-
-// argSpec declares one CLI flag sourced from a plan param, with its expected type
-// (like a cobra IntVar/StringVar/BoolVar, but for building an outbound CLI).
-// Required unless optional; bool renders as --flag=value, others as --flag value.
-type argSpec struct {
-	flag     string
-	param    string
-	typ      argType
-	optional bool
-}
-
-// workloadSpec is the per-workload contract: subcommand, the storage-class flag
-// (value from the backend), typed flags, and cluster prerequisites. Adding a
-// workload is a new entry here — no engine-code changes.
+// workloadSpec declares a workload CLI, result mapping, and prerequisites.
 type workloadSpec struct {
-	sub        string
-	scFlag     string
-	args       []argSpec
-	prereqs    []clustercheck.Capability
-	hostBins   []string
-	mapResults resultMapper
+	sub          string
+	scFlag       string
+	args         []argSpec
+	requirements common.WorkloadRequirements
+	mapResults   resultMapper
 }
 
 var workloadSpecs = map[string]workloadSpec{
@@ -59,8 +37,10 @@ var workloadSpecs = map[string]workloadSpec{
 			{flag: "--migration-qps", param: "migration_qps", typ: argInt, optional: true},
 			{flag: "--worker-node", param: "worker_node", typ: argString, optional: true},
 		},
-		prereqs:  []clustercheck.Capability{clustercheck.KubeVirt, clustercheck.CDI},
-		hostBins: []string{"virtctl"},
+		requirements: common.WorkloadRequirements{
+			Capabilities: []clustercheck.Capability{clustercheck.KubeVirt, clustercheck.CDI},
+			Binaries:     []common.BinaryRequirement{{Name: "virtctl", Workload: WorkloadVirtMigration}},
+		},
 	},
 	WorkloadVirtParallel: {
 		sub:        "virt-parallel",
@@ -82,74 +62,19 @@ var workloadSpecs = map[string]workloadSpec{
 			{flag: "--skip-restart-job", param: "skip_restart_job", typ: argBool, optional: true},
 			{flag: "--skip-snapshot-job", param: "skip_snapshot_job", typ: argBool, optional: true},
 		},
-		prereqs: []clustercheck.Capability{clustercheck.KubeVirt, clustercheck.CDI},
+		requirements: common.WorkloadRequirements{
+			Capabilities: []clustercheck.Capability{clustercheck.KubeVirt, clustercheck.CDI},
+		},
 	},
 }
 
-// globalArgs are optional kube-burner-ocp flags shared by every workload.
-var globalArgs = []argSpec{
-	{flag: "--qps", param: "qps", typ: argInt, optional: true},
-	{flag: "--burst", param: "burst", typ: argInt, optional: true},
-	{flag: "--gc", param: "gc", typ: argBool, optional: true},
-	{flag: "--timeout", param: "timeout", typ: argString, optional: true},
-}
-
-// buildCLIArgs renders a workload's subcommand + typed flags from the plan params
-// (a missing required param fails; a type mismatch fails), plus shared global
-// flags and the backend storage class.
-func buildCLIArgs(p Params, storageClass string) ([]string, error) {
-	spec, ok := workloadSpecs[p.Workload]
-	if !ok {
-		return nil, fmt.Errorf("kube-burner-ocp: unknown workload %q", p.Workload)
-	}
-	args := []string{spec.sub}
-	for _, set := range [][]argSpec{spec.args, globalArgs} {
-		for _, a := range set {
-			seg, err := renderArg(p.Raw, a)
-			if err != nil {
-				return nil, err
-			}
-			args = append(args, seg...)
-		}
-	}
-	args = append(args, "--local-indexing")
-	if spec.scFlag != "" {
-		if storageClass == "" {
-			return nil, fmt.Errorf("kube-burner-ocp: workload %q requires storage_class (pass --backends/--backend)", p.Workload)
-		}
-		args = append(args, spec.scFlag, storageClass)
-	}
-	return args, nil
-}
-
-// renderArg validates the param against its declared type and returns its CLI
-// segment(s); nil when an optional param is absent.
-func renderArg(raw map[string]any, a argSpec) ([]string, error) {
-	v, present := raw[a.param]
-	if !present {
-		if a.optional {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("kube-burner-ocp: missing required param %q", a.param)
-	}
-	switch a.typ {
-	case argInt:
-		n, ok := asInt(v)
-		if !ok {
-			return nil, fmt.Errorf("kube-burner-ocp: param %q must be an integer", a.param)
-		}
-		return []string{a.flag, strconv.Itoa(n)}, nil
-	case argBool:
-		b, ok := asBool(v)
-		if !ok {
-			return nil, fmt.Errorf("kube-burner-ocp: param %q must be a boolean", a.param)
-		}
-		return []string{a.flag + "=" + strconv.FormatBool(b)}, nil
-	default:
-		s, ok := asString(v)
-		if !ok || s == "" {
-			return nil, fmt.Errorf("kube-burner-ocp: param %q must be a non-empty string", a.param)
-		}
-		return []string{a.flag, s}, nil
-	}
+var preflightStage = common.Preflight[Params]{
+	Tool:    core.ToolKubeBurnerOCP,
+	Resolve: resolveParams,
+	Requirements: common.WorkloadRequirements{
+		Capabilities: []clustercheck.Capability{clustercheck.RequiredKubeCLI},
+	},
+	Workload: func(_ core.TestRequirement, params Params) common.WorkloadRequirements {
+		return workloadSpecs[params.Workload].requirements
+	},
 }

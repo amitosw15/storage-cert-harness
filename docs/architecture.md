@@ -46,6 +46,11 @@ Every stage method takes `context.Context` (cancellation/timeout) and a
 namespace Provision made, the Job name Run produced, etc.). The Bag is
 deliberately not `context.Value`.
 
+Every tool pipeline completes preflight before shared run/group setup starts.
+Only validated executions enter shared setup, retaining their Bag for the
+scheduled stages. Returned teardown errors add separate error verdicts and
+certification-blocking incidents while preserving original test results.
+
 ## Evaluation
 
 `ResultParser` emits a normalized `TestResult` keyed by TR id: `Metrics` (with
@@ -62,6 +67,10 @@ outcome) feed capability/suite/scenario checks. The grader scores a TR into
   `expectation` is always surfaced in the verdict reason.
 - A TR whose `automation_tool` is empty/`manual`/unregistered never runs — the
   orchestrator emits skip verdicts (not-scorable) before scheduling.
+- Shipped catalog `automation_tool` values come from the closed tool enum.
+  VirtBench TRs carry a separate `scenario` selector; KubeBurner OCP workloads
+  stay in TR parameters. The CI catalog test checks every shipped TR against
+  its registered integration.
 - A `ToolIntegration` may supply a custom `Evaluator` keyed by TR id that fully
   owns scoring for TRs that don't reduce to the built-in rules.
 

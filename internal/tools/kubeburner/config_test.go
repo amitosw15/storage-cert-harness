@@ -23,7 +23,7 @@ func TestSnapshotJobsMarkerIsYAMLComment(t *testing.T) {
 }
 
 func TestResolveParamsUsesKBCanonicalDiskSize(t *testing.T) {
-	p := resolveParams([]core.TestRequirement{{Params: map[string]any{"disk_size": "2Gi"}}})
+	p := resolveParams(core.TestRequirement{Params: map[string]any{"disk_size": "2Gi"}})
 	if p.DiskSize != "2Gi" {
 		t.Fatalf("disk size = %q, want KB value", p.DiskSize)
 	}

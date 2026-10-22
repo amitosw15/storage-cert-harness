@@ -1,9 +1,47 @@
 package kubeburnerocp
 
 import (
+	"context"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
+
+func TestWorkloadPreflightContinuesAfterInvalidParameters(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	findings, err := (preflight{}).Check(context.Background(), nil, core.NewBag(), []core.TestRequirement{
+		{ID: "INVALID", Params: map[string]any{"workload": "unknown"}},
+		{ID: "MIGRATION", Params: map[string]any{"workload": WorkloadVirtMigration, "iteration_vms": 2}},
+		{ID: "PARALLEL", Params: map[string]any{"workload": WorkloadVirtParallel}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		`INVALID parameters: kube-burner-ocp: unknown workload "unknown"`,
+		`MIGRATION parameters: kube-burner-ocp: missing required param "iterations"`,
+		"PARALLEL parameters valid",
+		"storage_class required",
+		`needs "kube-burner-ocp" on PATH`,
+		`needs "virtctl" on PATH`,
+		"cluster checks require kubectl or oc",
+		"kubevirts.kubevirt.io: neither kubectl nor oc found",
+		"datavolumes.cdi.kubevirt.io: neither kubectl nor oc found",
+	} {
+		count := 0
+		for _, finding := range findings {
+			if strings.Contains(finding.Message, fragment) {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("findings = %+v, want %q exactly once; got %d", findings, fragment, count)
+		}
+	}
+
+}
 
 func TestBuildCLIArgsPVCDensity(t *testing.T) {
 	p := Params{

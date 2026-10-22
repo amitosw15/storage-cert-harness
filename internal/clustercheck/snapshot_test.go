@@ -104,6 +104,83 @@ func TestResolveSnapshotAmbiguity(t *testing.T) {
 	}
 }
 
+func TestResolveSnapshotRequiresStorageClass(t *testing.T) {
+	dir := snapshotCLI(t)
+	selection, err := ResolveSnapshot(context.Background(), "", "nondefault", "", true)
+	if err == nil || !strings.Contains(err.Error(), "storage_class is required") {
+		t.Fatalf("selection = %+v, error = %v, want missing storage class", selection, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "commands")); !os.IsNotExist(err) {
+		t.Fatalf("cluster commands ran without a storage class: %v", err)
+	}
+}
+
+func TestResolveSnapshotRequiresClusterCLI(t *testing.T) {
+	snapshotCLI(t)
+	t.Setenv("PATH", t.TempDir())
+	_, err := ResolveSnapshot(context.Background(), "backend", "", "", false)
+	if err == nil || !strings.Contains(err.Error(), "neither kubectl nor oc found") {
+		t.Fatalf("error = %v, want missing cluster CLI", err)
+	}
+}
+
+func TestResolveSnapshotVMProfileFallback(t *testing.T) {
+	dir := snapshotCLI(t)
+	t.Setenv("TEST_PROFILE", "")
+	selection, err := ResolveSnapshot(context.Background(), "backend", "", "", true)
+	if err != nil || selection.SnapshotClass != "default" {
+		t.Fatalf("selection = %+v, error = %v, want default class", selection, err)
+	}
+	commands, err := os.ReadFile(filepath.Join(dir, "commands"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(commands), "get storageprofile backend") || !strings.Contains(string(commands), "get volumesnapshotclass -o json") {
+		t.Fatalf("VM fallback did not inspect profile and class list: %s", commands)
+	}
+}
+
+func TestResolveSnapshotRejectsMalformedVMProfile(t *testing.T) {
+	dir := snapshotCLI(t)
+	t.Setenv("TEST_PROFILE", "{")
+	_, err := ResolveSnapshot(context.Background(), "backend", "", "", true)
+	if err == nil || !strings.Contains(err.Error(), "decode storage profile") {
+		t.Fatalf("error = %v, want malformed profile error", err)
+	}
+	commands, err := os.ReadFile(filepath.Join(dir, "commands"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(commands), "get volumesnapshotclass") {
+		t.Fatalf("continued after malformed profile: %s", commands)
+	}
+}
+
+func TestResolveSnapshotDirectIgnoresVMProfile(t *testing.T) {
+	dir := snapshotCLI(t)
+	t.Setenv("TEST_PROFILE", "{")
+	selection, err := ResolveSnapshot(context.Background(), "backend", "", "", false)
+	if err != nil || selection.SnapshotClass != "default" {
+		t.Fatalf("selection = %+v, error = %v, want default class", selection, err)
+	}
+	commands, err := os.ReadFile(filepath.Join(dir, "commands"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(commands), "get storageprofile") {
+		t.Fatalf("direct snapshot consulted VM profile: %s", commands)
+	}
+}
+
+func TestResolveSnapshotRejectsMalformedClassList(t *testing.T) {
+	snapshotCLI(t)
+	t.Setenv("TEST_CLASSES", "{")
+	_, err := ResolveSnapshot(context.Background(), "backend", "", "", false)
+	if err == nil || !strings.Contains(err.Error(), "decode get volumesnapshotclass") {
+		t.Fatalf("error = %v, want malformed class list error", err)
+	}
+}
+
 func TestPrepareVMStorageIsIsolated(t *testing.T) {
 	dir := snapshotCLI(t)
 	s := SnapshotSelection{StorageClass: "backend", SnapshotClass: "nondefault", Kubeconfig: "/test/kubeconfig"}

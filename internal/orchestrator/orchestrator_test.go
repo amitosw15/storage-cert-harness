@@ -57,16 +57,22 @@ type recRunner struct {
 	rec  *recorder
 }
 
-func (r recRunner) Run(_ context.Context, _ *core.RunCtx, _ *core.Bag, _ []core.TestRequirement) (stages.RunHandle, error) {
+func (r *recRunner) Check(context.Context, *core.RunCtx, *core.Bag, []core.TestRequirement) ([]core.Finding, error) {
+	r.rec.add("preflight:" + r.name)
+	return nil, nil
+}
+
+func (r *recRunner) Run(_ context.Context, _ *core.RunCtx, _ *core.Bag, _ []core.TestRequirement) (stages.RunHandle, error) {
 	r.rec.add("job:" + r.name)
 	return stages.RunHandle{ID: r.name}, nil
 }
 
 type recSetup struct {
-	scope stages.SetupScope
-	key   string
-	rec   *recorder
-	fail  bool
+	scope       stages.SetupScope
+	key         string
+	rec         *recorder
+	fail        bool
+	teardownErr error
 }
 
 func (s recSetup) SetupInfo() stages.SetupInfo { return stages.SetupInfo{Scope: s.scope, Key: s.key} }
@@ -86,18 +92,16 @@ func (s recSetup) Setup(_ context.Context, _ *core.RunCtx, trs []core.TestRequir
 
 func (s recSetup) Teardown(_ context.Context, _ *core.RunCtx, _ []core.TestRequirement) error {
 	s.rec.add(fmt.Sprintf("teardown:%s/%s", s.scope, s.key))
-	return nil
+	return s.teardownErr
 }
 
-// TestScopedSetupOrderingAndFailure exercises run/group setup: each runs once,
-// ordered run→group→jobs→group-teardown→run-teardown; a group whose setup fails
-// errors its TRs and skips their jobs without tearing that group down.
+// TestScopedSetupOrderingAndFailure verifies preflight, setup, execution, and reverse teardown ordering.
 func TestScopedSetupOrderingAndFailure(t *testing.T) {
 	rec := &recorder{}
 	// Two tools share group gA (setup succeeds); tool t3 is in group gB (fails).
-	registry.Register(stages.ToolIntegration{Name: "t1", Provides: []string{"a"}, Runner: recRunner{"t1", rec}, SetupGroups: []string{"gA"}})
-	registry.Register(stages.ToolIntegration{Name: "t2", Provides: []string{"b"}, Runner: recRunner{"t2", rec}, SetupGroups: []string{"gA"}})
-	registry.Register(stages.ToolIntegration{Name: "t3", Provides: []string{"c"}, Runner: recRunner{"t3", rec}, SetupGroups: []string{"gB"}})
+	registry.Register(stages.ToolIntegration{Name: "t1", Provides: []string{"a"}, Preflight: &recRunner{name: "t1", rec: rec}, Runner: &recRunner{name: "t1", rec: rec}, SetupGroups: []string{"gA"}})
+	registry.Register(stages.ToolIntegration{Name: "t2", Provides: []string{"b"}, Preflight: &recRunner{name: "t2", rec: rec}, Runner: &recRunner{name: "t2", rec: rec}, SetupGroups: []string{"gA"}})
+	registry.Register(stages.ToolIntegration{Name: "t3", Provides: []string{"c"}, Preflight: &recRunner{name: "t3", rec: rec}, Runner: &recRunner{name: "t3", rec: rec}, SetupGroups: []string{"gB"}})
 	registry.RegisterSetup(recSetup{scope: stages.ScopeRun, key: "r", rec: rec})
 	registry.RegisterSetup(recSetup{scope: stages.ScopeGroup, key: "gA", rec: rec})
 	registry.RegisterSetup(recSetup{scope: stages.ScopeGroup, key: "gB", rec: rec, fail: true})
@@ -130,9 +134,13 @@ func TestScopedSetupOrderingAndFailure(t *testing.T) {
 	if rec.index("setup:group/gA(a,b)") < 0 {
 		t.Errorf("gA setup should receive TRs a,b; events=%v", rec.events)
 	}
-	// Ordering: run setup first; group setup before both jobs; teardown after both
-	// jobs; group teardown before run teardown.
+	// Shared setup follows all preflights; teardown follows the jobs in reverse order.
 	runSetup := rec.index("setup:run/r")
+	for _, name := range []string{"t1", "t2", "t3"} {
+		if index := rec.index("preflight:" + name); index < 0 || index >= runSetup {
+			t.Errorf("%s preflight must precede shared setup; events=%v", name, rec.events)
+		}
+	}
 	gaSetup := rec.index("setup:group/gA")
 	j1, j2 := rec.index("job:t1"), rec.index("job:t2")
 	gaDown := rec.index("teardown:group/gA")

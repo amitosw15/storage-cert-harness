@@ -11,7 +11,11 @@
       "title": "VDI Ready badge: VM cloning at scale",
       "partner_level": 3,
       "verified": "unverified",
-      "automation_tool": "virtbench datasource-clone --num-disks 2",
+      "automation_tool": "virtbench",
+      "scenario": "datasource-clone --num-disks 2",
+      "params": {
+        "num_disks": { "default": 2 }
+      },
       "sla_status": "defined",
       "sla_count": 1,
       "checks_status": "defined",

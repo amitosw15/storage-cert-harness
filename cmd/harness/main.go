@@ -188,6 +188,9 @@ func newPreflightCmd() *cobra.Command {
 			byTool := map[string][]core.TestRequirement{}
 			for _, tr := range trs {
 				key := tr.AutomationTool
+				if integration, ok := orchestrator.ResolveTool(tr); ok {
+					key = integration.Name
+				}
 				if tr.Variant != "" {
 					key = core.ExecutionLabel(key+":"+tr.ID, tr.Variant)
 				}
