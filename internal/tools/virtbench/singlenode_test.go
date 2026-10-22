@@ -59,7 +59,8 @@ func tr013Bars() []core.SLA {
 // DeriveMetrics hook wired in.
 func singleNodeEvaluator() scenarioEvaluator {
 	return scenarioEvaluator{sc: Scenario{
-		AutomationTool: "virtbench datasource-clone --single-node",
+		AutomationTool: core.ToolVirtbench,
+		Scenario:       string(WorkloadSingleNodeCeiling),
 		DeriveMetrics:  singleNodeLunMetric,
 	}}
 }
@@ -71,7 +72,8 @@ func singleNodeEvaluator() scenarioEvaluator {
 func TestSingleNodeCeilingComputesLuns(t *testing.T) {
 	tr := core.TestRequirement{
 		ID:             "TR-VIRT-013",
-		AutomationTool: "virtbench datasource-clone --single-node",
+		AutomationTool: core.ToolVirtbench,
+		Scenario:       string(WorkloadSingleNodeCeiling),
 		SLAs:           tr013SLAs(),
 		Bars:           tr013Bars(),
 		Params:         map[string]any{"num_disks": 2},
@@ -108,7 +110,8 @@ func TestSingleNodeCeilingComputesLuns(t *testing.T) {
 func TestSingleNodeCeilingBelowThresholdFails(t *testing.T) {
 	tr := core.TestRequirement{
 		ID:             "TR-VIRT-013",
-		AutomationTool: "virtbench datasource-clone --single-node",
+		AutomationTool: core.ToolVirtbench,
+		Scenario:       string(WorkloadSingleNodeCeiling),
 		SLAs:           tr013SLAs(),
 		Bars:           tr013Bars(),
 	}

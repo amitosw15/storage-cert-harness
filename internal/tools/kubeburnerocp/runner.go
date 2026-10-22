@@ -14,30 +14,15 @@ import (
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
-// kboRun records one workload execution (one TR) so Collect/Parse can handle a
-// job that bundles several kube-burner TRs.
-type kboRun struct {
-	Iterations int // resolved plan count, checked against the PVC-density job summary
-	TRID       string
-	Workload   string
-	Subdir     string
-	RunErr     string
-	Skipped    string
-}
-
-type runner struct{}
-
-func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error) {
-	if len(trs) == 0 {
-		return stages.RunHandle{}, fmt.Errorf("kube-burner-ocp: no TRs to run")
+func (s *session) Run(ctx context.Context, rc *core.RunCtx) error {
+	if len(s.executions) == 0 {
+		return fmt.Errorf("kube-burner-ocp: no TRs to run (preflight first)")
 	}
-
-	resultsDir, _ := core.GetAs[string](bag, "results_dir")
+	resultsDir := s.resultsDir
 	if resultsDir == "" {
-		return stages.RunHandle{}, fmt.Errorf("kube-burner-ocp: results_dir missing (provision first)")
+		return fmt.Errorf("kube-burner-ocp: results_dir missing (provision first)")
 	}
 	sc := ""
 	if rc.Backend != nil {
@@ -45,17 +30,16 @@ func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []cor
 	}
 
 	// Per-TR errors are isolated (recorded, not fatal); a repeated workload is skipped (shared namespace).
-	runs := make([]kboRun, len(trs))
-	cmds := make([]*exec.Cmd, len(trs))
+	runs := s.executions
+	cmds := make([]*exec.Cmd, len(runs))
 	seen := map[string]bool{}
-	for i, tr := range trs {
-		p := resolveParams([]core.TestRequirement{tr})
-		if err := p.validate(); err != nil {
-			runs[i] = kboRun{TRID: tr.ID, RunErr: err.Error()}
+	for i := range runs {
+		tr := runs[i].Requirement.TR
+		p := runs[i].Requirement.Params
+		if err := runs[i].Requirement.Err; err != nil {
+			runs[i].RunErr = err.Error()
 			continue
 		}
-		runs[i] = kboRun{TRID: tr.ID, Workload: p.Workload}
-		runs[i].Iterations, _ = asInt(p.Raw["iterations"])
 		if seen[p.Workload] {
 			runs[i].Skipped = "duplicate workload in job; only the first runs (shared namespace)"
 			continue
@@ -92,22 +76,21 @@ func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []cor
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			rc.Logger.Info("kube-burner-ocp: running", "tr", runs[i].TRID, "workload", runs[i].Workload)
+			rc.Logger.Info("kube-burner-ocp: running", "tr", runs[i].Requirement.TR.ID, "workload", runs[i].Requirement.Params.Workload)
 			if err := cmds[i].Run(); err != nil {
 				runs[i].RunErr = err.Error()
-				rc.Logger.Warn("kube-burner-ocp: run failed", "tr", runs[i].TRID, "err", err)
+				rc.Logger.Warn("kube-burner-ocp: run failed", "tr", runs[i].Requirement.TR.ID, "err", err)
 			}
 		}(i)
 	}
 	wg.Wait()
 
-	bag.Set("kbo_runs", runs)
-	return stages.RunHandle{ID: "kube-burner-ocp"}, nil
+	return nil
 }
 
 // buildRunCmd runs kube-burner-ocp from the host PATH, writing into resultsDir/<subdir>.
 func buildRunCmd(ctx context.Context, rc *core.RunCtx, args []string, resultsDir, subdir string) (*exec.Cmd, error) {
-	path, err := exec.LookPath("kube-burner-ocp")
+	path, err := exec.LookPath(string(core.ToolKubeBurnerOCP))
 	if err != nil {
 		return nil, fmt.Errorf("kube-burner-ocp: kube-burner-ocp not on PATH: %w", err)
 	}
@@ -117,10 +100,11 @@ func buildRunCmd(ctx context.Context, rc *core.RunCtx, args []string, resultsDir
 	return cmd, nil
 }
 
-type collector struct{}
-
-func (collector) Collect(_ context.Context, rc *core.RunCtx, bag *core.Bag, _ stages.RunHandle) (core.LogBundle, error) {
-	runs, _ := core.GetAs[[]kboRun](bag, "kbo_runs")
+func (s *session) Collect(_ context.Context, rc *core.RunCtx) (core.LogBundle, error) {
+	runs := s.executions
+	if runs == nil {
+		return core.LogBundle{}, fmt.Errorf("kube-burner-ocp: parameters missing (preflight first)")
+	}
 
 	data := map[string][]byte{}
 	var refs []string
@@ -132,18 +116,18 @@ func (collector) Collect(_ context.Context, rc *core.RunCtx, bag *core.Bag, _ st
 			continue
 		}
 		if r.Subdir == "" && r.RunErr != "" {
-			rc.Logger.Warn("kube-burner-ocp: run produced no result directory", "tr", r.TRID, "err", r.RunErr)
+			rc.Logger.Warn("kube-burner-ocp: run produced no result directory", "tr", r.Requirement.TR.ID, "err", r.RunErr)
 			continue
 		}
 		m, files, err := findCollectedMetrics(r.Subdir)
 		if err != nil {
-			rc.Logger.Warn("kube-burner-ocp: no results collected", "tr", r.TRID, "err", err)
+			rc.Logger.Warn("kube-burner-ocp: no results collected", "tr", r.Requirement.TR.ID, "err", err)
 			continue // Parse emits a fail verdict for this TR
 		}
 		refs = append(refs, files...)
-		refsByTR[r.TRID] = append(refsByTR[r.TRID], files...)
+		refsByTR[r.Requirement.TR.ID] = append(refsByTR[r.Requirement.TR.ID], files...)
 		for name, content := range m {
-			data[r.TRID+"/"+name] = content
+			data[r.Requirement.TR.ID+"/"+name] = content
 		}
 	}
 	rc.Logger.Info("kube-burner-ocp: collected results", "trs", len(runs))
@@ -186,19 +170,20 @@ func findCollectedMetrics(root string) (map[string][]byte, []string, error) {
 	return data, paths, nil
 }
 
-type parser struct{}
-
-func (parser) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, logs core.LogBundle) ([]core.TestResult, error) {
-	runs, _ := core.GetAs[[]kboRun](bag, "kbo_runs")
+func (s *session) Parse(_ context.Context, _ *core.RunCtx, logs core.LogBundle) ([]core.TestResult, error) {
+	runs := s.executions
+	if runs == nil {
+		return nil, fmt.Errorf("kube-burner-ocp: parameters missing (preflight first)")
+	}
 	var out []core.TestResult
 	for _, r := range runs {
 		if r.Skipped != "" {
 			raw, _ := json.Marshal(map[string]string{"skipped": r.Skipped})
-			out = append(out, core.TestResult{TRID: r.TRID, Native: core.OutcomeSkip, Raw: raw})
+			out = append(out, core.TestResult{TRID: r.Requirement.TR.ID, Native: core.OutcomeSkip, Raw: raw})
 			continue
 		}
 		sub := map[string][]byte{}
-		prefix := r.TRID + "/"
+		prefix := r.Requirement.TR.ID + "/"
 		for k, v := range logs.Data {
 			if strings.HasPrefix(k, prefix) {
 				sub[strings.TrimPrefix(k, prefix)] = v
@@ -211,18 +196,19 @@ func (parser) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, logs core.
 				reason = r.RunErr
 			}
 			raw, _ := json.Marshal(map[string]string{"error": reason})
-			out = append(out, core.TestResult{TRID: r.TRID, Native: core.OutcomeFail, Raw: raw})
+			out = append(out, core.TestResult{TRID: r.Requirement.TR.ID, Native: core.OutcomeFail, Raw: raw})
 			continue
 		}
 
-		res, err := ParseResults(r.Workload, r.TRID, sub)
+		res, err := ParseResults(r.Requirement.Params.Workload, r.Requirement.TR.ID, sub)
 		if err != nil {
 			return nil, err
 		}
-		if r.Workload == WorkloadPVCDensity {
+		if r.Requirement.Params.Workload == WorkloadPVCDensity {
 			matched := false
+			iterations, _ := core.AsInt(r.Requirement.Params.Raw["iterations"])
 			for _, m := range res.Metrics {
-				if m.Name == "pvc_requested_count" && r.Iterations > 0 && m.Value == float64(r.Iterations) {
+				if m.Name == "pvc_requested_count" && iterations > 0 && m.Value == float64(iterations) {
 					matched = true
 				}
 			}
@@ -236,9 +222,7 @@ func (parser) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, logs core.
 	return out, nil
 }
 
-type teardown struct{}
-
 // Teardown relies on each workload's native gc/cleanup.
-func (teardown) Teardown(_ context.Context, _ *core.RunCtx, _ *core.Bag) error {
+func (*session) Teardown(_ context.Context, _ *core.RunCtx) error {
 	return nil
 }

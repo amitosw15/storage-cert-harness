@@ -347,11 +347,16 @@ func runnable(tr core.TestRequirement) bool {
 	return ok
 }
 
-// ResolveTool binds a TR to its integration: an exact automation_tool == Name
-// match first, then the integration that declares it Provides the TR id. Exported
+// ResolveTool binds a TR to its integration: a scenario key or tool name match
+// first, then the integration that declares it Provides the TR id. Exported
 // so CLI subcommands (preflight) resolve tools identically to a run. See
 // registry.ForTRID.
 func ResolveTool(tr core.TestRequirement) (stages.ToolIntegration, bool) {
+	if tr.Scenario != "" {
+		if t, ok := registry.Get(tr.AutomationTool + " " + tr.Scenario); ok {
+			return t, true
+		}
+	}
 	if t, ok := registry.Get(tr.AutomationTool); ok {
 		return t, true
 	}
@@ -550,10 +555,11 @@ func groupByTool(trs []core.TestRequirement, sched map[string]config.ToolSchedul
 	byTool := map[string][]core.TestRequirement{}
 	order := []string{}
 	for _, tr := range trs {
-		if _, ok := byTool[tr.AutomationTool]; !ok {
-			order = append(order, tr.AutomationTool)
+		integration, _ := resolveTool(tr)
+		if _, ok := byTool[integration.Name]; !ok {
+			order = append(order, integration.Name)
 		}
-		byTool[tr.AutomationTool] = append(byTool[tr.AutomationTool], tr)
+		byTool[integration.Name] = append(byTool[integration.Name], tr)
 	}
 	var jobs []job
 	for _, tool := range order {
@@ -675,73 +681,61 @@ func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verd
 	if !ok {
 		return errTRs(j.trs, fmt.Sprintf("tool %q not registered", j.tool)), nil
 	}
-	bag := core.NewBag()
+	if ti.NewSession == nil {
+		return errTRs(j.trs, "tool has no session factory"), nil
+	}
+	session := ti.NewSession()
 
-	if ti.Teardown != nil {
-		defer func() {
-			rc.SetStage("teardown", j.trs)
-			_ = ti.Teardown.Teardown(ctx, rc, bag)
-		}()
+	defer func() {
+		rc.SetStage("teardown", j.trs)
+		_ = session.Teardown(ctx, rc)
+	}()
+
+	rc.SetStage("preflight", j.trs)
+	findings, err := session.Preflight(ctx, rc, j.trs)
+	if err != nil {
+		return errTRs(j.trs, "preflight: "+err.Error()), nil
+	}
+	for _, f := range findings {
+		if f.Level == "error" {
+			return errTRs(j.trs, "preflight failed: "+f.Message), nil
+		}
 	}
 
-	if ti.Preflight != nil {
-		rc.SetStage("preflight", j.trs)
-		findings, err := ti.Preflight.Check(ctx, rc, bag, j.trs)
-		if err != nil {
-			return errTRs(j.trs, "preflight: "+err.Error()), nil
-		}
-		for _, f := range findings {
-			if f.Level == "error" {
-				return errTRs(j.trs, "preflight failed: "+f.Message), nil
-			}
-		}
+	rc.SetStage("provision", j.trs)
+	if err := session.Provision(ctx, rc); err != nil {
+		return errTRs(j.trs, "provision: "+err.Error()), nil
 	}
-	if ti.Provisioner != nil {
-		rc.SetStage("provision", j.trs)
-		if err := ti.Provisioner.Provision(ctx, rc, bag, j.trs); err != nil {
-			return errTRs(j.trs, "provision: "+err.Error()), nil
-		}
+
+	rc.SetStage("run", j.trs)
+	if err := session.Run(ctx, rc); err != nil {
+		return errTRs(j.trs, "run: "+err.Error()), nil
 	}
-	var handle stages.RunHandle
-	if ti.Runner != nil {
-		rc.SetStage("run", j.trs)
-		h, err := ti.Runner.Run(ctx, rc, bag, j.trs)
-		if err != nil {
-			return errTRs(j.trs, "run: "+err.Error()), nil
-		}
-		handle = h
+
+	rc.SetStage("collect", j.trs)
+	lb, err := session.Collect(ctx, rc)
+	if err != nil {
+		return errTRs(j.trs, "collect: "+err.Error()), nil
 	}
-	var logs core.LogBundle
-	if ti.LogCollector != nil {
-		rc.SetStage("collect", j.trs)
-		lb, err := ti.LogCollector.Collect(ctx, rc, bag, handle)
-		if err != nil {
-			return errTRs(j.trs, "collect: "+err.Error()), nil
-		}
-		if rc.RecordArtifacts != nil {
-			// A job can span several TRs, and then the flat Refs list mixes
-			// their files together; recording it wholesale would attribute
-			// every TR's results to all of them.
-			if len(lb.RefsByTR) > 0 {
-				for _, tr := range j.trs {
-					if refs := lb.RefsByTR[tr.ID]; len(refs) > 0 {
-						rc.RecordArtifacts([]core.TestRequirement{tr}, refs)
-					}
+	if rc.RecordArtifacts != nil {
+		// A job can span several TRs, and then the flat Refs list mixes
+		// their files together; recording it wholesale would attribute
+		// every TR's results to all of them.
+		if len(lb.RefsByTR) > 0 {
+			for _, tr := range j.trs {
+				if refs := lb.RefsByTR[tr.ID]; len(refs) > 0 {
+					rc.RecordArtifacts([]core.TestRequirement{tr}, refs)
 				}
-			} else {
-				rc.RecordArtifacts(j.trs, lb.Refs)
 			}
+		} else {
+			rc.RecordArtifacts(j.trs, lb.Refs)
 		}
-		logs = lb
 	}
-	var results []core.TestResult
-	if ti.ResultParser != nil {
-		rc.SetStage("parse", j.trs)
-		rs, err := ti.ResultParser.Parse(ctx, rc, bag, logs)
-		if err != nil {
-			return errTRs(j.trs, "parse: "+err.Error()), nil
-		}
-		results = rs
+
+	rc.SetStage("parse", j.trs)
+	results, err := session.Parse(ctx, rc, lb)
+	if err != nil {
+		return errTRs(j.trs, "parse: "+err.Error()), nil
 	}
 
 	byID := map[string]core.TestResult{}

@@ -1,26 +1,4 @@
-// Package virtbench integrates portworx/kubevirt-benchmark ("virtbench") as a
-// tool. virtbench ships no upstream container image, so phase 1 runs the released
-// CLI locally via os/exec; an in-cluster Job model is a documented follow-up
-// (decisions/0007).
-//
-// virtbench exposes several scenarios (datasource-clone, its --boot-storm
-// variant, disk-ops, …), each a distinct KB automation_tool and a distinct TR.
-// They share ALL the plumbing here — preflight, provision, exec, collect,
-// teardown, and replay — and differ only in a small Scenario config
-// (scenario.go): the automation_tool string, the TR it provides, the result file
-// name, how to build the CLI args, and how to parse the output. Adding a scenario
-// should be a new table row, never an engine edit (decisions/0008).
-//
-// Bag contract (see decisions/0003):
-//   - provisioner writes "tr_id" (string), "replay" (bool), "results_root" (string)
-//   - runner      reads  "replay", "results_root"; execs virtbench unless replay
-//   - collector   reads  "results_root"; finds + reads the scenario's result file
-//   - parser      reads  "tr_id"
-//
-// Replay mode: a TR param "results_dir" points at a directory of already-collected
-// virtbench results. Preflight skips binary/cluster checks, the runner skips exec,
-// and the harness grades the pre-collected file — enabling offline e2e and
-// re-grading without a cluster.
+// Package virtbench integrates the released kubevirt-benchmark CLI using typed sessions.
 package virtbench
 
 import (
@@ -40,7 +18,6 @@ import (
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
 const (
@@ -70,89 +47,17 @@ var fioVMTemplate string
 // it still happens when the run ctx was cancelled.
 const teardownBudget = 120 * time.Second
 
-// --- Preflight ---------------------------------------------------------------
-
-type preflight struct{ sc Scenario }
-
-func (p preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) ([]core.Finding, error) {
-	var findings []core.Finding
-	// Replay grades pre-collected results — no binary or cluster needed.
-	dir := replayDir(trs)
-	if dir != "" {
-		if _, err := os.Stat(dir); err != nil {
-			findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: replay results_dir %q not accessible: %v", dir, err)})
-		} else {
-			findings = append(findings, core.Finding{Level: "info", Message: "virtbench: replay results_dir accessible: " + dir})
-		}
-	}
-
-	if dir != "" {
-		findings = append(findings, core.Finding{Level: "skip", Message: "virtbench CLI on PATH: replay mode"})
-		if len(p.sc.CommandCheck) > 0 {
-			findings = append(findings, core.Finding{Level: "skip", Message: "virtbench command " + p.sc.CommandCheck[0] + ": replay mode"})
-		}
-	} else if _, err := exec.LookPath(binary); err != nil {
-		findings = append(findings, core.Finding{Level: "error", Message: "virtbench CLI not found on PATH (install per https://portworx.github.io/kubevirt-benchmark/install/, or use replay mode via the results_dir param)"})
-		if len(p.sc.CommandCheck) > 0 {
-			findings = append(findings, core.Finding{Level: "skip", Message: "virtbench command " + p.sc.CommandCheck[0] + ": virtbench CLI not found on PATH"})
-		}
-	} else {
-		findings = append(findings, core.Finding{Level: "info", Message: "virtbench CLI found on PATH"})
-		if len(p.sc.CommandCheck) > 0 {
-			cmd := exec.CommandContext(ctx, binary, p.sc.CommandCheck...) // #nosec G204 -- command checks are declared by built-in scenarios.
-			if output, err := cmd.CombinedOutput(); err != nil {
-				findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: required command %q unavailable: %v: %s", p.sc.CommandCheck[0], err, strings.TrimSpace(string(output)))})
-			} else {
-				findings = append(findings, core.Finding{Level: "info", Message: "virtbench command available: " + p.sc.CommandCheck[0]})
-			}
-		}
-	}
-	for _, tr := range trs {
-		if dir == "" && usesSnapshot(tr) && strings.HasPrefix(p.sc.AutomationTool, "virtbench datasource-clone") {
-			clone, err := snapshotClonePreflight(ctx, rc, tr)
-			if err != nil {
-				findings = append(findings, core.Finding{Level: "error", Message: tr.ID + " snapshot clone: " + err.Error()})
-			} else {
-				bag.Set("snapshot_clone", clone)
-				findings = append(findings, clone.Selection.Finding())
-			}
-		}
-		if dir != "" {
-			findings = append(findings, core.Finding{Level: "skip", Message: tr.ID + " storage_class: replay mode"})
-		} else if sc := storageClass(rc, tr); sc == "" && !p.sc.StorageClassOptional {
-			findings = append(findings, core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: %s has no storage_class (select a --backend or set the TR 'storage_class' param)", tr.ID)})
-		} else {
-			findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " storage_class=" + sc})
-		}
-		if p.sc.Validate != nil {
-			if dir != "" {
-				findings = append(findings, core.Finding{Level: "skip", Message: tr.ID + " scenario parameters: replay mode"})
-			} else if err := p.sc.Validate(tr); err != nil {
-				findings = append(findings, core.Finding{Level: "error", Message: tr.ID + " scenario parameters: " + err.Error()})
-			} else {
-				findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " scenario parameters valid"})
-			}
-		}
-	}
-	if p.sc.Preflight != nil {
-		findings = append(findings, p.sc.Preflight(ctx, rc, trs)...)
-	}
-	return findings, nil
-}
-
 // --- Provision ---------------------------------------------------------------
 
-type provisioner struct{ sc Scenario }
-
-func (p provisioner) Provision(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) error {
+func (s *session) Provision(ctx context.Context, rc *core.RunCtx) error {
+	trs := s.trs
 	if len(trs) > 0 {
-		bag.Set("tr_id", trs[0].ID)
-		bag.Set("ns_prefix", strParamOr(trs[0], "namespace_prefix", p.sc.NSPrefix))
-		bag.Set("kubeconfig", strParamOr(trs[0], "kubeconfig", ""))
+		s.nsPrefix = strParamOr(trs[0], "namespace_prefix", s.sc.NSPrefix)
+		s.kubeconfig = strParamOr(trs[0], "kubeconfig", "")
 	}
 	if dir := replayDir(trs); dir != "" {
-		bag.Set("replay", true)
-		bag.Set("results_root", dir)
+		s.replay = true
+		s.resultsRoot = dir
 		rc.Logger.Info("virtbench: replay mode", "results_dir", dir)
 		return nil
 	}
@@ -173,18 +78,18 @@ func (p provisioner) Provision(ctx context.Context, rc *core.RunCtx, bag *core.B
 	if err := safefs.MkdirAll(root, 0o755); err != nil {
 		return fmt.Errorf("virtbench: create results dir: %w", err)
 	}
-	bag.Set("replay", false)
-	bag.Set("results_root", root)
+	s.replay = false
+	s.resultsRoot = root
 	rc.Logger.Debug("virtbench: provisioned results dir", "results_root", root)
 	// A scenario that must stage the cluster before Run does it here (drain clones
 	// the VMs onto the target); the generic scenarios have no extra provisioning.
-	if p.sc.Provision != nil && len(trs) > 0 {
-		if err := p.sc.Provision(ctx, rc, bag, trs[0], root); err != nil {
+	if s.sc.Provision != nil && len(trs) > 0 {
+		if err := s.sc.Provision(ctx, rc, s, trs[0], root); err != nil {
 			return err
 		}
 	}
-	if p.sc.ProvisionVMs != nil {
-		if err := p.sc.ProvisionVMs(ctx, rc, bag, trs); err != nil {
+	if s.sc.ProvisionVMs != nil {
+		if err := s.sc.ProvisionVMs(ctx, rc, s, trs); err != nil {
 			return err
 		}
 	}
@@ -193,29 +98,26 @@ func (p provisioner) Provision(ctx context.Context, rc *core.RunCtx, bag *core.B
 
 // --- Run ---------------------------------------------------------------------
 
-type runner struct{ sc Scenario }
-
-func (r runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error) {
-	replay, _ := core.GetAs[bool](bag, "replay")
-	root, _ := core.GetAs[string](bag, "results_root")
-	if replay {
+func (s *session) Run(ctx context.Context, rc *core.RunCtx) error {
+	trs, root := s.trs, s.resultsRoot
+	if s.replay {
 		rc.Logger.Info("virtbench: replay — skipping exec", "results_root", root)
-		return stages.RunHandle{ID: "virtbench-replay"}, nil
+		return nil
 	}
 	if len(trs) == 0 {
-		return stages.RunHandle{}, fmt.Errorf("virtbench: no TRs to run")
+		return fmt.Errorf("virtbench: no TRs to run")
 	}
-	if r.sc.Run != nil {
-		return r.sc.Run(ctx, rc, bag, trs)
+	if s.sc.Run != nil {
+		return s.sc.Run(ctx, rc, s, trs)
 	}
-	args, err := r.sc.BuildArgs(rc, bag, trs[0], root)
+	args, err := s.sc.BuildArgs(rc, s, trs[0], root)
 	if err != nil {
-		return stages.RunHandle{}, err
+		return err
 	}
-	if clone, ok := core.GetAs[*snapshotClone](bag, "snapshot_clone"); ok {
+	if clone := s.snapshotClone; clone != nil {
 		path, err := clone.prepare(ctx, root)
 		if err != nil {
-			return stages.RunHandle{}, fmt.Errorf("prepare snapshot clone: %w", err)
+			return fmt.Errorf("prepare snapshot clone: %w", err)
 		}
 		found := false
 		for i := 0; i+1 < len(args); i++ {
@@ -235,12 +137,12 @@ func (r runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []c
 	if err := execVirtbench(ctx, rc, root, args); err != nil {
 		// drain-nodes exits 1 on a timeout — a gradeable FAIL, not a crash. Keep
 		// going to Collect/Parse so the log is still scored (decisions/0013).
-		if !r.sc.TolerateRunError {
-			return stages.RunHandle{}, fmt.Errorf("virtbench: run failed: %w", err)
+		if !s.sc.TolerateRunError {
+			return fmt.Errorf("virtbench: run failed: %w", err)
 		}
 		rc.Logger.Warn("virtbench: CLI exited non-zero; grading from its output anyway", "err", err)
 	}
-	return stages.RunHandle{ID: "virtbench-" + rc.RunID}, nil
+	return nil
 }
 
 func runVirtbench(ctx context.Context, rc *core.RunCtx, root string, args []string) error {
@@ -253,26 +155,23 @@ func runVirtbench(ctx context.Context, rc *core.RunCtx, root string, args []stri
 
 // --- Collect -----------------------------------------------------------------
 
-type collector struct{ sc Scenario }
-
-func (c collector) Collect(_ context.Context, rc *core.RunCtx, bag *core.Bag, h stages.RunHandle) (core.LogBundle, error) {
-	root, _ := core.GetAs[string](bag, "results_root")
+func (s *session) Collect(_ context.Context, rc *core.RunCtx) (core.LogBundle, error) {
+	root := s.resultsRoot
 	if root == "" {
-		return core.LogBundle{}, fmt.Errorf("virtbench: no results_root in bag")
+		return core.LogBundle{}, fmt.Errorf("virtbench: no results directory in session")
 	}
-	if c.sc.Collect != nil {
-		replay, _ := core.GetAs[bool](bag, "replay")
-		refs, data, err := c.sc.Collect(root, replay)
+	if s.sc.Collect != nil {
+		refs, data, err := s.sc.Collect(root, s.replay)
 		if err != nil {
 			return core.LogBundle{}, err
 		}
 		rc.Logger.Info("virtbench: collected results", "paths", refs)
 		return core.LogBundle{
 			Refs: refs,
-			Data: map[string][]byte{c.sc.ResultFile: data},
+			Data: map[string][]byte{s.sc.ResultFile: data},
 		}, nil
 	}
-	path, err := findResult(root, c.sc.ResultFile)
+	path, err := findResult(root, s.sc.ResultFile)
 	if err != nil {
 		return core.LogBundle{}, err
 	}
@@ -282,27 +181,27 @@ func (c collector) Collect(_ context.Context, rc *core.RunCtx, bag *core.Bag, h 
 	}
 	rc.Logger.Info("virtbench: collected results", "path", path)
 	refs := []string{path}
-	bundle := map[string][]byte{c.sc.ResultFile: data}
-	if c.sc.DetailFile != "" {
+	bundle := map[string][]byte{s.sc.ResultFile: data}
+	if s.sc.DetailFile != "" {
 		// A scenario with DetailParse is graded from these per-VM samples (the
 		// summary carries only avg/max/min), so a lookup that cannot name one
 		// file must stop the execution. Degrading to summary-only would drop
 		// the gated metric, and an ambiguous detail file is the very case this
 		// collector must not guess at. Where no DetailParse is set the file is
 		// supplementary and stays best-effort.
-		dp, err := findResult(root, c.sc.DetailFile)
+		dp, err := findResult(root, s.sc.DetailFile)
 		switch {
-		case err != nil && c.sc.DetailParse != nil:
+		case err != nil && s.sc.DetailParse != nil:
 			return core.LogBundle{}, fmt.Errorf("virtbench: detail results: %w", err)
 		case err != nil:
-			rc.Logger.Warn("virtbench: detail results not found", "file", c.sc.DetailFile, "err", err)
+			rc.Logger.Warn("virtbench: detail results not found", "file", s.sc.DetailFile, "err", err)
 		default:
 			dd, readErr := safefs.ReadUnder(root, dp)
-			if readErr != nil && c.sc.DetailParse != nil {
+			if readErr != nil && s.sc.DetailParse != nil {
 				return core.LogBundle{}, fmt.Errorf("virtbench: read detail results %s: %w", dp, readErr)
 			}
 			if readErr == nil {
-				bundle[c.sc.DetailFile] = dd
+				bundle[s.sc.DetailFile] = dd
 				refs = append(refs, dp)
 			}
 		}
@@ -391,20 +290,21 @@ func findResults(root, name string) ([]string, error) {
 
 // --- Parse -------------------------------------------------------------------
 
-type parser struct{ sc Scenario }
-
-func (p parser) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, logs core.LogBundle) ([]core.TestResult, error) {
-	trID, _ := core.GetAs[string](bag, "tr_id")
-	if trID == "" {
-		trID = p.sc.ProvidesTR
+func (s *session) Parse(_ context.Context, _ *core.RunCtx, logs core.LogBundle) ([]core.TestResult, error) {
+	trID := ""
+	if len(s.trs) > 0 {
+		trID = s.trs[0].ID
 	}
-	res, err := p.sc.Parse(logs.Data[p.sc.ResultFile], trID)
+	if trID == "" {
+		trID = s.sc.ProvidesTR
+	}
+	res, err := s.sc.Parse(logs.Data[s.sc.ResultFile], trID)
 	if err != nil {
 		return nil, err
 	}
-	if p.sc.DetailParse != nil && len(res) > 0 {
-		if dd, ok := logs.Data[p.sc.DetailFile]; ok {
-			extra, err := p.sc.DetailParse(dd)
+	if s.sc.DetailParse != nil && len(res) > 0 {
+		if dd, ok := logs.Data[s.sc.DetailFile]; ok {
+			extra, err := s.sc.DetailParse(dd)
 			if err != nil {
 				return nil, err
 			}
@@ -416,36 +316,34 @@ func (p parser) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, logs cor
 
 // --- Teardown ----------------------------------------------------------------
 
-type teardown struct{ sc Scenario }
-
 // Teardown is a best-effort safety net. Normal runs pass --cleanup(-on-failure)
 // so virtbench removes its own namespaces/VMs; the generic sweep only catches the
 // case where the process was killed mid-run (drain-nodes deliberately omits
 // --cleanup, so its VMs always land here). It runs on a fresh bounded context so
 // cleanup still happens when the run ctx was cancelled, and never fails the run.
-func (t teardown) Teardown(_ context.Context, rc *core.RunCtx, bag *core.Bag) error {
-	if replay, _ := core.GetAs[bool](bag, "replay"); replay {
+func (s *session) Teardown(_ context.Context, rc *core.RunCtx) error {
+	if s.replay {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), teardownBudget)
 	defer cancel()
-	if clone, ok := core.GetAs[*snapshotClone](bag, "snapshot_clone"); ok {
+	if clone := s.snapshotClone; clone != nil {
 		defer clone.cleanup(ctx, rc)
 	}
 
 	// A scenario adds its own cleanup on top of the generic namespace sweep (drain
 	// uncordons the workers it cordoned).
-	if t.sc.Teardown != nil {
-		if err := t.sc.Teardown(ctx, rc, bag); err != nil {
-			rc.Logger.Warn("virtbench: scenario teardown failed", "tool", t.sc.AutomationTool, "err", err)
+	if s.sc.Teardown != nil {
+		if err := s.sc.Teardown(ctx, rc, s); err != nil {
+			rc.Logger.Warn("virtbench: scenario teardown failed", "tool", s.sc.IntegrationName(), "err", err)
 		}
 	}
 
-	prefix, _ := core.GetAs[string](bag, "ns_prefix")
+	prefix := s.nsPrefix
 	if prefix == "" {
-		prefix = t.sc.NSPrefix
+		prefix = s.sc.NSPrefix
 	}
-	kubeconfig, _ := core.GetAs[string](bag, "kubeconfig")
+	kubeconfig := s.kubeconfig
 
 	leftovers, err := listNamespacesByPrefix(ctx, kubeconfig, prefix+"-")
 	if err != nil {
@@ -471,8 +369,8 @@ func (t teardown) Teardown(_ context.Context, rc *core.RunCtx, bag *core.Bag) er
 // ONLY params/backend config — never a threshold/SLA value — so nothing sensitive
 // can reach a command line. resultsRoot is where virtbench must write results so
 // the collector can find them.
-func datasourceCloneArgs(bootStorm bool, nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
-	return func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+func datasourceCloneArgs(bootStorm bool, nsPrefix string) func(rc *core.RunCtx, _ *session, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+	return func(rc *core.RunCtx, _ *session, tr core.TestRequirement, resultsRoot string) ([]string, error) {
 		sc := storageClass(rc, tr)
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
@@ -522,8 +420,8 @@ func datasourceCloneArgs(bootStorm bool, nsPrefix string) func(rc *core.RunCtx, 
 // with its own flags — note --results-dir vs the clone family's --results-folder,
 // and disk-ops templates its own VM name so no --vm-name fix is needed). Same
 // secret-hygiene rule as datasourceCloneArgs.
-func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
-	return func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *session, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+	return func(rc *core.RunCtx, _ *session, tr core.TestRequirement, resultsRoot string) ([]string, error) {
 		sc := storageClass(rc, tr)
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
@@ -585,8 +483,8 @@ const (
 
 // fioArgs builds the fixed 4 KiB random read/write profile. The plan's start/end
 // range selects one VM or a concurrent fleet; the parser grades the worst p99.
-func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
-	return func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *session, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+	return func(rc *core.RunCtx, _ *session, tr core.TestRequirement, resultsRoot string) ([]string, error) {
 		sc := storageClass(rc, tr)
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
@@ -673,28 +571,26 @@ func fioProfile(tr core.TestRequirement) (string, error) {
 	}
 }
 
-// runFIO avoids Virtbench's fixed five-minute VM boot wait. FIO starts during
-// guest boot; this runner waits for every VM to be Running, then runs gather-results
-// with collect retries (virtbench SSH from the helper pod — not duplicated in harness).
-func runFIO(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error) {
+// runFIO waits for running VMs, then gathers results with retries through the SSH helper.
+func runFIO(ctx context.Context, rc *core.RunCtx, s *session, trs []core.TestRequirement) error {
 	if len(trs) == 0 {
-		return stages.RunHandle{}, fmt.Errorf("virtbench: no FIO test requirement")
+		return fmt.Errorf("virtbench: no FIO test requirement")
 	}
-	root, _ := core.GetAs[string](bag, "results_root")
+	root := s.resultsRoot
 	if root == "" {
-		return stages.RunHandle{}, fmt.Errorf("virtbench: no results_root in bag")
+		return fmt.Errorf("virtbench: no results directory in session")
 	}
 	tr := trs[0]
 	base, err := fioArgs("fio-latency")(rc, nil, tr, root)
 	if err != nil {
-		return stages.RunHandle{}, err
+		return err
 	}
 	deploy := fioActionArgs(base, "deploy")
 	gather := fioActionArgs(base, "gather-results")
 	cleanup := fioActionArgs(base, "cleanup")
 	retries, delay, err := fioCollectionSettings(tr)
 	if err != nil {
-		return stages.RunHandle{}, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
+		return fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 	}
 	gather = append(gather,
 		"--collect-retries", strconv.Itoa(retries),
@@ -715,15 +611,15 @@ func runFIO(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.Test
 
 	deployed = true
 	if err := runVirtbench(ctx, rc, root, deploy); err != nil {
-		return stages.RunHandle{}, fmt.Errorf("virtbench fio: deploy: %w", err)
+		return fmt.Errorf("virtbench fio: deploy: %w", err)
 	}
 	if err := waitForFIOVMs(ctx, rc, tr); err != nil {
-		return stages.RunHandle{}, err
+		return err
 	}
 	if err := runVirtbench(ctx, rc, root, gather); err != nil {
-		return stages.RunHandle{}, fmt.Errorf("virtbench fio: gather results: %w", err)
+		return fmt.Errorf("virtbench fio: gather results: %w", err)
 	}
-	return stages.RunHandle{ID: "virtbench-" + rc.RunID}, nil
+	return nil
 }
 
 func fioActionArgs(base []string, action string) []string {
@@ -1023,12 +919,13 @@ func intParam(tr core.TestRequirement, key string, fallback int) int {
 	return fallback
 }
 
-// failureRecoveryArgs builds the CLI for the failure-recovery scenario.
-// The node is taken from the bag (set by provisionFailureRecoveryVMs which
-// auto-picks a worker at Provision time) or from an explicit "node" param.
-func failureRecoveryArgs(nsPrefix string) func(rc *core.RunCtx, bag *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
-	return func(rc *core.RunCtx, bag *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
-		node, _ := core.GetAs[string](bag, "picked_node")
+// failureRecoveryArgs uses the provisioned node or an explicit node parameter.
+func failureRecoveryArgs(nsPrefix string) func(rc *core.RunCtx, s *session, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+	return func(rc *core.RunCtx, s *session, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+		node := ""
+		if s != nil {
+			node = s.pickedNode
+		}
 		if node == "" {
 			node = strParamOr(tr, "node", "")
 		}

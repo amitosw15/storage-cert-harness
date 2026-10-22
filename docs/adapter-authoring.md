@@ -16,24 +16,24 @@ independently-ownable tasks — great for parallel work.
        Name:     "<tool>",
        Image:    "quay.io/<vendor>/<tool>:<tag>", // the tool's RELEASED image
        Provides: []string{"<TR-id>", ...},        // TR ids from catalog.json
-       Provisioner:  provisioner{},
-       Runner:       runner{},
-       LogCollector: collector{},
-       ResultParser: parser{},
-       Teardown:     teardown{},
-       // Optional: Preflight, Evaluators (custom per-TR scoring),
-       // ParallelSafe + ExclusivityGroups (scheduling defaults).
+       NewSession: func() stages.Session { return &session{} },
+       // Optional: Evaluators, ParallelSafe, and ExclusivityGroups.
    })
    ```
 
-3. **Implement only the stages you need.** Each is a small interface (see
-   `internal/stages`). Reuse shared adapters where they exist. Every method gets
-   `context.Context` (honor cancellation) and a `*core.Bag`.
+3. **Implement `stages.Session`.** Its lifecycle methods are `Preflight`,
+   `Provision`, `Run`, `Collect`, `Parse`, and `Teardown`. Every method gets
+   `context.Context` (honor cancellation) and `*core.RunCtx`. Stages with no work
+   return empty outputs or nil. Keep parsing and other reusable operations in
+   independently testable functions.
 
-4. **Use the Bag for cross-stage state** and document its keys at the top of the
-   package (see the `example` package header):
-   - Provision writes what Run/Collect/Teardown need (namespace, release name…).
-   - Read with `core.GetAs[string](bag, "namespace")`.
+4. **Keep cross-stage state in typed session fields.** Store resolved parameters,
+   namespaces, resources, and result paths on the session, with one execution
+   record per selected TR. `NewSession` must return a fresh object for every job.
+   The orchestrator owns stage ordering and always calls teardown, including
+   after a failed preflight or partial provision. Standalone preflight creates
+   its own session and calls only `Preflight`, so that stage must avoid creating
+   resources that would require cleanup.
 
    For the active storage array, read `rc.Backend` (a `*core.ResolvedBackend`,
    may be nil): `rc.Backend.StorageClass`, `rc.Backend.Param("svm")`, and
@@ -53,7 +53,7 @@ independently-ownable tasks — great for parallel work.
    (`example_test.go` is the template; `go test ./... -update` regenerates). This
    needs no cluster.
 
-6. **Emit results the grader can score.** Your `ResultParser` returns one
+6. **Emit results the grader can score.** Your session's `Parse` method returns one
    `TestResult` per TR (keyed by `TRID`):
    - For **SLAs**: append `core.Metric{Name, Value, Unit, Percentile}` — the
      grader matches each `sla` by metric name (and percentile when set) and
@@ -75,6 +75,29 @@ independently-ownable tasks — great for parallel work.
 8. **Verify:** `make unittest && ./bin/harness list` should show your tool and
    `run --tool <tool>` should exercise it.
 
+## Shared preflight checks
+
+KB and KBO declare workload prerequisites in their `workloads.go` files and
+use `common.Preflight` from `internal/tools/common` within their sessions. Set `Tool` and `Resolve`,
+declare adapter-wide `Requirements`, and use `Workload` to select a TR's
+`common.WorkloadRequirements`. The shared stage builds tool identity, host binary,
+backend storage-class configuration/existence, and workload prerequisite checks.
+`Check` returns resolved parameters and findings without storing state. The session
+retains a typed execution record for every selected TR. The optional
+`Checks` hook binds additional checks to adapter-specific run state, such as KB's
+snapshot selection and CDI import mode. Use the constructors in `common/checks.go`
+for those checks.
+
+`RunPreflightChecks` runs requests in order. `Applies` can skip a check with a
+reason. A nonempty `Key` suppresses duplicate executions within that call; it
+does not replay results or callbacks. Leave checks that record per-TR state
+unkeyed. Include every probe input in a reuse key.
+
+`SnapshotSupportCheck` separates snapshot selection mode (`VMSnapshot`) from
+the VM client prerequisite (`RequireVMClient`). KB requires both. Direct
+snapshot consumers can resolve a class without probing VM client support.
+VirtBench still uses its existing preflight pending workload migration.
+
 ## Multi-scenario tools = a scenario table
 
 Some tools expose several subcommands, each mapping to a different TR and (often)
@@ -83,8 +106,8 @@ ADR-0008). Don't copy the package per subcommand. Instead:
 
 - Keep one generic `engine.go` with the stage plumbing (preflight, provision,
   exec, collect, teardown, replay), parameterized over a `Scenario`.
-- Put a `Scenario` table in `scenario.go`: each row carries the
-  `automation_tool` string (the registry key), the TR it provides, the result
+- Put a `Scenario` table in `workloads.go`: each row carries the
+  scenario registry key, the TR it provides, the result
   file, a `BuildArgs` closure, and a **pluggable `Parse` closure**. `init()`
   loops the table and registers one `ToolIntegration` per row.
 - A metric-map scenario is a new row + fixture; a differently-shaped output is a
@@ -105,7 +128,7 @@ grader tool-agnostic.
 
 ## Setup that's shared across tests (run / group scope)
 
-The `Provisioner` stage runs once per tool-job (individual scope). For setup that
+The session's `Provision` stage runs once per tool-job (individual scope). For setup that
 must happen **once per run** or **once for a batch of tests that share it**, use a
 `stages.SetupProvider` instead of repeating work per job (ADR-0009):
 

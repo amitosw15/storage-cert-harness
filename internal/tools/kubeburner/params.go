@@ -1,9 +1,12 @@
 package kubeburner
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"strings"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/tools/common"
 )
 
 const (
@@ -17,25 +20,6 @@ const (
 	defaultBurst    = 20
 	defaultDiskSize = "10Gi"
 )
-
-type snapshotScenario struct {
-	SnapshotsPerVolume bool
-	SingleSourceVolume bool
-	AllowZeroSnapshots bool
-}
-
-var snapshotScenarios = map[string]snapshotScenario{
-	"TR-VIRT-010": {},
-	"TR-VIRT-027": {
-		SnapshotsPerVolume: true,
-		SingleSourceVolume: true,
-		AllowZeroSnapshots: true,
-	},
-}
-
-func scenarioFor(trID string) snapshotScenario {
-	return snapshotScenarios[trID]
-}
 
 // Params are the harness-local per-TR knobs (plan overrides) that shape the kube-burner run; storage class comes from the backend, not here. See decisions/0012.
 type Params struct {
@@ -52,12 +36,14 @@ type Params struct {
 	snapshotCountSet bool
 }
 
-func resolveParams(trs []core.TestRequirement) Params {
+var _ common.RequirementValidator = Params{}
+
+func resolveParams(tr core.TestRequirement) Params {
 	p := Params{VMImage: DefaultVMImage, DiskSize: defaultDiskSize, QPS: defaultQPS, Burst: defaultBurst, MaxWait: defaultMaxWait, NS: defaultNS, UsePopulator: true}
-	if len(trs) == 0 || trs[0].Params == nil {
+	if tr.Params == nil {
 		return p
 	}
-	raw := trs[0].Params
+	raw := tr.Params
 	if n, ok := core.AsInt(raw["replicas"]); ok {
 		p.Replicas = n
 	}
@@ -89,12 +75,35 @@ func resolveParams(trs []core.TestRequirement) Params {
 	return p
 }
 
+// Isolate colliding namespaces while keeping each TR's other parameters intact.
+func assignNamespaces(resolved []common.ResolvedRequirement[Params]) {
+	counts := make(map[string]int, len(resolved))
+	for _, requirement := range resolved {
+		counts[requirement.Params.NS]++
+	}
+	for i := range resolved {
+		params := &resolved[i].Params
+		if counts[params.NS] < 2 {
+			continue
+		}
+		tr := resolved[i].TR
+		digest := sha256.Sum256([]byte(tr.ID + "\x00" + tr.Variant))
+		prefix := strings.TrimRight(params.NS[:min(len(params.NS), 54)], "-")
+		params.NS = fmt.Sprintf("%s-%x", prefix, digest[:4])
+	}
+}
+
 func (p Params) validate() error {
 	return p.validateFor("")
 }
 
+// Validate checks the params using the rules for this specific test requirement.
+func (p Params) Validate(tr core.TestRequirement) error {
+	return p.validateFor(tr.ID)
+}
+
 func (p Params) validateFor(trID string) error {
-	scenario := scenarioFor(trID)
+	scenario := snapshotScenarios[trID]
 	if p.Replicas < 1 {
 		return fmt.Errorf("kube-burner: param %q must be >= 1", "replicas")
 	}

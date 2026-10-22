@@ -151,7 +151,8 @@ func TestProvisionRecoversSSHHelperBetweenScenarios(t *testing.T) {
 		// Each deletion represents a previous test evicting the shared helper.
 		setState("missing")
 		trs := []core.TestRequirement{{ID: id, Params: map[string]any{"kubeconfig": "/test/config"}}}
-		if err := (provisioner{}).Provision(t.Context(), rc, core.NewBag(), trs); err != nil {
+		s := &session{sc: scenarioForTR(id), trs: trs}
+		if err := s.Provision(t.Context(), rc); err != nil {
 			t.Fatal(err)
 		}
 		if !sshpassReady(t.Context(), "/test/config") {
@@ -457,12 +458,12 @@ esac
 
 func TestSSHHelperReplayDoesNotUseCluster(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	trs := []core.TestRequirement{{Params: map[string]any{"results_dir": t.TempDir()}}}
+	trs := []core.TestRequirement{{ID: "TR-VIRT-002", Params: map[string]any{"results_dir": t.TempDir()}}}
 	rc := sshTestRunCtx(t)
 	if err := (&sshPodSetup{}).Setup(t.Context(), rc, trs); err != nil {
 		t.Fatal(err)
 	}
-	if err := (provisioner{}).Provision(t.Context(), rc, core.NewBag(), trs); err != nil {
+	if err := (&session{sc: scenarioForTR(trs[0].ID), trs: trs}).Provision(t.Context(), rc); err != nil {
 		t.Fatal(err)
 	}
 }

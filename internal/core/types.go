@@ -180,6 +180,7 @@ type TestRequirement struct {
 	PartnerLevel   int     `json:"partner_level,omitempty"`
 	Verified       string  `json:"verified,omitempty"`
 	AutomationTool string  `json:"automation_tool,omitempty"`
+	Scenario       string  `json:"scenario,omitempty"`
 	SLAStatus      string  `json:"sla_status,omitempty"`
 	SLACount       int     `json:"sla_count,omitempty"`
 	ChecksStatus   string  `json:"checks_status,omitempty"`

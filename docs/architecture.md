@@ -37,14 +37,20 @@ flowchart LR
 
 ## Stage interfaces (the layers)
 
-`Preflight`, `Provisioner`, `Runner`, `LogCollector`, `ResultParser`,
-`Teardown` — each small and independently testable. A `ToolIntegration` binds a
-set of them plus `Image`, `Provides`, and optional custom `Evaluators`.
+`ToolIntegration.NewSession` creates one `stages.Session` for each invocation of
+a tool's pipeline. The orchestrator calls its `Preflight`, `Provision`, `Run`,
+`Collect`, `Parse`, and `Teardown` methods and remains responsible for ordering,
+scheduling, reporting, and grading. Teardown runs even after an earlier stage
+fails. The integration also declares `Image`, `Provides`, and optional custom
+`Evaluators`.
 
-Every stage method takes `context.Context` (cancellation/timeout) and a
-`*core.Bag` (concurrency-safe `string → any` state threaded stage-to-stage — the
-namespace Provision made, the Job name Run produced, etc.). The Bag is
-deliberately not `context.Value`.
+A session owns typed adapter-specific fields for the job's parameters,
+resources, result paths, and execution status. Each TR has an execution record;
+an ordinary tool batch may contain several TRs, while named variants receive
+separate sessions. Registry entries contain factories, so mutable job state is
+never shared across invocations. Stage methods take `context.Context` for
+cancellation and `*core.RunCtx` for shared infrastructure. Findings, artifacts,
+and parsed test results have explicit return values. See ADR-0021.
 
 ## Evaluation
 
@@ -62,6 +68,10 @@ outcome) feed capability/suite/scenario checks. The grader scores a TR into
   `expectation` is always surfaced in the verdict reason.
 - A TR whose `automation_tool` is empty/`manual`/unregistered never runs — the
   orchestrator emits skip verdicts (not-scorable) before scheduling.
+- Shipped catalog `automation_tool` values come from the closed tool enum.
+  VirtBench TRs carry a separate `scenario` selector; KubeBurner OCP workloads
+  stay in TR parameters. The CI catalog test checks every shipped TR against
+  its registered integration.
 - A `ToolIntegration` may supply a custom `Evaluator` keyed by TR id that fully
   owns scoring for TRs that don't reduce to the built-in rules.
 

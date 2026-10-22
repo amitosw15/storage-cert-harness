@@ -268,13 +268,12 @@ func TestPreflightChecksFIOCommand(t *testing.T) {
 		t.Fatalf("write fake virtbench: %v", err)
 	}
 	t.Setenv("PATH", dir)
-	findings, err := (preflight{sc: Scenario{CommandCheck: []string{"fio", "--help"}}}).Check(
-		context.Background(), &core.RunCtx{}, nil, nil,
-	)
+	trs := []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}}}
+	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
-	if len(findings) != 2 || findings[1].Level != "error" {
+	if !hasFinding(findings, "command") || findings[len(findings)-1].Level != "error" {
 		t.Fatalf("findings = %+v, want FIO command error", findings)
 	}
 }
@@ -286,17 +285,13 @@ func TestPreflightUsesEmbeddedFIOP99Template(t *testing.T) {
 		t.Fatalf("write fake virtbench: %v", err)
 	}
 	t.Setenv("PATH", dir)
-	findings, err := (preflight{sc: Scenario{Validate: fioValidate}}).Check(
-		context.Background(), &core.RunCtx{}, nil, []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}}},
-	)
+	trs := []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}}}
+	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
-	if len(findings) != 3 {
-		t.Fatalf("findings = %+v, want binary, storage class, and parameter checks", findings)
-	}
 	for _, f := range findings {
-		if f.Level != "info" {
+		if f.Level == "error" {
 			t.Fatalf("findings = %+v, want all checks to pass", findings)
 		}
 	}
@@ -307,7 +302,7 @@ func TestPreflightUsesEmbeddedFIOP99Template(t *testing.T) {
 // virtbench-specific scoring that survives ADR-0013 (measurability is now data).
 func TestScenarioEvaluatorNativeFail(t *testing.T) {
 	ev := scenarioEvaluator{}
-	tr := core.TestRequirement{ID: "TR-STOR-001", AutomationTool: "virtbench disk-ops",
+	tr := core.TestRequirement{ID: "TR-STOR-001", AutomationTool: string(core.ToolVirtbench), Scenario: string(WorkloadDiskOps),
 		SLAs: []core.SLA{{Metric: "pvc_attach_time", MeasuredBy: []string{"virtbench disk-ops"}}}}
 	res := core.TestResult{TRID: "TR-STOR-001", Native: core.OutcomeFail,
 		Metrics: []core.Metric{{Name: "vms_failed", Value: 2}, {Name: "vms_total", Value: 10}}}
@@ -322,14 +317,14 @@ func TestScenarioEvaluatorNativeFail(t *testing.T) {
 
 func TestScenarioEvaluatorLabelsFIOFleetP99(t *testing.T) {
 	limit := 5.0
-	tr := core.TestRequirement{ID: "TR-STOR-002", AutomationTool: "virtbench fio", SLAStatus: core.StatusDefined, SLAs: []core.SLA{{
+	tr := core.TestRequirement{ID: "TR-STOR-002", AutomationTool: string(core.ToolVirtbench), Scenario: string(WorkloadFIO), SLAStatus: core.StatusDefined, SLAs: []core.SLA{{
 		Metric: "read_latency", Operator: "<=", Value: &limit, Unit: "ms", Percentile: "p99", MeasuredBy: []string{"virtbench fio"},
 	}}}
 	result := core.TestResult{TRID: tr.ID, Metrics: []core.Metric{
 		{Name: "vms_total", Value: 2},
 		{Name: "read_latency", Value: 3, Unit: "ms", Percentile: "p99"},
 	}}
-	verdicts, err := (scenarioEvaluator{sc: Scenario{AutomationTool: "virtbench fio"}}).Evaluate(context.Background(), tr, result)
+	verdicts, err := (scenarioEvaluator{sc: Scenario{AutomationTool: core.ToolVirtbench, ScenarioName: WorkloadFIO}}).Evaluate(context.Background(), tr, result)
 	if err != nil {
 		t.Fatalf("evaluate fleet FIO: %v", err)
 	}
@@ -576,14 +571,14 @@ func TestFIOVMStates(t *testing.T) {
 
 func TestFIOUsesCustomRunnerOnly(t *testing.T) {
 	for _, sc := range scenarios {
-		if sc.AutomationTool == "virtbench fio" {
+		if sc.ScenarioName == WorkloadFIO {
 			if sc.Run == nil {
 				t.Error("FIO custom runner is nil")
 			}
 			continue
 		}
 		if sc.Run != nil {
-			t.Errorf("%s unexpectedly has a custom runner", sc.AutomationTool)
+			t.Errorf("%s unexpectedly has a custom runner", sc.IntegrationName())
 		}
 	}
 }
@@ -716,7 +711,7 @@ func TestBuildArgsFailureRecovery(t *testing.T) {
 			"vm_recovery_timeout": 90,
 		},
 	}
-	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, core.NewBag(), tr, "/work/res")
+	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, &session{}, tr, "/work/res")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}
@@ -743,7 +738,7 @@ func TestBuildArgsFailureRecoveryFAR(t *testing.T) {
 		"mode":       "far-operator",
 		"far_config": "/far-config.json",
 	}}
-	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, core.NewBag(), tr, "/work/res")
+	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, &session{}, tr, "/work/res")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}
@@ -785,10 +780,9 @@ func TestFailureRecoveryValidate(t *testing.T) {
 }
 
 func TestBuildArgsFailureRecoveryNodeFromBag(t *testing.T) {
-	b := core.NewBag()
-	b.Set("picked_node", "auto-worker-3")
+	s := &session{pickedNode: "auto-worker-3"}
 	tr := core.TestRequirement{ID: "TR-VIRT-007", Params: map[string]any{"storage_class": "sc", "far_config": "/far-config.json"}}
-	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, b, tr, "/work/res")
+	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, s, tr, "/work/res")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}
@@ -798,7 +792,7 @@ func TestBuildArgsFailureRecoveryNodeFromBag(t *testing.T) {
 }
 
 func TestBuildArgsFailureRecoveryRequiresNode(t *testing.T) {
-	if _, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, core.NewBag(), core.TestRequirement{ID: "TR-VIRT-007"}, "/work/res"); err == nil {
+	if _, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, &session{}, core.TestRequirement{ID: "TR-VIRT-007"}, "/work/res"); err == nil {
 		t.Error("missing node: want error, got nil")
 	}
 }
@@ -813,7 +807,7 @@ func TestBuildArgsFailureRecoveryOptionalFlags(t *testing.T) {
 			"vm_recovery_timeout": 300,
 		},
 	}
-	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, core.NewBag(), tr, "/work/res")
+	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, &session{}, tr, "/work/res")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}

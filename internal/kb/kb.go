@@ -72,6 +72,7 @@ func trFromCatalog(c catalog.TR) core.TestRequirement {
 		PartnerLevel:   c.PartnerLevel,
 		Verified:       c.Verified,
 		AutomationTool: c.AutomationTool,
+		Scenario:       c.Scenario,
 		SLAStatus:      c.SLAStatus,
 		SLACount:       c.SLACount,
 		ChecksStatus:   c.ChecksStatus,

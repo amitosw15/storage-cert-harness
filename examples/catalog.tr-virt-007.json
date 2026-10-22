@@ -11,7 +11,8 @@
       "title": "VM HA Restart After Node Failure",
       "partner_level": 3,
       "verified": "unverified",
-      "automation_tool": "virtbench failure-recovery",
+      "automation_tool": "virtbench",
+      "scenario": "failure-recovery",
       "category": "Life-cycle",
       "description": "Validate HA restart time after an unplanned node failure — volume re-attach + VM restart on a surviving node.",
       "sla_status": "defined",
@@ -28,7 +29,7 @@
           "metric": "vm_ha_restart_time",
           "type": "duration",
           "unit": "s",
-          "measured_by": ["virtbench failure-recovery"]
+          "measured_by": ["virtbench"]
         }
       ],
       "checks": [

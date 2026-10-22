@@ -188,6 +188,9 @@ func newPreflightCmd() *cobra.Command {
 			byTool := map[string][]core.TestRequirement{}
 			for _, tr := range trs {
 				key := tr.AutomationTool
+				if integration, ok := orchestrator.ResolveTool(tr); ok {
+					key = integration.Name
+				}
 				if tr.Variant != "" {
 					key = core.ExecutionLabel(key+":"+tr.ID, tr.Variant)
 				}
@@ -212,11 +215,11 @@ func newPreflightCmd() *cobra.Command {
 					results.add("FAIL", tool, "tool not registered")
 					continue
 				}
-				if ti.Preflight == nil {
+				if ti.NewSession == nil {
 					results.add("SKIP", tool, "no preflight checks implemented")
 					continue
 				}
-				findings, err := ti.Preflight.Check(cmd.Context(), rc, core.NewBag(), ts)
+				findings, err := ti.NewSession().Preflight(cmd.Context(), rc, ts)
 				for _, f := range findings {
 					switch f.Level {
 					case "info":

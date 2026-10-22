@@ -1,12 +1,4 @@
-// Package example is the reference tool integration. Copy this package to add a
-// real tool: implement the stage adapters you need, declare the tool's released
-// image and the test ids it Provides, and register it in init(). Everything
-// here runs with no live cluster so it is safe to use as a smoke test.
-//
-// Bag contract (see decisions/0003):
-//   - provisioner writes  "namespace" (string)
-//   - runner       writes "job"       (string), reads "namespace"
-//   - teardown     reads  "namespace"
+// Package example demonstrates a complete tool session without requiring a cluster.
 package example
 
 import (
@@ -31,63 +23,51 @@ func init() {
 		Name:         "example",
 		Image:        "quay.io/example/harness-example:latest",         // overridable; fallback Containerfile only if no upstream image
 		Provides:     []string{"EX-001", "EX-002", "EX-003", "EX-004"}, // TR ids this integration runs
-		Preflight:    preflight{},
-		Provisioner:  provisioner{},
-		Runner:       runner{},
-		LogCollector: collector{},
-		ResultParser: parser{},
-		Teardown:     teardown{},
+		NewSession:   func() stages.Session { return &session{} },
 		ParallelSafe: true, // offline demo tool; safe to overlap
 	})
 }
 
-type preflight struct{}
+type session struct {
+	namespace string
+	job       string
+}
 
-func (preflight) Check(_ context.Context, rc *core.RunCtx, _ *core.Bag, _ []core.TestRequirement) ([]core.Finding, error) {
+func (*session) Preflight(_ context.Context, rc *core.RunCtx, _ []core.TestRequirement) ([]core.Finding, error) {
 	rc.Logger.Debug("example: preflight ok")
 	return []core.Finding{{Level: "info", Message: "example integration ready"}}, nil
 }
 
-type provisioner struct{}
-
-func (provisioner) Provision(_ context.Context, rc *core.RunCtx, bag *core.Bag, _ []core.TestRequirement) error {
+func (s *session) Provision(_ context.Context, rc *core.RunCtx) error {
 	ns := "example-" + rc.RunID
-	bag.Set("namespace", ns)
+	s.namespace = ns
 	rc.Logger.Debug("example: provisioned", "namespace", ns)
 	return nil
 }
 
-type runner struct{}
-
-func (runner) Run(_ context.Context, rc *core.RunCtx, bag *core.Bag, _ []core.TestRequirement) (stages.RunHandle, error) {
-	ns, _ := core.GetAs[string](bag, "namespace")
+func (s *session) Run(_ context.Context, rc *core.RunCtx) error {
+	ns := s.namespace
 	job := "example-job-" + rc.RunID
-	bag.Set("job", job)
+	s.job = job
 	rc.Logger.Debug("example: launched", "namespace", ns, "job", job)
 	// A real runner would create a Job from ToolIntegration.Image here.
-	return stages.RunHandle{ID: job}, nil
+	return nil
 }
 
-type collector struct{}
-
-func (collector) Collect(_ context.Context, _ *core.RunCtx, _ *core.Bag, h stages.RunHandle) (core.LogBundle, error) {
-	// A real collector would fetch pod logs / artifacts for h.ID.
+func (s *session) Collect(_ context.Context, _ *core.RunCtx) (core.LogBundle, error) {
+	// A real collector would fetch pod logs and artifacts for s.job.
 	return core.LogBundle{
-		Refs: []string{h.ID},
+		Refs: []string{s.job},
 		Data: map[string][]byte{"results.json": sampleResults},
 	}, nil
 }
 
-type parser struct{}
-
-func (parser) Parse(_ context.Context, _ *core.RunCtx, _ *core.Bag, logs core.LogBundle) ([]core.TestResult, error) {
+func (*session) Parse(_ context.Context, _ *core.RunCtx, logs core.LogBundle) ([]core.TestResult, error) {
 	return ParseResults(logs.Data["results.json"])
 }
 
-type teardown struct{}
-
-func (teardown) Teardown(_ context.Context, rc *core.RunCtx, bag *core.Bag) error {
-	if ns, ok := core.GetAs[string](bag, "namespace"); ok {
+func (s *session) Teardown(_ context.Context, rc *core.RunCtx) error {
+	if ns := s.namespace; ns != "" {
 		rc.Logger.Debug("example: torn down", "namespace", ns)
 	}
 	return nil

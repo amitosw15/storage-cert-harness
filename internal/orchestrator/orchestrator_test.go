@@ -53,13 +53,14 @@ func (r *recorder) count(substr string) int {
 }
 
 type recRunner struct {
+	sessionStub
 	name string
 	rec  *recorder
 }
 
-func (r recRunner) Run(_ context.Context, _ *core.RunCtx, _ *core.Bag, _ []core.TestRequirement) (stages.RunHandle, error) {
+func (r *recRunner) Run(_ context.Context, _ *core.RunCtx) error {
 	r.rec.add("job:" + r.name)
-	return stages.RunHandle{ID: r.name}, nil
+	return nil
 }
 
 type recSetup struct {
@@ -95,9 +96,9 @@ func (s recSetup) Teardown(_ context.Context, _ *core.RunCtx, _ []core.TestRequi
 func TestScopedSetupOrderingAndFailure(t *testing.T) {
 	rec := &recorder{}
 	// Two tools share group gA (setup succeeds); tool t3 is in group gB (fails).
-	registry.Register(stages.ToolIntegration{Name: "t1", Provides: []string{"a"}, Runner: recRunner{"t1", rec}, SetupGroups: []string{"gA"}})
-	registry.Register(stages.ToolIntegration{Name: "t2", Provides: []string{"b"}, Runner: recRunner{"t2", rec}, SetupGroups: []string{"gA"}})
-	registry.Register(stages.ToolIntegration{Name: "t3", Provides: []string{"c"}, Runner: recRunner{"t3", rec}, SetupGroups: []string{"gB"}})
+	registry.Register(stages.ToolIntegration{Name: "t1", Provides: []string{"a"}, NewSession: func() stages.Session { return &recRunner{name: "t1", rec: rec} }, SetupGroups: []string{"gA"}})
+	registry.Register(stages.ToolIntegration{Name: "t2", Provides: []string{"b"}, NewSession: func() stages.Session { return &recRunner{name: "t2", rec: rec} }, SetupGroups: []string{"gA"}})
+	registry.Register(stages.ToolIntegration{Name: "t3", Provides: []string{"c"}, NewSession: func() stages.Session { return &recRunner{name: "t3", rec: rec} }, SetupGroups: []string{"gB"}})
 	registry.RegisterSetup(recSetup{scope: stages.ScopeRun, key: "r", rec: rec})
 	registry.RegisterSetup(recSetup{scope: stages.ScopeGroup, key: "gA", rec: rec})
 	registry.RegisterSetup(recSetup{scope: stages.ScopeGroup, key: "gB", rec: rec, fail: true})

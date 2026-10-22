@@ -9,14 +9,9 @@ import (
 
 func init() {
 	registry.Register(stages.ToolIntegration{
-		Name:         "kube-burner",
-		Provides:     []string{"TR-VIRT-010", "TR-VIRT-027"},
-		Preflight:    preflight{},
-		Provisioner:  provisioner{},
-		Runner:       runner{},
-		LogCollector: collector{},
-		ResultParser: parser{},
-		Teardown:     teardown{},
+		Name:       "kube-burner",
+		Provides:   []string{"TR-VIRT-010", "TR-VIRT-027"},
+		NewSession: func() stages.Session { return &session{} },
 		Evaluators: map[string]stages.Evaluator{
 			"TR-VIRT-010": snapshotEvaluator{},
 			"TR-VIRT-027": snapshotEvaluator{},
