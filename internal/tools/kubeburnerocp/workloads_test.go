@@ -11,7 +11,8 @@ import (
 
 func TestWorkloadPreflightContinuesAfterInvalidParameters(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	findings, err := (preflight{}).Check(context.Background(), nil, core.NewBag(), []core.TestRequirement{
+	job := &session{}
+	findings, err := job.Preflight(context.Background(), nil, []core.TestRequirement{
 		{ID: "INVALID", Params: map[string]any{"workload": "unknown"}},
 		{ID: "MIGRATION", Params: map[string]any{"workload": WorkloadVirtMigration, "iteration_vms": 2}},
 		{ID: "PARALLEL", Params: map[string]any{"workload": WorkloadVirtParallel}},
@@ -40,7 +41,10 @@ func TestWorkloadPreflightContinuesAfterInvalidParameters(t *testing.T) {
 			t.Errorf("findings = %+v, want %q exactly once; got %d", findings, fragment, count)
 		}
 	}
-
+	executions := job.executions
+	if len(executions) != 3 || executions[0].Requirement.Err == nil || executions[1].Requirement.Err == nil || executions[2].Requirement.Err != nil {
+		t.Fatalf("executions = %+v, want both invalid requirements and the later valid requirement", executions)
+	}
 }
 
 func TestBuildCLIArgsPVCDensity(t *testing.T) {

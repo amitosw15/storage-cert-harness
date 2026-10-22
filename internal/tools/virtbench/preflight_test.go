@@ -21,14 +21,14 @@ func scenarioForTR(id string) Scenario {
 	return Scenario{}
 }
 
-func checkPreflight(ctx context.Context, rc *core.RunCtx, trs []core.TestRequirement) ([]core.Finding, error) {
-	return (preflight{sc: scenarioForTR(trs[0].ID)}).Check(ctx, rc, core.NewBag(), trs)
+func testSession(trs []core.TestRequirement) *session {
+	return &session{sc: scenarioForTR(trs[0].ID), trs: trs}
 }
 
 func TestPreflightMissingBinaryContinuesIndependentChecks(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	trs := []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"num_vms": 0}}}
-	findings, err := checkPreflight(context.Background(), &core.RunCtx{}, trs)
+	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestPreflightReplayReportsLiveChecksAsSkipped(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	dir := t.TempDir()
 	trs := []core.TestRequirement{{ID: "TR-VIRT-008", Params: map[string]any{"results_dir": dir}}}
-	findings, err := checkPreflight(context.Background(), &core.RunCtx{}, trs)
+	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestPreflightReplayPathErrorStillReportsLiveSkips(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	missing := filepath.Join(t.TempDir(), "missing")
 	trs := []core.TestRequirement{{ID: "TR-VIRT-008", Params: map[string]any{"results_dir": missing}}}
-	findings, err := checkPreflight(context.Background(), &core.RunCtx{}, trs)
+	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestPreflightContinuesBatchAfterParameterError(t *testing.T) {
 		{ID: "TR-VIRT-008", Params: map[string]any{"storage_class": "sc"}},
 		{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}},
 	}
-	findings, err := checkPreflight(context.Background(), &core.RunCtx{}, trs)
+	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestSnapshotFlagDoesNotProbeForNonCloneWorkload(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 	trs := []core.TestRequirement{{ID: "TR-STOR-001", Params: map[string]any{"storage_class": "sc", "use_snapshot": true}}}
-	findings, err := checkPreflight(context.Background(), &core.RunCtx{}, trs)
+	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ echo '{"items":[{"metadata":{"name":"worker-a","labels":{"node-role.kubernetes.i
 	}
 	t.Setenv("PATH", dir)
 	trs := []core.TestRequirement{{ID: "TR-VIRT-008", Params: map[string]any{"storage_class": "sc", "target_node": "worker-a"}}}
-	findings, err := checkPreflight(context.Background(), &core.RunCtx{}, trs)
+	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestSingleNodeUnpinnedWorkerCheckIsSkipped(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 	trs := []core.TestRequirement{{ID: "TR-VIRT-013", Params: map[string]any{"storage_class": "sc"}}}
-	findings, err := checkPreflight(context.Background(), &core.RunCtx{}, trs)
+	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,58 @@ func TestSingleNodeUnpinnedWorkerCheckIsSkipped(t *testing.T) {
 	}
 }
 
-func TestVirtbenchWorkloadsMatchCatalogAndRegistry(t *testing.T) {
+func TestReplayLifecycleStaysInsideSession(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	dir := t.TempDir()
+	data, err := os.ReadFile(filepath.Join("testdata", SummaryFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, SummaryFileName), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	trs := []core.TestRequirement{{ID: "TR-VIRT-002", Params: map[string]any{"results_dir": dir}}}
+	integration, ok := registry.Get(string(core.ToolVirtbench) + " " + string(WorkloadDatasourceClone))
+	if !ok {
+		t.Fatal("datasource-clone integration is not registered")
+	}
+	s := integration.NewSession().(*session)
+	rc := sshTestRunCtx(t)
+	findings, err := s.Preflight(context.Background(), rc, trs)
+	if err != nil {
+		t.Fatalf("replay preflight = %+v, %v", findings, err)
+	}
+	for _, finding := range findings {
+		if finding.Level == "error" {
+			t.Fatalf("replay preflight = %+v", findings)
+		}
+	}
+	if err := s.Provision(context.Background(), rc); err != nil {
+		t.Fatal(err)
+	}
+	if !s.replay || s.resultsRoot != dir {
+		t.Fatalf("session replay state = %+v", s)
+	}
+	if err := s.Run(context.Background(), rc); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := s.Collect(context.Background(), rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, err := s.Parse(context.Background(), rc, logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].TRID != trs[0].ID || results[0].Native != core.OutcomePass {
+		t.Fatalf("parsed results = %+v, want TR %s", results, trs[0].ID)
+	}
+	if err := s.Teardown(context.Background(), rc); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVirtbenchWorkloadsMatchCatalogAndRegistrySessions(t *testing.T) {
 	var catalog struct {
 		TestRequirements []struct {
 			ID             string `json:"id"`
@@ -208,11 +259,14 @@ func TestVirtbenchWorkloadsMatchCatalogAndRegistry(t *testing.T) {
 			t.Errorf("registry lacks %q", scenario.IntegrationName())
 			continue
 		}
-		stage, ok := integration.Preflight.(preflight)
-		if !ok || stage.sc.ProvidesTR != scenario.ProvidesTR {
-			t.Errorf("%s preflight bound to the wrong scenario", scenario.ProvidesTR)
+		first, second := integration.NewSession().(*session), integration.NewSession().(*session)
+		if first == second || first.sc.ProvidesTR != scenario.ProvidesTR || second.sc.ProvidesTR != scenario.ProvidesTR {
+			t.Errorf("%s registry did not create isolated scenario sessions", scenario.ProvidesTR)
 		}
-
+		first.resultsRoot = "first"
+		if second.resultsRoot != "" {
+			t.Errorf("%s session state leaked between factory calls", scenario.ProvidesTR)
+		}
 	}
 	for id := range actual {
 		if !declared[id] {

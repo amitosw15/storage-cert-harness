@@ -2,12 +2,12 @@ package virtbench
 
 import (
 	"context"
+
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/tools/common"
 )
 
-type preflight struct{ sc Scenario }
-
-func (preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) ([]core.Finding, error) {
-	return common.RunPreflightChecks(ctx, workloadChecks(rc, bag, trs)), nil
+func (s *session) Preflight(ctx context.Context, rc *core.RunCtx, trs []core.TestRequirement) ([]core.Finding, error) {
+	s.trs = trs
+	return common.RunPreflightChecks(ctx, workloadChecks(rc, s, trs)), nil
 }

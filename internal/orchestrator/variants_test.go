@@ -17,30 +17,36 @@ import (
 
 type variantProbe struct{ dirs []string }
 
-func (p *variantProbe) Run(_ context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error) {
-	if len(trs) != 1 {
-		return stages.RunHandle{}, fmt.Errorf("expected isolated execution")
-	}
-	if _, ok := bag.Get("result"); ok {
-		return stages.RunHandle{}, fmt.Errorf("bag reused")
-	}
-	tr := trs[0]
-	p.dirs = append(p.dirs, rc.WorkDir)
-	if err := os.WriteFile(filepath.Join(rc.WorkDir, "artifact"), []byte(tr.Variant), 0o600); err != nil {
-		return stages.RunHandle{}, err
-	}
-	bag.Set("result", core.TestResult{TRID: tr.ID, Metrics: []core.Metric{{Name: "latency", Value: tr.Params["load"].(float64), Unit: "s"}}})
-	return stages.RunHandle{}, nil
+type variantSession struct {
+	sessionStub
+	probe  *variantProbe
+	result core.TestResult
 }
-func (*variantProbe) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, _ core.LogBundle) ([]core.TestResult, error) {
-	r, _ := core.GetAs[core.TestResult](bag, "result")
-	return []core.TestResult{r}, nil
+
+func (s *variantSession) Run(_ context.Context, rc *core.RunCtx) error {
+	if len(s.trs) != 1 {
+		return fmt.Errorf("expected isolated execution")
+	}
+	if s.result.TRID != "" {
+		return fmt.Errorf("session reused")
+	}
+	tr := s.trs[0]
+	s.probe.dirs = append(s.probe.dirs, rc.WorkDir)
+	if err := os.WriteFile(filepath.Join(rc.WorkDir, "artifact"), []byte(tr.Variant), 0o600); err != nil {
+		return err
+	}
+	s.result = core.TestResult{TRID: tr.ID, Metrics: []core.Metric{{Name: "latency", Value: tr.Params["load"].(float64), Unit: "s"}}}
+	return nil
+}
+
+func (s *variantSession) Parse(context.Context, *core.RunCtx, core.LogBundle) ([]core.TestResult, error) {
+	return []core.TestResult{s.result}, nil
 }
 
 func TestVariantsRunAndGradeIndependently(t *testing.T) {
 	probe := &variantProbe{}
 	tool := "variant-probe"
-	registry.Register(stages.ToolIntegration{Name: tool, Runner: probe, ResultParser: probe})
+	registry.Register(stages.ToolIntegration{Name: tool, NewSession: func() stages.Session { return &variantSession{probe: probe} }})
 	// fake workload values and gates exercise conditional grading.
 	small, large, gate := 10.0, 100.0, 50.0
 	tr := core.TestRequirement{ID: "TR-VARIANT", AutomationTool: tool,

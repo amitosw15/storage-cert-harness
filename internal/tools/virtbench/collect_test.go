@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
 // Virtbench nests its output under <n>-disk/<timestamp>_<prefix>_<range>/, and
@@ -48,7 +47,8 @@ func writeResults(t *testing.T, root, subdir, summary, detail string) {
 
 func cloneAtScaleScenario() Scenario {
 	return Scenario{
-		AutomationTool: "virtbench datasource-clone --num-disks 2",
+		AutomationTool: core.ToolVirtbench,
+		ScenarioName:   WorkloadCloneAtScale,
 		ProvidesTR:     "TR-VIRT-018",
 		ResultFile:     SummaryFileName,
 		DetailFile:     DetailCloneFileName,
@@ -69,9 +69,8 @@ func TestCollectReadsOnlyItsOwnExecution(t *testing.T) {
 	writeResults(t, singleNode, singleNodeDir, singleNodeSummary, singleNodeDetail)
 	writeResults(t, atScale, atScaleDir, atScaleSummary, atScaleDetail)
 
-	bag := core.NewBag()
-	bag.Set("results_root", atScale)
-	bundle, err := (collector{sc: cloneAtScaleScenario()}).Collect(context.Background(), rc, bag, stages.RunHandle{ID: "test"})
+	s := &session{sc: cloneAtScaleScenario(), resultsRoot: atScale}
+	bundle, err := s.Collect(context.Background(), rc)
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
@@ -101,10 +100,9 @@ func TestCollectRefusesAmbiguousResults(t *testing.T) {
 	writeResults(t, shared, singleNodeDir, singleNodeSummary, singleNodeDetail)
 	writeResults(t, shared, atScaleDir, atScaleSummary, atScaleDetail)
 
-	bag := core.NewBag()
-	bag.Set("results_root", shared)
+	s := &session{sc: cloneAtScaleScenario(), resultsRoot: shared}
 	rc := &core.RunCtx{RunID: "20261018-060401", WorkDir: shared, Logger: slog.New(slog.DiscardHandler)}
-	bundle, err := (collector{sc: cloneAtScaleScenario()}).Collect(context.Background(), rc, bag, stages.RunHandle{ID: "test"})
+	bundle, err := s.Collect(context.Background(), rc)
 	if err == nil {
 		// Before the per-execution root this returned the lexically first match:
 		// "1-disk" beats "2-disk", so the clone-at-scale grade came from the
@@ -127,10 +125,9 @@ func TestCollectRefusesRootCopyShadowingNestedResults(t *testing.T) {
 	writeResults(t, root, ".", atScaleSummary, atScaleDetail)
 	writeResults(t, root, singleNodeDir, singleNodeSummary, singleNodeDetail)
 
-	bag := core.NewBag()
-	bag.Set("results_root", root)
+	s := &session{sc: cloneAtScaleScenario(), resultsRoot: root}
 	rc := &core.RunCtx{RunID: "20261018-060401", WorkDir: root, Logger: slog.New(slog.DiscardHandler)}
-	if _, err := (collector{sc: cloneAtScaleScenario()}).Collect(context.Background(), rc, bag, stages.RunHandle{ID: "test"}); err == nil {
+	if _, err := s.Collect(context.Background(), rc); err == nil {
 		t.Fatal("a copy in the root hid the nested one; the search must consider both")
 	}
 }
@@ -153,11 +150,10 @@ func TestCollectFailsWhenRequiredDetailIsAmbiguous(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bag := core.NewBag()
-	bag.Set("results_root", root)
 	sc := cloneAtScaleScenario()
 	sc.DetailParse = func(data []byte) ([]core.Metric, error) { return ClonePercentiles(data, []string{"p99"}) }
-	if _, err := (collector{sc: sc}).Collect(context.Background(), rc, bag, stages.RunHandle{ID: "test"}); err == nil {
+	s := &session{sc: sc, resultsRoot: root}
+	if _, err := s.Collect(context.Background(), rc); err == nil {
 		t.Fatal("collected summary-only when the gated detail file was ambiguous; the execution must fail instead")
 	}
 }
@@ -165,10 +161,9 @@ func TestCollectFailsWhenRequiredDetailIsAmbiguous(t *testing.T) {
 // A result file that is simply absent is a collection error, not a crash.
 func TestCollectReportsMissingResults(t *testing.T) {
 	root := t.TempDir()
-	bag := core.NewBag()
-	bag.Set("results_root", root)
 	rc := &core.RunCtx{RunID: "20261018-060401", WorkDir: root, Logger: slog.New(slog.DiscardHandler)}
-	_, err := (collector{sc: cloneAtScaleScenario()}).Collect(context.Background(), rc, bag, stages.RunHandle{ID: "test"})
+	s := &session{sc: cloneAtScaleScenario(), resultsRoot: root}
+	_, err := s.Collect(context.Background(), rc)
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("err = %v, want a not-found collection error", err)
 	}

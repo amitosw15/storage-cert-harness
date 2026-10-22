@@ -17,10 +17,7 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/tools/common"
 )
 
-type cloneSource struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-}
+type cloneSource = common.NamespacedSource
 
 type snapshotClone struct {
 	Selection clustercheck.SnapshotSelection
@@ -35,25 +32,30 @@ func usesSnapshot(tr core.TestRequirement) bool {
 	return b
 }
 
-// snapshotClonePreflight resolves every source without creating resources. The
-// released virtbench CLI has no snapshot-class or use-snapshot flags, so the
-// adapter supplies a staged VM template with explicit CDI snapshot sources.
+// snapshotClonePreflight binds a selected snapshot class to the VM template.
 func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRequirement) (*snapshotClone, error) {
+	c := &snapshotClone{Sources: map[int]cloneSource{}}
 	configured := ""
-	if rc.Backend != nil {
+	if rc != nil && rc.Backend != nil {
 		configured = rc.Backend.SnapshotClass
 	}
-	selection, err := clustercheck.ResolveSnapshot(ctx, storageClass(rc, tr), configured, strParamOr(tr, "kubeconfig", ""), false)
-	if err != nil {
+	if storageClass(rc, tr) == "" {
+		return nil, fmt.Errorf("snapshot clone: storage_class required")
+	}
+	selectionCheck := common.SnapshotSupportCheck(common.SnapshotSupport{
+		Name: "snapshot clone support", StorageClass: storageClass(rc, tr), SnapshotClass: configured,
+		Kubeconfig: strParamOr(tr, "kubeconfig", ""), SnapshotCount: 1,
+		Record: func(selection clustercheck.SnapshotSelection) { c.Selection = selection },
+	})
+	if err := runSnapshotCheck(ctx, selectionCheck); err != nil {
 		return nil, err
 	}
 	data, err := snapshotTemplate(tr)
 	if err != nil {
 		return nil, err
 	}
-	c := &snapshotClone{Selection: selection, Sources: map[int]cloneSource{}}
 	// virtbench also substitutes this placeholder before reading YAML.
-	data = []byte(strings.ReplaceAll(string(data), "{{STORAGE_CLASS_NAME}}", selection.StorageClass))
+	data = []byte(strings.ReplaceAll(string(data), "{{STORAGE_CLASS_NAME}}", c.Selection.StorageClass))
 	if err := yaml.Unmarshal(data, &c.Template); err != nil {
 		return nil, fmt.Errorf("snapshot clone VM template: %w", err)
 	}
@@ -67,51 +69,105 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 		}
 		c.Volumes = append(c.Volumes, v)
 	}
-	cloned := 0
+	cloned := false
 	for i, v := range c.Volumes {
-		source, err := c.resolveSource(ctx, v)
+		source, err := c.resolveAndValidateSource(ctx, i, v)
 		if err != nil {
 			return nil, err
 		}
-		if source == nil { // blank data disks are not clone sources
+		if source == nil {
 			continue
 		}
-		cloned++
-		if pvc, ok := source["pvc"]; ok {
-			var obj struct {
-				Spec struct {
-					StorageClass string `json:"storageClassName"`
-				} `json:"spec"`
-			}
-			if err := c.get(ctx, &obj, "pvc", pvc); err != nil {
-				return nil, err
-			}
-			if _, err := clustercheck.ResolveSnapshot(ctx, obj.Spec.StorageClass, selection.SnapshotClass, selection.Kubeconfig, false); err != nil {
-				return nil, fmt.Errorf("source PVC %s/%s: %w", pvc.Namespace, pvc.Name, err)
-			}
-			c.Sources[i] = pvc
-		} else if snapshot, ok := source["snapshot"]; ok {
-			var obj struct {
-				Spec struct {
-					Class string `json:"volumeSnapshotClassName"`
-				} `json:"spec"`
-			}
-			if err := c.get(ctx, &obj, "volumesnapshot", snapshot); err != nil {
-				return nil, err
-			}
-			if obj.Spec.Class != selection.SnapshotClass {
-				return nil, fmt.Errorf("source snapshot %s/%s uses snapshot class %q, requested %q", snapshot.Namespace, snapshot.Name, obj.Spec.Class, selection.SnapshotClass)
-			}
-			delete(v, "sourceRef")
-			v["source"] = map[string]any{"snapshot": map[string]any{"name": snapshot.Name, "namespace": snapshot.Namespace}}
-		} else {
-			return nil, fmt.Errorf("use_snapshot requires PVC or snapshot clone sources")
-		}
+		cloned = true
 	}
-	if cloned == 0 {
+	if !cloned {
 		return nil, fmt.Errorf("use_snapshot requires at least one PVC or snapshot clone source in dataVolumeTemplates")
 	}
 	return c, nil
+}
+
+func (c *snapshotClone) resolveAndValidateSource(ctx context.Context, index int, volume map[string]any) (map[string]common.NamespacedSource, error) {
+	var sources map[string]common.NamespacedSource
+	if ref, ok := volume["sourceRef"].(map[string]any); ok {
+		if ref["kind"] != "DataSource" {
+			return nil, fmt.Errorf("use_snapshot: unsupported sourceRef kind %v", ref["kind"])
+		}
+		name, _ := ref["name"].(string)
+		namespace, _ := ref["namespace"].(string)
+		err := runSnapshotCheck(ctx, common.DataSourceCheck(common.DataSourceRequirement{
+			Source: common.NamespacedSource{Name: name, Namespace: namespace}, Kubeconfig: c.Selection.Kubeconfig,
+			Record: func(resolved map[string]common.NamespacedSource) { sources = resolved },
+		}))
+		if err != nil {
+			return nil, err
+		}
+		if sources == nil {
+			return nil, nil
+		}
+		if len(sources) == 0 {
+			return nil, fmt.Errorf("use_snapshot requires PVC or snapshot clone sources")
+		}
+	} else {
+		direct, _ := volume["source"].(map[string]any)
+		if _, blank := direct["blank"]; blank {
+			return nil, nil
+		}
+		encoded, err := json.Marshal(volume["source"])
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(encoded, &sources); err != nil {
+			return nil, err
+		}
+	}
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("use_snapshot: missing clone source")
+	}
+	if pvc, ok := sources["pvc"]; ok {
+		err := runSnapshotCheck(ctx, common.PVCSnapshotCompatibilityCheck(common.SnapshotSourceRequirement{
+			Source: pvc, SnapshotClass: c.Selection.SnapshotClass, Kubeconfig: c.Selection.Kubeconfig,
+		}))
+		if err != nil {
+			return nil, err
+		}
+		c.Sources[index] = pvc
+		return sources, nil
+	}
+	if snapshot, ok := sources["snapshot"]; ok {
+		err := runSnapshotCheck(ctx, common.VolumeSnapshotCompatibilityCheck(common.SnapshotSourceRequirement{
+			Source: snapshot, SnapshotClass: c.Selection.SnapshotClass, Kubeconfig: c.Selection.Kubeconfig,
+		}))
+		if err != nil {
+			return nil, err
+		}
+		delete(volume, "sourceRef")
+		volume["source"] = map[string]any{"snapshot": map[string]any{"name": snapshot.Name, "namespace": snapshot.Namespace}}
+		return sources, nil
+	}
+	return nil, fmt.Errorf("use_snapshot requires PVC or snapshot clone sources")
+}
+
+func runSnapshotCheck(ctx context.Context, check common.PreflightCheck) error {
+	for _, finding := range common.RunPreflightChecks(ctx, []common.PreflightCheck{check}) {
+		if finding.Level == "error" {
+			return fmt.Errorf("%s", finding.Message)
+		}
+	}
+	return nil
+}
+
+func snapshotCloneBinding(rc *core.RunCtx, s *session, tr core.TestRequirement) common.PreflightCheck {
+	return common.PreflightCheck{
+		Name: tr.ID + " snapshot clone",
+		Run: func(ctx context.Context) []core.Finding {
+			clone, err := snapshotClonePreflight(ctx, rc, tr)
+			if err != nil {
+				return []core.Finding{{Level: "error", Message: tr.ID + " snapshot clone: " + err.Error()}}
+			}
+			s.snapshotClone = clone
+			return []core.Finding{clone.Selection.Finding()}
+		},
+	}
 }
 
 func snapshotTemplate(tr core.TestRequirement) ([]byte, error) {
@@ -130,52 +186,6 @@ func snapshotTemplate(tr core.TestRequirement) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("use_snapshot: cannot locate virtbench's default VM template; set vm_template or VIRTBENCH_REPO")
-}
-
-func (c *snapshotClone) get(ctx context.Context, obj any, kind string, source cloneSource) error {
-	if source.Name == "" || source.Namespace == "" {
-		return fmt.Errorf("snapshot clone: %s source requires name and namespace", kind)
-	}
-	out, err := clustercheck.SnapshotCommand(ctx, c.Selection.Kubeconfig, nil, "get", kind, source.Name, "-n", source.Namespace, "-o", "json")
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(out, obj)
-}
-
-func (c *snapshotClone) resolveSource(ctx context.Context, v map[string]any) (map[string]cloneSource, error) {
-	if ref, ok := v["sourceRef"].(map[string]any); ok {
-		if ref["kind"] != "DataSource" {
-			return nil, fmt.Errorf("use_snapshot: unsupported sourceRef kind %v", ref["kind"])
-		}
-		name, _ := ref["name"].(string)
-		ns, _ := ref["namespace"].(string)
-		var ds struct {
-			Spec struct {
-				Source map[string]cloneSource `json:"source"`
-			} `json:"spec"`
-		}
-		if err := c.get(ctx, &ds, "datasource", cloneSource{Name: name, Namespace: ns}); err != nil {
-			return nil, err
-		}
-		return ds.Spec.Source, nil
-	}
-	source, _ := v["source"].(map[string]any)
-	if _, blank := source["blank"]; blank {
-		return nil, nil
-	}
-	data, err := json.Marshal(source)
-	if err != nil {
-		return nil, err
-	}
-	var decoded map[string]cloneSource
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return nil, err
-	}
-	if len(decoded) == 0 {
-		return nil, fmt.Errorf("use_snapshot: missing clone source")
-	}
-	return decoded, nil
 }
 
 // prepare creates only new snapshots; source PVCs and DataSources are read-only.
@@ -231,19 +241,5 @@ func (c *snapshotClone) cleanup(ctx context.Context, rc *core.RunCtx) {
 		if _, err := clustercheck.SnapshotCommand(ctx, c.Selection.Kubeconfig, nil, "delete", "volumesnapshot", source.Name, "-n", source.Namespace, "--ignore-not-found", "--wait=false"); err != nil {
 			rc.Logger.Warn("virtbench: delete source snapshot", "name", source.Name, "err", err)
 		}
-	}
-}
-
-func snapshotCloneBinding(rc *core.RunCtx, bag *core.Bag, tr core.TestRequirement) common.PreflightCheck {
-	return common.PreflightCheck{
-		Name: tr.ID + " snapshot clone",
-		Run: func(ctx context.Context) []core.Finding {
-			clone, err := snapshotClonePreflight(ctx, rc, tr)
-			if err != nil {
-				return []core.Finding{{Level: "error", Message: tr.ID + " snapshot clone: " + err.Error()}}
-			}
-			bag.Set("snapshot_clone", clone)
-			return []core.Finding{clone.Selection.Finding()}
-		},
 	}
 }

@@ -162,13 +162,6 @@ func templateDiskCount(path string) (int, error) {
 	return 0, fmt.Errorf("no VirtualMachine document found")
 }
 
-// --- Preflight hook ----------------------------------------------------------
-
-// singleNodeCeilingPreflight adds one check on top of the generic ones
-// (binary, storage_class): when node_name is pinned, it must name a real,
-// schedulable worker (listWorkers is shared with the drain scenario,
-// drain.go). Left unpinned, virtbench itself picks a random worker.
-
 // --- DeriveMetrics -----------------------------------------------------------
 
 // singleNodeLunMetric derives max_luns_per_node = successful VMs × num_disks.
