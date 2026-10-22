@@ -89,7 +89,12 @@ func ToolIdentityCheck(tr core.TestRequirement, expected core.ToolName) Prefligh
 	return PreflightCheck{
 		Name: "automation tool",
 		Run: func(context.Context) []core.Finding {
-			if tr.AutomationTool != "" && tr.AutomationTool != string(expected) {
+			tool := tr.AutomationTool
+			// Legacy catalogs append workloads, labels, and arguments after the tool name.
+			if fields := strings.Fields(tool); len(fields) > 0 {
+				tool = fields[0]
+			}
+			if tool != "" && tool != string(expected) {
 				return []core.Finding{{Level: "error", Message: fmt.Sprintf("%s: automation_tool %q must be %q", tr.ID, tr.AutomationTool, expected)}}
 			}
 			return nil
@@ -149,7 +154,7 @@ func CommandCheck(requirement CommandRequirement) PreflightCheck {
 				}
 				return []core.Finding{{Level: "error", Message: fmt.Sprintf("%s command %q on PATH: %v", prefix, name, err)}}
 			}
-			cmd := exec.CommandContext(ctx, path, requirement.Args...)
+			cmd := exec.CommandContext(ctx, path, requirement.Args...) // #nosec G204 -- executable and arguments are declared by harness workloads, without a shell.
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				return []core.Finding{{Level: "error", Message: fmt.Sprintf("command %q unavailable: %v: %s", name, err, strings.TrimSpace(string(output)))}}
