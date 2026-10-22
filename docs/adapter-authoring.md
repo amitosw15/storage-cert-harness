@@ -96,7 +96,8 @@ unkeyed. Include every probe input in a reuse key.
 `SnapshotSupportCheck` separates snapshot selection mode (`VMSnapshot`) from
 the VM client prerequisite (`RequireVMClient`). KB requires both. Direct
 snapshot consumers can resolve a class without probing VM client support.
-VirtBench still uses its existing preflight pending workload migration.
+VirtBench builds scenario checks from its workload table and runs them through
+the same `RunPreflightChecks` runner.
 
 ## Multi-scenario tools = a scenario table
 
@@ -139,12 +140,15 @@ must happen **once per run** or **once for a batch of tests that share it**, use
   so registering the same group from several tool packages is safe).
 - Each tool that depends on a group lists it in
   `ToolIntegration.SetupGroups: []string{"<key>"}`.
-- The orchestrator runs `Setup` once (run → group) before the job loop and
+- The orchestrator preflights every session before shared setup, then runs
+  `Setup` once (run → group) for validated executions before the job loop and
   `Teardown` once in reverse after all jobs; a failed `Setup` errors its in-scope
   TRs instead of running them. Make `Setup` idempotent (create-if-absent). Roll
   back resources your `Setup` created when `Setup` returns an error (teardown is
   not called for failed providers). In `Teardown`, delete only what your provider
   owns unless the resource is explicitly shared and documented (see virtbench).
+- Return cleanup errors from `Teardown`; the orchestrator records them alongside
+  the original results and blocks certification.
 
 virtbench is the reference: all its scenarios share one `ssh-test-pod` helper via
 a group provider (`internal/tools/virtbench/setup.go`). A batch reuses the helper

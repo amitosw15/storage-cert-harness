@@ -40,7 +40,7 @@ func TestParseSingleNodeCeilingNativePassDespiteFailures(t *testing.T) {
 // TR-VIRT-013: a real >= 50 bar for max_vms_per_node, and no bar at all for
 // max_luns_per_node (it is published, never gated).
 func tr013SLAs() []core.SLA {
-	measuredBy := []string{"virtbench datasource-clone --single-node"}
+	measuredBy := []string{string(core.ToolVirtbench)}
 	return []core.SLA{
 		{Metric: "max_vms_per_node", Type: "count", Unit: "count", MeasuredBy: measuredBy},
 		{Metric: "max_luns_per_node", Type: "count", Unit: "count", MeasuredBy: measuredBy},
@@ -60,7 +60,7 @@ func tr013Bars() []core.SLA {
 func singleNodeEvaluator() scenarioEvaluator {
 	return scenarioEvaluator{sc: Scenario{
 		AutomationTool: core.ToolVirtbench,
-		Scenario:       string(WorkloadSingleNodeCeiling),
+		ScenarioName:   WorkloadSingleNodeCeiling,
 		DeriveMetrics:  singleNodeLunMetric,
 	}}
 }
@@ -72,7 +72,7 @@ func singleNodeEvaluator() scenarioEvaluator {
 func TestSingleNodeCeilingComputesLuns(t *testing.T) {
 	tr := core.TestRequirement{
 		ID:             "TR-VIRT-013",
-		AutomationTool: core.ToolVirtbench,
+		AutomationTool: string(core.ToolVirtbench),
 		Scenario:       string(WorkloadSingleNodeCeiling),
 		SLAs:           tr013SLAs(),
 		Bars:           tr013Bars(),
@@ -110,7 +110,7 @@ func TestSingleNodeCeilingComputesLuns(t *testing.T) {
 func TestSingleNodeCeilingBelowThresholdFails(t *testing.T) {
 	tr := core.TestRequirement{
 		ID:             "TR-VIRT-013",
-		AutomationTool: core.ToolVirtbench,
+		AutomationTool: string(core.ToolVirtbench),
 		Scenario:       string(WorkloadSingleNodeCeiling),
 		SLAs:           tr013SLAs(),
 		Bars:           tr013Bars(),

@@ -32,6 +32,15 @@ type job struct {
 	trs          []core.TestRequirement
 	parallelSafe bool
 	groups       []string
+	pipelines    []pipeline
+}
+
+// pipeline retains one preflighted session and the executions it owns.
+type pipeline struct {
+	tool    stages.ToolIntegration
+	trs     []core.TestRequirement
+	rc      *core.RunCtx
+	session stages.Session
 }
 
 // Run selects and scores the given TRs, returning a graded report. TRs whose
@@ -226,47 +235,88 @@ func Run(ctx context.Context, cfg config.Config, trs []core.TestRequirement, pro
 	}
 	checkpoint(core.RunStatusRunning)
 
-	// Run scoped setup (run → group) once each before the job loop; a failed
-	// setup errors its in-scope TRs and skips their jobs. Successful setups are
-	// torn down once each in reverse order after all jobs (deferred). See ADR-0008.
+	jobs, preflightVerdicts := prepareJobs(ctx, groupByTool(scorable, cfg.Scheduling), rc, progress)
+	verdicts = append(verdicts, preflightVerdicts...)
+	scorable = nil
+	for _, j := range jobs {
+		scorable = append(scorable, j.trs...)
+	}
+	checkpoint(core.RunStatusRunning)
+
+	// Run shared setup only for preflighted executions, then tear it down in reverse order.
 	setups := activeSetups(scorable)
 	var ranSetups []scopedSetup
 	for _, s := range setups {
+		s.trs = slices.DeleteFunc(slices.Clone(s.trs), func(tr core.TestRequirement) bool {
+			return !slices.ContainsFunc(scorable, func(eligible core.TestRequirement) bool {
+				return tr.ID == eligible.ID && tr.Variant == eligible.Variant
+			})
+		})
+		if len(s.trs) == 0 {
+			continue
+		}
 		rc.SetStage("setup:"+s.label, s.trs)
 		if err := s.provider.Setup(ctx, rc, s.trs); err != nil {
 			verdicts = append(verdicts, errTRs(s.trs, "setup ["+s.label+"]: "+err.Error())...)
-			for _, tr := range s.trs {
-				if ctx.Err() != nil {
-					progress.abort(tr, core.OutcomeError)
-				} else {
-					progress.complete(tr, core.OutcomeError)
-				}
-			}
 			scorable = withoutTRs(scorable, s.trs)
 			continue
 		}
 		ranSetups = append(ranSetups, s)
 	}
 	checkpoint(core.RunStatusRunning)
-	defer func() {
-		for i := len(ranSetups) - 1; i >= 0; i-- {
-			if err := ranSetups[i].provider.Teardown(ctx, rc, ranSetups[i].trs); err != nil {
-				rc.Logger.Warn("shared setup teardown failed", "setup", ranSetups[i].label, "err", err)
-			}
-		}
-	}()
 
-	jobs := groupByTool(scorable, cfg.Scheduling)
 	g := grader.New()
 
 	schedule(cfg.Concurrency, jobs, func(j job) {
-		vs, ms := runToolExecutions(ctx, j, rc, g, progress)
+		var vs []core.Verdict
+		var ms []core.Measurement
+		for _, p := range j.pipelines {
+			if !slices.ContainsFunc(scorable, func(tr core.TestRequirement) bool {
+				return tr.ID == p.trs[0].ID && tr.Variant == p.trs[0].Variant
+			}) {
+				vs = append(vs, teardownSession(ctx, p)...)
+				for _, tr := range p.trs {
+					if ctx.Err() != nil {
+						progress.abort(tr, core.OutcomeError)
+					} else {
+						progress.complete(tr, core.OutcomeError)
+					}
+				}
+				continue
+			}
+			v, m := runJob(ctx, p, g)
+			for _, tr := range p.trs {
+				if ctx.Err() != nil {
+					progress.abort(tr, core.OutcomeError)
+				} else {
+					progress.complete(tr, summarizeTR(v, tr))
+				}
+			}
+			vs = append(vs, v...)
+			ms = append(ms, m...)
+		}
 		resultsMu.Lock()
 		verdicts = append(verdicts, vs...)
 		measurements = append(measurements, ms...)
 		resultsMu.Unlock()
 		checkpoint(core.RunStatusRunning)
 	})
+
+	for i := len(ranSetups) - 1; i >= 0; i-- {
+		setup := ranSetups[i]
+		if err := setup.provider.Teardown(ctx, rc, setup.trs); err != nil {
+			verdicts = append(verdicts, cleanupFailure(rc, "", setup.trs, "teardown:"+setup.label, err)...)
+			stateMu.Lock()
+			for _, tr := range setup.trs {
+				label := core.ExecutionLabel(tr.ID, tr.Variant)
+				execution := executionStates[label]
+				execution.Outcome = core.OutcomeError
+				executionStates[label] = execution
+			}
+			stateMu.Unlock()
+		}
+	}
+	checkpoint(core.RunStatusRunning)
 
 	sort.Slice(verdicts, func(i, k int) bool {
 		if verdicts[i].TR != verdicts[k].TR {
@@ -343,7 +393,7 @@ func runnable(tr core.TestRequirement) bool {
 	if tr.AutomationTool == "" || tr.AutomationTool == core.CheckManual {
 		return false
 	}
-	_, ok := resolveTool(tr)
+	_, ok := ResolveTool(tr)
 	return ok
 }
 
@@ -362,8 +412,6 @@ func ResolveTool(tr core.TestRequirement) (stages.ToolIntegration, bool) {
 	}
 	return registry.ForTRID(tr.ID)
 }
-
-func resolveTool(tr core.TestRequirement) (stages.ToolIntegration, bool) { return ResolveTool(tr) }
 
 // SelectTRs applies the filter to a TR list. Exported for CLI subcommands (list,
 // preflight) that need the same selection semantics as a run.
@@ -514,7 +562,7 @@ func activeSetups(scorable []core.TestRequirement) []scopedSetup {
 	groupTRs := map[string][]core.TestRequirement{}
 	var order []string
 	for _, tr := range scorable {
-		ti, ok := resolveTool(tr)
+		ti, ok := ResolveTool(tr)
 		if !ok {
 			continue
 		}
@@ -555,7 +603,7 @@ func groupByTool(trs []core.TestRequirement, sched map[string]config.ToolSchedul
 	byTool := map[string][]core.TestRequirement{}
 	order := []string{}
 	for _, tr := range trs {
-		integration, _ := resolveTool(tr)
+		integration, _ := ResolveTool(tr)
 		if _, ok := byTool[integration.Name]; !ok {
 			order = append(order, integration.Name)
 		}
@@ -563,7 +611,7 @@ func groupByTool(trs []core.TestRequirement, sched map[string]config.ToolSchedul
 	}
 	var jobs []job
 	for _, tool := range order {
-		ti, _ := resolveTool(byTool[tool][0]) // guaranteed resolvable (runnable filtered)
+		ti, _ := ResolveTool(byTool[tool][0]) // guaranteed resolvable (runnable filtered)
 		j := job{tool: tool, trs: byTool[tool], parallelSafe: ti.ParallelSafe}
 		groups := map[string]bool{}
 		for _, gr := range ti.ExclusivityGroups {
@@ -662,11 +710,10 @@ func relativeTo(workdir string, paths []string) (kept, dropped []string) {
 	return kept, dropped
 }
 
-// runJob drives one tool's stage pipeline over its selected TRs and grades the
-// results. Teardown always runs. Context cancellation short-circuits.
-func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verdicts []core.Verdict, measurements []core.Measurement) {
-	// Time the whole tool run for this job and stamp it onto every verdict, so the
-	// report always shows how long the test took — with or without an SLA bar.
+// runJob executes a preflighted pipeline and always tears down its session.
+func runJob(ctx context.Context, p pipeline, g *grader.Grader) (verdicts []core.Verdict, measurements []core.Measurement) {
+	rc, trs, ti := p.rc, p.trs, p.tool
+	// Stamp each verdict with the duration of execution and session cleanup.
 	start := time.Now()
 	defer func() {
 		d := time.Since(start).Seconds()
@@ -674,75 +721,58 @@ func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verd
 			verdicts[i].DurationS = d
 		}
 	}()
+	defer func() { verdicts = append(verdicts, teardownSession(ctx, p)...) }()
 	if err := ctx.Err(); err != nil {
-		return errTRs(j.trs, "cancelled: "+err.Error()), nil
+		return errTRs(trs, "cancelled: "+err.Error()), nil
 	}
-	ti, ok := resolveTool(j.trs[0])
-	if !ok {
-		return errTRs(j.trs, fmt.Sprintf("tool %q not registered", j.tool)), nil
-	}
-	if ti.NewSession == nil {
-		return errTRs(j.trs, "tool has no session factory"), nil
-	}
-	session := ti.NewSession()
-
-	defer func() {
-		rc.SetStage("teardown", j.trs)
-		_ = session.Teardown(ctx, rc)
-	}()
-
-	rc.SetStage("preflight", j.trs)
-	findings, err := session.Preflight(ctx, rc, j.trs)
-	if err != nil {
-		return errTRs(j.trs, "preflight: "+err.Error()), nil
-	}
-	for _, f := range findings {
-		if f.Level == "error" {
-			return errTRs(j.trs, "preflight failed: "+f.Message), nil
+	session := p.session
+	if len(trs) == 1 && trs[0].Variant != "" {
+		if err := os.MkdirAll(rc.WorkDir, 0o750); err != nil {
+			return errTRs(trs, "variant workdir: "+err.Error()), nil
 		}
 	}
 
-	rc.SetStage("provision", j.trs)
+	rc.SetStage("provision", trs)
 	if err := session.Provision(ctx, rc); err != nil {
-		return errTRs(j.trs, "provision: "+err.Error()), nil
+		return errTRs(trs, "provision: "+err.Error()), nil
 	}
 
-	rc.SetStage("run", j.trs)
+	rc.SetStage("run", trs)
 	if err := session.Run(ctx, rc); err != nil {
-		return errTRs(j.trs, "run: "+err.Error()), nil
+		return errTRs(trs, "run: "+err.Error()), nil
 	}
 
-	rc.SetStage("collect", j.trs)
+	rc.SetStage("collect", trs)
 	lb, err := session.Collect(ctx, rc)
 	if err != nil {
-		return errTRs(j.trs, "collect: "+err.Error()), nil
+		return errTRs(trs, "collect: "+err.Error()), nil
 	}
 	if rc.RecordArtifacts != nil {
 		// A job can span several TRs, and then the flat Refs list mixes
 		// their files together; recording it wholesale would attribute
 		// every TR's results to all of them.
 		if len(lb.RefsByTR) > 0 {
-			for _, tr := range j.trs {
+			for _, tr := range trs {
 				if refs := lb.RefsByTR[tr.ID]; len(refs) > 0 {
 					rc.RecordArtifacts([]core.TestRequirement{tr}, refs)
 				}
 			}
 		} else {
-			rc.RecordArtifacts(j.trs, lb.Refs)
+			rc.RecordArtifacts(trs, lb.Refs)
 		}
 	}
 
-	rc.SetStage("parse", j.trs)
+	rc.SetStage("parse", trs)
 	results, err := session.Parse(ctx, rc, lb)
 	if err != nil {
-		return errTRs(j.trs, "parse: "+err.Error()), nil
+		return errTRs(trs, "parse: "+err.Error()), nil
 	}
 
 	byID := map[string]core.TestResult{}
 	for _, r := range results {
 		byID[r.TRID] = r
 	}
-	for _, tr := range j.trs {
+	for _, tr := range trs {
 		r, ok := byID[tr.ID]
 		if !ok {
 			verdicts = append(verdicts, errTR(tr, "no result produced for test requirement")...)
@@ -841,61 +871,104 @@ func ResolveExecutions(trs []core.TestRequirement, cfg config.Config) ([]core.Te
 	return out, nil
 }
 
-// Keep ordinary multi-TR batching; named variants get independent pipelines.
-// All executions for this tool stay inside its scheduling lock.
-func runToolExecutions(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader, progress *progressTracker) ([]core.Verdict, []core.Measurement) {
-	var ordinary []core.TestRequirement
-	for _, tr := range j.trs {
-		if tr.Variant == "" {
-			ordinary = append(ordinary, tr)
-		}
-	}
-	var vs []core.Verdict
-	var ms []core.Measurement
-	if len(ordinary) > 0 {
-		batch := j
-		batch.trs = ordinary
-		for _, tr := range ordinary {
-			progress.start(tr)
-		}
-		v, m := runJob(ctx, batch, rc, g)
-		for _, tr := range ordinary {
-			if ctx.Err() != nil {
-				progress.abort(tr, core.OutcomeError)
-			} else {
-				progress.complete(tr, summarizeTR(v, tr))
+// prepareJobs validates every pipeline before shared setup creates resources.
+func prepareJobs(ctx context.Context, jobs []job, rc *core.RunCtx, progress *progressTracker) ([]job, []core.Verdict) {
+	var ready []job
+	var verdicts []core.Verdict
+	for _, j := range jobs {
+		tool, _ := registry.Get(j.tool)
+		var batches [][]core.TestRequirement
+		var ordinary []core.TestRequirement
+		for _, tr := range j.trs {
+			if tr.Variant == "" {
+				ordinary = append(ordinary, tr)
 			}
 		}
-		vs = append(vs, v...)
-		ms = append(ms, m...)
-	}
-	for _, tr := range j.trs {
-		if tr.Variant == "" {
-			continue
+		if len(ordinary) > 0 {
+			batches = append(batches, ordinary)
 		}
-		variantRC := *rc
-		// Encode both path components so even programmatically supplied IDs cannot escape.
-		variantRC.WorkDir = filepath.Join(rc.WorkDir, "variants", hex.EncodeToString([]byte(tr.ID)), hex.EncodeToString([]byte(tr.Variant)))
-		if err := os.MkdirAll(variantRC.WorkDir, 0o750); err != nil {
-			vs = append(vs, errTR(tr, "variant workdir: "+err.Error())...)
-			if ctx.Err() != nil {
-				progress.abort(tr, core.OutcomeError)
-			} else {
-				progress.complete(tr, core.OutcomeError)
+		for _, tr := range j.trs {
+			if tr.Variant != "" {
+				batches = append(batches, []core.TestRequirement{tr})
 			}
-			continue
 		}
-		batch := j
-		batch.trs = []core.TestRequirement{tr}
-		progress.start(tr)
-		v, m := runJob(ctx, batch, &variantRC, g)
-		if ctx.Err() != nil {
-			progress.abort(tr, core.OutcomeError)
-		} else {
-			progress.complete(tr, summarizeTR(v, tr))
+		j.trs = nil
+		for _, trs := range batches {
+			batchRC := rc
+			if len(trs) == 1 && trs[0].Variant != "" {
+				variantRC := *rc
+				variantRC.WorkDir = filepath.Join(rc.WorkDir, "variants", hex.EncodeToString([]byte(trs[0].ID)), hex.EncodeToString([]byte(trs[0].Variant)))
+				batchRC = &variantRC
+			}
+			for _, tr := range trs {
+				progress.start(tr)
+			}
+			var failure error
+			p := pipeline{tool: tool, trs: trs, rc: batchRC}
+			switch {
+			case ctx.Err() != nil:
+				failure = fmt.Errorf("cancelled: %w", ctx.Err())
+			case tool.NewSession == nil:
+				failure = fmt.Errorf("tool has no session factory")
+			default:
+				p.session = tool.NewSession()
+				batchRC.SetStage("preflight", trs)
+				findings, err := p.session.Preflight(ctx, batchRC, trs)
+				if err != nil {
+					failure = fmt.Errorf("preflight: %w", err)
+				} else {
+					for _, finding := range findings {
+						if finding.Level == "error" {
+							failure = fmt.Errorf("preflight failed: %s", finding.Message)
+							break
+						}
+					}
+				}
+			}
+			if failure != nil {
+				failed := errTRs(trs, failure.Error())
+				if p.session != nil {
+					failed = append(failed, teardownSession(ctx, p)...)
+				}
+				verdicts = append(verdicts, failed...)
+				for _, tr := range trs {
+					if ctx.Err() != nil {
+						progress.abort(tr, core.OutcomeError)
+					} else {
+						progress.complete(tr, core.OutcomeError)
+					}
+				}
+				continue
+			}
+			j.trs = append(j.trs, trs...)
+			j.pipelines = append(j.pipelines, p)
 		}
-		vs = append(vs, v...)
-		ms = append(ms, m...)
+		if len(j.pipelines) > 0 {
+			ready = append(ready, j)
+		}
 	}
-	return vs, ms
+	return ready, verdicts
+}
+
+func teardownSession(ctx context.Context, p pipeline) []core.Verdict {
+	p.rc.SetStage("teardown", p.trs)
+	if err := p.session.Teardown(ctx, p.rc); err != nil {
+		return cleanupFailure(p.rc, p.tool.Name, p.trs, "teardown", err)
+	}
+	return nil
+}
+
+func cleanupFailure(rc *core.RunCtx, tool string, trs []core.TestRequirement, stage string, err error) []core.Verdict {
+	message := stage + ": " + err.Error()
+	if rc.Logger != nil {
+		rc.Logger.Error("cleanup failed", "tool", tool, "stage", stage, "err", err)
+	}
+	verdicts := make([]core.Verdict, 0, len(trs))
+	for _, tr := range trs {
+		verdicts = append(verdicts, core.Verdict{TR: tr.ID, Variant: tr.Variant, Item: stage, Outcome: core.OutcomeError, Reason: message})
+		if rc.RecordIncident != nil {
+			rc.RecordIncident(core.Incident{Type: "cleanup", Severity: "error", TR: tr.ID, Variant: tr.Variant, Tool: tool, Stage: stage, Message: message, BlocksCertification: true, Impact: "resources may remain after cleanup failed"})
+		}
+	}
+	return verdicts
 }

@@ -766,20 +766,6 @@ func fioVMIHasIP(item fioVMI) bool {
 	return false
 }
 
-func fioValidate(tr core.TestRequirement) error {
-	if _, _, err := fioVMRange(tr); err != nil {
-		return err
-	}
-	if _, err := fioProfile(tr); err != nil {
-		return err
-	}
-	_, err := fioTemplate(tr)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 // stageFIOTemplate stages the embedded default or a caller-supplied custom
 // template into the run workdir. virtbench mutates the staged file while
 // substituting the storage class, so neither the embedded bytes nor a custom

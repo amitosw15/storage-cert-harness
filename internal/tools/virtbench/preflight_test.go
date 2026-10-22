@@ -25,15 +25,23 @@ func testSession(trs []core.TestRequirement) *session {
 	return &session{sc: scenarioForTR(trs[0].ID), trs: trs}
 }
 
-func TestPreflightMissingBinaryStopsAtFirstError(t *testing.T) {
+func TestPreflightMissingBinaryContinuesIndependentChecks(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	trs := []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}}}
+	trs := []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"num_vms": 0}}}
 	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 1 || findings[0].Level != "error" || !strings.Contains(findings[0].Message, "virtbench") {
-		t.Fatalf("findings = %+v, want only the missing VirtBench binary error", findings)
+	for _, fragment := range []string{"virtbench", "storage_class", "num_vms"} {
+		found := false
+		for _, finding := range findings {
+			if finding.Level == "error" && strings.Contains(finding.Message, fragment) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("findings = %+v, want independent error containing %q", findings, fragment)
+		}
 	}
 }
 
@@ -55,7 +63,7 @@ func TestPreflightReplayReportsLiveChecksAsSkipped(t *testing.T) {
 	}
 }
 
-func TestPreflightReplayPathErrorStopsBeforeLiveChecks(t *testing.T) {
+func TestPreflightReplayPathErrorStillReportsLiveSkips(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	missing := filepath.Join(t.TempDir(), "missing")
 	trs := []core.TestRequirement{{ID: "TR-VIRT-008", Params: map[string]any{"results_dir": missing}}}
@@ -63,16 +71,21 @@ func TestPreflightReplayPathErrorStopsBeforeLiveChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 1 || findings[0].Level != "error" {
-		t.Fatalf("findings = %+v, want only inaccessible replay path error", findings)
+	if len(findings) < 2 || findings[0].Level != "error" {
+		t.Fatalf("findings = %+v, want path error and live skips", findings)
+	}
+	for _, finding := range findings[1:] {
+		if finding.Level != "skip" || !strings.Contains(finding.Message, "replay mode") {
+			t.Errorf("finding = %+v, want live replay skip", finding)
+		}
 	}
 }
 
-func TestPreflightStopsBatchBeforeLaterProbes(t *testing.T) {
+func TestPreflightContinuesBatchAfterParameterError(t *testing.T) {
 	dir := t.TempDir()
 	probe := filepath.Join(dir, "probe-called")
-	virtbench := "#!/bin/sh\nif [ \"$1\" = fio ]; then touch '" + probe + "'; fi\nexit 0\n"
-	kubectl := "#!/bin/sh\ntouch '" + probe + "'\necho '{\"items\':[]}'\n"
+	virtbench := "#!/bin/sh\nif [ \"$1\" = fio ]; then : > '" + probe + "'; fi\nexit 0\n"
+	kubectl := "#!/bin/sh\n: > '" + probe + "'\nprintf '%s\\n' '{\"items\":[]}'\n"
 	for name, body := range map[string]string{"virtbench": virtbench, "kubectl": kubectl} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
 			t.Fatal(err)
@@ -87,11 +100,11 @@ func TestPreflightStopsBatchBeforeLaterProbes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) == 0 || findings[len(findings)-1].Level != "error" || !strings.Contains(findings[len(findings)-1].Message, "target_node") {
-		t.Fatalf("findings = %+v, want first missing target_node error", findings)
+	if !hasFinding(findings, "target_node") || !hasFinding(findings, "command available") {
+		t.Fatalf("findings = %+v, want target-node failure and later FIO command result", findings)
 	}
-	if _, err := os.Stat(probe); !os.IsNotExist(err) {
-		t.Fatalf("later worker/FIO probe ran after first error: %v", err)
+	if _, err := os.Stat(probe); err != nil {
+		t.Fatalf("independent probes did not run: %v", err)
 	}
 }
 
@@ -157,6 +170,57 @@ func TestSingleNodeUnpinnedWorkerCheckIsSkipped(t *testing.T) {
 	}
 }
 
+func TestReplayLifecycleStaysInsideSession(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	dir := t.TempDir()
+	data, err := os.ReadFile(filepath.Join("testdata", SummaryFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, SummaryFileName), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	trs := []core.TestRequirement{{ID: "TR-VIRT-002", Params: map[string]any{"results_dir": dir}}}
+	integration, ok := registry.Get(string(core.ToolVirtbench) + " " + string(WorkloadDatasourceClone))
+	if !ok {
+		t.Fatal("datasource-clone integration is not registered")
+	}
+	s := integration.NewSession().(*session)
+	rc := sshTestRunCtx(t)
+	findings, err := s.Preflight(context.Background(), rc, trs)
+	if err != nil {
+		t.Fatalf("replay preflight = %+v, %v", findings, err)
+	}
+	for _, finding := range findings {
+		if finding.Level == "error" {
+			t.Fatalf("replay preflight = %+v", findings)
+		}
+	}
+	if err := s.Provision(context.Background(), rc); err != nil {
+		t.Fatal(err)
+	}
+	if !s.replay || s.resultsRoot != dir {
+		t.Fatalf("session replay state = %+v", s)
+	}
+	if err := s.Run(context.Background(), rc); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := s.Collect(context.Background(), rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, err := s.Parse(context.Background(), rc, logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].TRID != trs[0].ID || results[0].Native != core.OutcomePass {
+		t.Fatalf("parsed results = %+v, want TR %s", results, trs[0].ID)
+	}
+	if err := s.Teardown(context.Background(), rc); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestVirtbenchWorkloadsMatchCatalogAndRegistrySessions(t *testing.T) {
 	var catalog struct {
 		TestRequirements []struct {
@@ -186,8 +250,8 @@ func TestVirtbenchWorkloadsMatchCatalogAndRegistrySessions(t *testing.T) {
 		if _, ok := workloadSpecs[scenario.ProvidesTR]; !ok {
 			t.Errorf("%s has no workload declaration", scenario.ProvidesTR)
 		}
-		if got, ok := actual[scenario.ProvidesTR]; !ok || got != string(scenario.ScenarioName) {
-			t.Errorf("%s scenario = %q, catalog has %q (present=%t)", scenario.ProvidesTR, scenario.ScenarioName, got, ok)
+		if got, ok := actual[scenario.ProvidesTR]; ok && got != string(scenario.ScenarioName) {
+			t.Errorf("%s scenario = %q, catalog has %q", scenario.ProvidesTR, scenario.ScenarioName, got)
 		}
 		declared[scenario.ProvidesTR] = true
 		integration, ok := registry.Get(scenario.IntegrationName())

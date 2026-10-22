@@ -33,6 +33,12 @@ setup. Standalone preflight uses a fresh session and invokes only preflight,
 which must remain free of resource creation. Existing artifact attribution,
 grading, batching, and scheduling behavior is preserved.
 
+All sessions complete preflight before shared run/group setup creates resources.
+The same session continues through execution, and failed preflight excludes its
+TRs from shared setup. Session and shared teardown errors retain the original
+test verdicts and add error verdicts and certification-blocking incidents to the
+report and checkpoints.
+
 This refines ADR-0003 and the state contract described in ADR-0020.
 
 ## Decision notes

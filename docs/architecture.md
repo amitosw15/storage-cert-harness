@@ -44,6 +44,11 @@ scheduling, reporting, and grading. Teardown runs even after an earlier stage
 fails. The integration also declares `Image`, `Provides`, and optional custom
 `Evaluators`.
 
+Every session completes preflight before shared run/group setup starts. Only
+validated executions enter shared setup; those sessions then continue through
+the scheduled pipeline. Session and shared cleanup errors appear as separate
+error verdicts and certification-blocking incidents, preserving test results.
+
 A session owns typed adapter-specific fields for the job's parameters,
 resources, result paths, and execution status. Each TR has an execution record;
 an ordinary tool batch may contain several TRs, while named variants receive

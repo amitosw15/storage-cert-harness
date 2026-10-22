@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -273,7 +274,9 @@ func TestPreflightChecksFIOCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
-	if !hasFinding(findings, "command") || findings[len(findings)-1].Level != "error" {
+	if !slices.ContainsFunc(findings, func(f core.Finding) bool {
+		return f.Level == "error" && strings.Contains(f.Message, "command")
+	}) {
 		t.Fatalf("findings = %+v, want FIO command error", findings)
 	}
 }
@@ -779,7 +782,7 @@ func TestFailureRecoveryValidate(t *testing.T) {
 	}
 }
 
-func TestBuildArgsFailureRecoveryNodeFromBag(t *testing.T) {
+func TestBuildArgsFailureRecoveryNodeFromSession(t *testing.T) {
 	s := &session{pickedNode: "auto-worker-3"}
 	tr := core.TestRequirement{ID: "TR-VIRT-007", Params: map[string]any{"storage_class": "sc", "far_config": "/far-config.json"}}
 	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, s, tr, "/work/res")
@@ -787,7 +790,7 @@ func TestBuildArgsFailureRecoveryNodeFromBag(t *testing.T) {
 		t.Fatalf("buildArgs: %v", err)
 	}
 	if !strings.Contains(strings.Join(got, " "), "--node auto-worker-3") {
-		t.Errorf("expected --node auto-worker-3 from bag; got %v", got)
+		t.Errorf("expected --node auto-worker-3 from session; got %v", got)
 	}
 }
 

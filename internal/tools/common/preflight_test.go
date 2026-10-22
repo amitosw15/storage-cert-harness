@@ -122,7 +122,8 @@ func TestTemplateDiskCountCheckOutcomes(t *testing.T) {
 func TestRunPreflightChecksOrderingSkippingAndDeduplication(t *testing.T) {
 	keyedCalls := 0
 	unkeyedCalls := 0
-	ctx := context.WithValue(context.Background(), struct{}{}, "test-context")
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "test-context")
 	checks := []PreflightCheck{
 		{Name: "skip", Key: "shared", Applies: func() (bool, string) { return false, "disabled" }, Run: func(context.Context) []core.Finding { keyedCalls++; return nil }},
 		{Name: "error", Run: func(context.Context) []core.Finding {
@@ -131,7 +132,7 @@ func TestRunPreflightChecksOrderingSkippingAndDeduplication(t *testing.T) {
 		}},
 		{Name: "first", Key: "shared", Run: func(got context.Context) []core.Finding {
 			keyedCalls++
-			if got.Value(struct{}{}) != nil {
+			if got.Value(contextKey{}) == "test-context" {
 				return []core.Finding{{Level: "info"}}
 			}
 			return []core.Finding{{Level: "error"}}

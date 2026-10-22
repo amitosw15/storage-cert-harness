@@ -58,16 +58,22 @@ type recRunner struct {
 	rec  *recorder
 }
 
+func (r *recRunner) Preflight(ctx context.Context, rc *core.RunCtx, trs []core.TestRequirement) ([]core.Finding, error) {
+	r.rec.add("preflight:" + r.name)
+	return r.sessionStub.Preflight(ctx, rc, trs)
+}
+
 func (r *recRunner) Run(_ context.Context, _ *core.RunCtx) error {
 	r.rec.add("job:" + r.name)
 	return nil
 }
 
 type recSetup struct {
-	scope stages.SetupScope
-	key   string
-	rec   *recorder
-	fail  bool
+	scope       stages.SetupScope
+	key         string
+	rec         *recorder
+	fail        bool
+	teardownErr error
 }
 
 func (s recSetup) SetupInfo() stages.SetupInfo { return stages.SetupInfo{Scope: s.scope, Key: s.key} }
@@ -87,7 +93,7 @@ func (s recSetup) Setup(_ context.Context, _ *core.RunCtx, trs []core.TestRequir
 
 func (s recSetup) Teardown(_ context.Context, _ *core.RunCtx, _ []core.TestRequirement) error {
 	s.rec.add(fmt.Sprintf("teardown:%s/%s", s.scope, s.key))
-	return nil
+	return s.teardownErr
 }
 
 // TestScopedSetupOrderingAndFailure exercises run/group setup: each runs once,
@@ -134,6 +140,11 @@ func TestScopedSetupOrderingAndFailure(t *testing.T) {
 	// Ordering: run setup first; group setup before both jobs; teardown after both
 	// jobs; group teardown before run teardown.
 	runSetup := rec.index("setup:run/r")
+	for _, name := range []string{"t1", "t2", "t3"} {
+		if index := rec.index("preflight:" + name); index < 0 || index >= runSetup {
+			t.Errorf("%s preflight must precede shared setup; events=%v", name, rec.events)
+		}
+	}
 	gaSetup := rec.index("setup:group/gA")
 	j1, j2 := rec.index("job:t1"), rec.index("job:t2")
 	gaDown := rec.index("teardown:group/gA")
