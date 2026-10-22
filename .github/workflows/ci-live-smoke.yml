@@ -40,7 +40,7 @@ jobs:
       pr_number: ${{ steps.resolve.outputs.pr_number }}
     steps:
       - id: resolve
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const prNumber = context.payload.pull_request.number;
@@ -132,7 +132,7 @@ jobs:
       pr_number: ${{ steps.resolve.outputs.pr_number }}
     steps:
       - id: resolve
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const pr = await github.rest.pulls.get({
@@ -219,7 +219,7 @@ jobs:
       pr_number: ${{ steps.resolve.outputs.pr_number }}
     steps:
       - id: resolve
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const prNumber = Number(context.payload.inputs.pr_number);
