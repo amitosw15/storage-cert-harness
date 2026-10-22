@@ -35,12 +35,12 @@ type job struct {
 	pipelines    []pipeline
 }
 
-// pipeline retains one preflighted Bag and the executions it owns.
+// pipeline retains one preflighted session and the executions it owns.
 type pipeline struct {
-	tool stages.ToolIntegration
-	trs  []core.TestRequirement
-	rc   *core.RunCtx
-	bag  *core.Bag
+	tool    stages.ToolIntegration
+	trs     []core.TestRequirement
+	rc      *core.RunCtx
+	session stages.Session
 }
 
 // Run selects and scores the given TRs, returning a graded report. TRs whose
@@ -274,7 +274,7 @@ func Run(ctx context.Context, cfg config.Config, trs []core.TestRequirement, pro
 			if !slices.ContainsFunc(scorable, func(tr core.TestRequirement) bool {
 				return tr.ID == p.trs[0].ID && tr.Variant == p.trs[0].Variant
 			}) {
-				vs = append(vs, teardownPipeline(ctx, p)...)
+				vs = append(vs, teardownSession(ctx, p)...)
 				for _, tr := range p.trs {
 					if ctx.Err() != nil {
 						progress.abort(tr, core.OutcomeError)
@@ -710,11 +710,10 @@ func relativeTo(workdir string, paths []string) (kept, dropped []string) {
 	return kept, dropped
 }
 
-// runJob executes a preflighted pipeline and always invokes its teardown.
+// runJob executes a preflighted pipeline and always tears down its session.
 func runJob(ctx context.Context, p pipeline, g *grader.Grader) (verdicts []core.Verdict, measurements []core.Measurement) {
-	rc, ti, bag := p.rc, p.tool, p.bag
-	j := job{tool: ti.Name, trs: p.trs}
-	// Stamp each verdict with the duration of execution and cleanup.
+	rc, trs, ti := p.rc, p.trs, p.tool
+	// Stamp each verdict with the duration of execution and session cleanup.
 	start := time.Now()
 	defer func() {
 		d := time.Since(start).Seconds()
@@ -722,68 +721,58 @@ func runJob(ctx context.Context, p pipeline, g *grader.Grader) (verdicts []core.
 			verdicts[i].DurationS = d
 		}
 	}()
-	defer func() { verdicts = append(verdicts, teardownPipeline(ctx, p)...) }()
+	defer func() { verdicts = append(verdicts, teardownSession(ctx, p)...) }()
 	if err := ctx.Err(); err != nil {
-		return errTRs(j.trs, "cancelled: "+err.Error()), nil
+		return errTRs(trs, "cancelled: "+err.Error()), nil
 	}
-	if len(j.trs) == 1 && j.trs[0].Variant != "" {
+	session := p.session
+	if len(trs) == 1 && trs[0].Variant != "" {
 		if err := os.MkdirAll(rc.WorkDir, 0o750); err != nil {
-			return errTRs(j.trs, "variant workdir: "+err.Error()), nil
+			return errTRs(trs, "variant workdir: "+err.Error()), nil
 		}
 	}
-	if ti.Provisioner != nil {
-		rc.SetStage("provision", j.trs)
-		if err := ti.Provisioner.Provision(ctx, rc, bag, j.trs); err != nil {
-			return errTRs(j.trs, "provision: "+err.Error()), nil
-		}
+
+	rc.SetStage("provision", trs)
+	if err := session.Provision(ctx, rc); err != nil {
+		return errTRs(trs, "provision: "+err.Error()), nil
 	}
-	var handle stages.RunHandle
-	if ti.Runner != nil {
-		rc.SetStage("run", j.trs)
-		h, err := ti.Runner.Run(ctx, rc, bag, j.trs)
-		if err != nil {
-			return errTRs(j.trs, "run: "+err.Error()), nil
-		}
-		handle = h
+
+	rc.SetStage("run", trs)
+	if err := session.Run(ctx, rc); err != nil {
+		return errTRs(trs, "run: "+err.Error()), nil
 	}
-	var logs core.LogBundle
-	if ti.LogCollector != nil {
-		rc.SetStage("collect", j.trs)
-		lb, err := ti.LogCollector.Collect(ctx, rc, bag, handle)
-		if err != nil {
-			return errTRs(j.trs, "collect: "+err.Error()), nil
-		}
-		if rc.RecordArtifacts != nil {
-			// A job can span several TRs, and then the flat Refs list mixes
-			// their files together; recording it wholesale would attribute
-			// every TR's results to all of them.
-			if len(lb.RefsByTR) > 0 {
-				for _, tr := range j.trs {
-					if refs := lb.RefsByTR[tr.ID]; len(refs) > 0 {
-						rc.RecordArtifacts([]core.TestRequirement{tr}, refs)
-					}
+
+	rc.SetStage("collect", trs)
+	lb, err := session.Collect(ctx, rc)
+	if err != nil {
+		return errTRs(trs, "collect: "+err.Error()), nil
+	}
+	if rc.RecordArtifacts != nil {
+		// A job can span several TRs, and then the flat Refs list mixes
+		// their files together; recording it wholesale would attribute
+		// every TR's results to all of them.
+		if len(lb.RefsByTR) > 0 {
+			for _, tr := range trs {
+				if refs := lb.RefsByTR[tr.ID]; len(refs) > 0 {
+					rc.RecordArtifacts([]core.TestRequirement{tr}, refs)
 				}
-			} else {
-				rc.RecordArtifacts(j.trs, lb.Refs)
 			}
+		} else {
+			rc.RecordArtifacts(trs, lb.Refs)
 		}
-		logs = lb
 	}
-	var results []core.TestResult
-	if ti.ResultParser != nil {
-		rc.SetStage("parse", j.trs)
-		rs, err := ti.ResultParser.Parse(ctx, rc, bag, logs)
-		if err != nil {
-			return errTRs(j.trs, "parse: "+err.Error()), nil
-		}
-		results = rs
+
+	rc.SetStage("parse", trs)
+	results, err := session.Parse(ctx, rc, lb)
+	if err != nil {
+		return errTRs(trs, "parse: "+err.Error()), nil
 	}
 
 	byID := map[string]core.TestResult{}
 	for _, r := range results {
 		byID[r.TRID] = r
 	}
-	for _, tr := range j.trs {
+	for _, tr := range trs {
 		r, ok := byID[tr.ID]
 		if !ok {
 			verdicts = append(verdicts, errTR(tr, "no result produced for test requirement")...)
@@ -915,30 +904,31 @@ func prepareJobs(ctx context.Context, jobs []job, rc *core.RunCtx, progress *pro
 				progress.start(tr)
 			}
 			var failure error
-			p := pipeline{tool: tool, trs: trs, rc: batchRC, bag: core.NewBag()}
+			p := pipeline{tool: tool, trs: trs, rc: batchRC}
 			switch {
 			case ctx.Err() != nil:
 				failure = fmt.Errorf("cancelled: %w", ctx.Err())
+			case tool.NewSession == nil:
+				failure = fmt.Errorf("tool has no session factory")
 			default:
-				if tool.Preflight != nil {
-					batchRC.SetStage("preflight", trs)
-					findings, err := tool.Preflight.Check(ctx, batchRC, p.bag, trs)
-					if err != nil {
-						failure = fmt.Errorf("preflight: %w", err)
-					} else {
-						for _, finding := range findings {
-							if finding.Level == "error" {
-								failure = fmt.Errorf("preflight failed: %s", finding.Message)
-								break
-							}
+				p.session = tool.NewSession()
+				batchRC.SetStage("preflight", trs)
+				findings, err := p.session.Preflight(ctx, batchRC, trs)
+				if err != nil {
+					failure = fmt.Errorf("preflight: %w", err)
+				} else {
+					for _, finding := range findings {
+						if finding.Level == "error" {
+							failure = fmt.Errorf("preflight failed: %s", finding.Message)
+							break
 						}
 					}
 				}
 			}
 			if failure != nil {
 				failed := errTRs(trs, failure.Error())
-				if p.tool.Teardown != nil {
-					failed = append(failed, teardownPipeline(ctx, p)...)
+				if p.session != nil {
+					failed = append(failed, teardownSession(ctx, p)...)
 				}
 				verdicts = append(verdicts, failed...)
 				for _, tr := range trs {
@@ -960,12 +950,9 @@ func prepareJobs(ctx context.Context, jobs []job, rc *core.RunCtx, progress *pro
 	return ready, verdicts
 }
 
-func teardownPipeline(ctx context.Context, p pipeline) []core.Verdict {
-	if p.tool.Teardown == nil {
-		return nil
-	}
+func teardownSession(ctx context.Context, p pipeline) []core.Verdict {
 	p.rc.SetStage("teardown", p.trs)
-	if err := p.tool.Teardown.Teardown(ctx, p.rc, p.bag); err != nil {
+	if err := p.session.Teardown(ctx, p.rc); err != nil {
 		return cleanupFailure(p.rc, p.tool.Name, p.trs, "teardown", err)
 	}
 	return nil

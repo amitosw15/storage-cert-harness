@@ -48,7 +48,9 @@ var preflightStage = common.Preflight[Params]{
 	},
 }
 
-func snapshotChecks(rc *core.RunCtx, bag *core.Bag, resolved []common.ResolvedRequirement[Params]) []common.PreflightCheck {
+func (s *session) snapshotChecks(rc *core.RunCtx, resolved []common.ResolvedRequirement[Params]) []common.PreflightCheck {
+	assignNamespaces(resolved)
+	s.executions = make([]execution, len(resolved))
 	var checks []common.PreflightCheck
 	storageClass := common.BackendStorageClass(rc)
 	snapshotClass := ""
@@ -56,8 +58,9 @@ func snapshotChecks(rc *core.RunCtx, bag *core.Bag, resolved []common.ResolvedRe
 		snapshotClass = rc.Backend.SnapshotClass
 	}
 	for i := range resolved {
-		requirement := &resolved[i]
-		bag.Set("params", requirement.Params)
+		run := &s.executions[i]
+		run.Requirement = resolved[i]
+		requirement := &run.Requirement
 		scenario, ok := snapshotScenarios[requirement.TR.ID]
 		if !ok {
 			continue
@@ -72,12 +75,11 @@ func snapshotChecks(rc *core.RunCtx, bag *core.Bag, resolved []common.ResolvedRe
 			SnapshotCount:   requirement.Params.SnapshotCount,
 			SkipReason:      scenario.SnapshotSkipReason,
 			Record: func(selection clustercheck.SnapshotSelection) {
-				bag.Set("snapshot_selection", selection)
+				run.Selection = selection
 			},
 		}))
 		checks = append(checks, common.VolumePopulatorCheck(func(registered bool) {
 			requirement.Params.UsePopulator = registered
-			bag.Set("params", requirement.Params)
 		}))
 	}
 	return checks

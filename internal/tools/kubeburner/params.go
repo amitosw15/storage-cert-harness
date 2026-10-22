@@ -1,7 +1,9 @@
 package kubeburner
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"strings"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/tools/common"
@@ -71,6 +73,24 @@ func resolveParams(tr core.TestRequirement) Params {
 		p.NS = s
 	}
 	return p
+}
+
+// Isolate colliding namespaces while keeping each TR's other parameters intact.
+func assignNamespaces(resolved []common.ResolvedRequirement[Params]) {
+	counts := make(map[string]int, len(resolved))
+	for _, requirement := range resolved {
+		counts[requirement.Params.NS]++
+	}
+	for i := range resolved {
+		params := &resolved[i].Params
+		if counts[params.NS] < 2 {
+			continue
+		}
+		tr := resolved[i].TR
+		digest := sha256.Sum256([]byte(tr.ID + "\x00" + tr.Variant))
+		prefix := strings.TrimRight(params.NS[:min(len(params.NS), 54)], "-")
+		params.NS = fmt.Sprintf("%s-%x", prefix, digest[:4])
+	}
 }
 
 func (p Params) validate() error {

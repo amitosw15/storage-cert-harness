@@ -2,6 +2,7 @@
 package kubeburnerocp
 
 import (
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/grader"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/registry"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
@@ -22,14 +23,9 @@ func init() {
 		}
 	}
 	registry.Register(stages.ToolIntegration{
-		Name:              "kube-burner-ocp",
+		Name:              string(core.ToolKubeBurnerOCP),
 		Provides:          provides,
-		Preflight:         preflight{},
-		Provisioner:       provisioner{},
-		Runner:            runner{},
-		LogCollector:      collector{},
-		ResultParser:      parser{},
-		Teardown:          teardown{},
+		NewSession:        func() stages.Session { return &session{} },
 		Evaluators:        evals,
 		ParallelSafe:      false,
 		ExclusivityGroups: []string{"kube-burner", "cdi", "storage"},

@@ -395,10 +395,7 @@ type Attestation struct {
 	SignedBy string `json:"signed_by,omitempty"`
 }
 
-// RunCtx carries stable, run-scoped dependencies through every stage. It is the
-// immutable counterpart to Bag (mutable stage-to-stage state) and to
-// context.Context (cancellation/deadlines). A live Kubernetes client will be
-// added here once internal/kube is implemented.
+// RunCtx carries run-scoped dependencies; tool sessions own mutable pipeline state.
 type RunCtx struct {
 	RunID    string
 	PartKind string // initial | resume | recovery | retry

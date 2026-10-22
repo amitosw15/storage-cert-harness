@@ -21,12 +21,12 @@ var failureRecoveryVMTemplate string
 // removes that selector before fencing so recreated VMIs can land elsewhere.
 // Namespaces follow the pattern {nsPrefix}-{i}, which virtbench picks up via
 // --namespace-prefix and Teardown sweeps via listNamespacesByPrefix.
-func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) error {
+func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, s *session, trs []core.TestRequirement) error {
 	if len(trs) == 0 {
 		return nil
 	}
 	tr := trs[0]
-	kubeconfig, _ := core.GetAs[string](bag, "kubeconfig")
+	kubeconfig := s.kubeconfig
 
 	node := strParamOr(tr, "node", "")
 	hostnameLabel := strParamOr(tr, "node_hostname_label", "")
@@ -45,7 +45,7 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 			hostnameLabel = node
 		}
 	}
-	bag.Set("picked_node", node)
+	s.pickedNode = node
 	sc := storageClass(rc, tr)
 	if sc == "" {
 		return fmt.Errorf("virtbench: TR-VIRT-007: storage_class required (select a --backend or set the 'storage_class' param)")
