@@ -37,25 +37,19 @@ flowchart LR
 
 ## Stage interfaces (the layers)
 
-`ToolIntegration.NewSession` creates one `stages.Session` for each invocation of
-a tool's pipeline. The orchestrator calls its `Preflight`, `Provision`, `Run`,
-`Collect`, `Parse`, and `Teardown` methods and remains responsible for ordering,
-scheduling, reporting, and grading. Teardown runs even after an earlier stage
-fails. The integration also declares `Image`, `Provides`, and optional custom
-`Evaluators`.
+`Preflight`, `Provisioner`, `Runner`, `LogCollector`, `ResultParser`,
+`Teardown` — each small and independently testable. A `ToolIntegration` binds a
+set of them plus `Image`, `Provides`, and optional custom `Evaluators`.
 
-Every session completes preflight before shared run/group setup starts. Only
-validated executions enter shared setup; those sessions then continue through
-the scheduled pipeline. Session and shared cleanup errors appear as separate
-error verdicts and certification-blocking incidents, preserving test results.
+Every stage method takes `context.Context` (cancellation/timeout) and a
+`*core.Bag` (concurrency-safe `string → any` state threaded stage-to-stage — the
+namespace Provision made, the Job name Run produced, etc.). The Bag is
+deliberately not `context.Value`.
 
-A session owns typed adapter-specific fields for the job's parameters,
-resources, result paths, and execution status. Each TR has an execution record;
-an ordinary tool batch may contain several TRs, while named variants receive
-separate sessions. Registry entries contain factories, so mutable job state is
-never shared across invocations. Stage methods take `context.Context` for
-cancellation and `*core.RunCtx` for shared infrastructure. Findings, artifacts,
-and parsed test results have explicit return values. See ADR-0021.
+Every tool pipeline completes preflight before shared run/group setup starts.
+Only validated executions enter shared setup, retaining their Bag for the
+scheduled stages. Returned teardown errors add separate error verdicts and
+certification-blocking incidents while preserving original test results.
 
 ## Evaluation
 

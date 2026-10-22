@@ -156,7 +156,7 @@ func TestSnapshotCloneCleanupAfterWaitFailure(t *testing.T) {
 func TestSnapshotCloneReplayDoesNotReadCluster(t *testing.T) {
 	dir := cloneSnapshotCLI(t)
 	tr := core.TestRequirement{ID: "TR-VIRT-018", Params: map[string]any{"use_snapshot": true, "results_dir": t.TempDir()}}
-	findings, err := (&session{sc: scenarioForTR(tr.ID), trs: []core.TestRequirement{tr}}).Preflight(context.Background(), &core.RunCtx{}, []core.TestRequirement{tr})
+	findings, err := (preflight{sc: Scenario{AutomationTool: "virtbench datasource-clone"}}).Check(context.Background(), &core.RunCtx{}, core.NewBag(), []core.TestRequirement{tr})
 	if err != nil {
 		t.Fatal(err)
 	}

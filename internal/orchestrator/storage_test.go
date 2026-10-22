@@ -13,16 +13,15 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
-type storageRecordingRunner struct{ sessionStub }
+type storageRecordingRunner struct{}
 
-func (s *storageRecordingRunner) Run(_ context.Context, rc *core.RunCtx) error {
-	trs := s.trs
+func (storageRecordingRunner) Run(_ context.Context, rc *core.RunCtx, _ *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error) {
 	rc.RecordStorageSelection(core.StorageSelection{TR: trs[0].ID, Variant: trs[0].Variant, StorageClass: "backend", SnapshotClass: "selected"})
-	return fmt.Errorf("failure after storage selection")
+	return stages.RunHandle{}, fmt.Errorf("failure after storage selection")
 }
 
 func TestStorageSelectionSurvivesFailureAndCheckpoint(t *testing.T) {
-	registry.Register(stages.ToolIntegration{Name: "storage-recording-test", NewSession: func() stages.Session { return &storageRecordingRunner{} }})
+	registry.Register(stages.ToolIntegration{Name: "storage-recording-test", Runner: storageRecordingRunner{}})
 	var checkpoint core.Report
 	var recorded []core.StorageSelection
 	rc := &core.RunCtx{

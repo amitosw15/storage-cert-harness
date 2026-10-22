@@ -16,26 +16,27 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
-type sessionStub struct {
+type pipelineStub struct {
 	trs         []core.TestRequirement
+	bags        []*core.Bag
 	events      []string
 	failAt      string
 	teardownErr error
 	results     []core.TestResult
 }
 
-func TestFailedPipelineSkipsSharedSetupAndStillCleansSession(t *testing.T) {
+func TestFailedPipelineSkipsSharedSetupAndStillCleansUp(t *testing.T) {
 	for _, failAt := range []string{"preflight", "setup"} {
 		t.Run(failAt, func(t *testing.T) {
 			tool, group := t.Name(), t.Name()+"-group"
 			rec := &recorder{}
-			session := &sessionStub{}
+			stub := &pipelineStub{}
 			if failAt == "preflight" {
-				session.failAt = "preflight"
+				stub.failAt = "preflight"
 			}
 			registry.Register(stages.ToolIntegration{
 				Name: tool, SetupGroups: []string{group},
-				NewSession: func() stages.Session { return session },
+				Preflight: stub, Provisioner: stub, Runner: stub, LogCollector: stub, ResultParser: stub, Teardown: stub,
 			})
 			registry.RegisterSetup(recSetup{scope: stages.ScopeGroup, key: group, rec: rec, fail: true})
 			trs := []core.TestRequirement{{ID: tool, AutomationTool: tool}}
@@ -44,8 +45,8 @@ func TestFailedPipelineSkipsSharedSetupAndStillCleansSession(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Equal(session.events, []string{"preflight", "teardown"}) {
-				t.Fatalf("session stages = %v", session.events)
+			if !slices.Equal(stub.events, []string{"preflight", "teardown"}) {
+				t.Fatalf("pipeline stages = %v", stub.events)
 			}
 			wantSetup := 0
 			if failAt == "setup" {
@@ -62,22 +63,22 @@ func TestFailedPipelineSkipsSharedSetupAndStillCleansSession(t *testing.T) {
 }
 
 func TestCleanupErrorsPreserveResultsAndReachReports(t *testing.T) {
-	for _, failure := range []string{"session", "shared", "run-and-cleanup"} {
+	for _, failure := range []string{"pipeline", "shared", "run-and-cleanup"} {
 		t.Run(failure, func(t *testing.T) {
 			tool := t.Name()
 			cleanupErr := fmt.Errorf("delete resources failed")
-			session := &sessionStub{results: []core.TestResult{{TRID: tool, Checks: map[string]core.Outcome{"ready": core.OutcomePass}}}}
+			stub := &pipelineStub{results: []core.TestResult{{TRID: tool, Checks: map[string]core.Outcome{"ready": core.OutcomePass}}}}
 			if failure == "shared" {
 				registry.RegisterSetup(recSetup{scope: stages.ScopeGroup, key: tool, rec: &recorder{}, teardownErr: cleanupErr})
 			} else {
-				session.teardownErr = cleanupErr
+				stub.teardownErr = cleanupErr
 			}
 			if failure == "run-and-cleanup" {
-				session.failAt = "run"
+				stub.failAt = "run"
 			}
 			registry.Register(stages.ToolIntegration{
 				Name: tool, SetupGroups: []string{tool},
-				NewSession: func() stages.Session { return session },
+				Preflight: stub, Provisioner: stub, Runner: stub, LogCollector: stub, ResultParser: stub, Teardown: stub,
 			})
 			trs := []core.TestRequirement{{ID: tool, AutomationTool: tool, Checks: []core.Check{{ID: "ready", Kind: "capability"}}}}
 			var checkpoint core.Report
@@ -112,7 +113,10 @@ func TestCleanupErrorsPreserveResultsAndReachReports(t *testing.T) {
 	}
 }
 
-func (s *sessionStub) stage(name string) error {
+func (s *pipelineStub) stage(name string, bag *core.Bag) error {
+	if value, _ := core.GetAs[bool](bag, "preflight-checked"); !value {
+		return fmt.Errorf("preflight Bag state lost before %s", name)
+	}
 	s.events = append(s.events, name)
 	if s.failAt == name {
 		return fmt.Errorf("%s failed", name)
@@ -120,50 +124,48 @@ func (s *sessionStub) stage(name string) error {
 	return nil
 }
 
-func (s *sessionStub) Preflight(_ context.Context, _ *core.RunCtx, trs []core.TestRequirement) ([]core.Finding, error) {
+func (s *pipelineStub) Check(_ context.Context, _ *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) ([]core.Finding, error) {
 	s.trs = trs
-	err := s.stage("preflight")
+	s.bags = append(s.bags, bag)
+	bag.Set("preflight-checked", true)
+	err := s.stage("preflight", bag)
 	if s.failAt == "finding" {
 		return []core.Finding{{Level: "error", Message: "prerequisite missing"}}, nil
 	}
 	return nil, err
 }
 
-func (s *sessionStub) Provision(context.Context, *core.RunCtx) error {
-	return s.stage("provision")
+func (s *pipelineStub) Provision(_ context.Context, _ *core.RunCtx, bag *core.Bag, _ []core.TestRequirement) error {
+	return s.stage("provision", bag)
 }
 
-func (s *sessionStub) Run(context.Context, *core.RunCtx) error {
-	return s.stage("run")
+func (s *pipelineStub) Run(_ context.Context, _ *core.RunCtx, bag *core.Bag, _ []core.TestRequirement) (stages.RunHandle, error) {
+	return stages.RunHandle{}, s.stage("run", bag)
 }
 
-func (s *sessionStub) Collect(context.Context, *core.RunCtx) (core.LogBundle, error) {
-	return core.LogBundle{}, s.stage("collect")
+func (s *pipelineStub) Collect(_ context.Context, _ *core.RunCtx, bag *core.Bag, _ stages.RunHandle) (core.LogBundle, error) {
+	return core.LogBundle{}, s.stage("collect", bag)
 }
 
-func (s *sessionStub) Parse(context.Context, *core.RunCtx, core.LogBundle) ([]core.TestResult, error) {
-	return s.results, s.stage("parse")
+func (s *pipelineStub) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, _ core.LogBundle) ([]core.TestResult, error) {
+	return s.results, s.stage("parse", bag)
 }
 
-func (s *sessionStub) Teardown(context.Context, *core.RunCtx) error {
-	if err := s.stage("teardown"); err != nil {
+func (s *pipelineStub) Teardown(_ context.Context, _ *core.RunCtx, bag *core.Bag) error {
+	if err := s.stage("teardown", bag); err != nil {
 		return err
 	}
 	return s.teardownErr
 }
 
-func TestSessionLifecycleAndCleanup(t *testing.T) {
+func TestPipelineLifecycleAndCleanup(t *testing.T) {
 	allStages := []string{"preflight", "provision", "run", "collect", "parse", "teardown"}
 	for _, failAt := range []string{"", "preflight", "finding", "provision", "run", "collect", "parse", "teardown"} {
 		t.Run("failure="+failAt, func(t *testing.T) {
-			var sessions []*sessionStub
+			stub := &pipelineStub{failAt: failAt, results: []core.TestResult{{TRID: "PIPELINE-TR"}}}
 			tool := t.Name()
-			registry.Register(stages.ToolIntegration{Name: tool, NewSession: func() stages.Session {
-				s := &sessionStub{failAt: failAt, results: []core.TestResult{{TRID: "SESSION-TR"}}}
-				sessions = append(sessions, s)
-				return s
-			}})
-			trs := []core.TestRequirement{{ID: "SESSION-TR", AutomationTool: tool, SLAs: []core.SLA{{Metric: "latency", Unit: "s"}}}}
+			registry.Register(stages.ToolIntegration{Name: tool, Preflight: stub, Provisioner: stub, Runner: stub, LogCollector: stub, ResultParser: stub, Teardown: stub})
+			trs := []core.TestRequirement{{ID: "PIPELINE-TR", AutomationTool: tool, SLAs: []core.SLA{{Metric: "latency", Unit: "s"}}}}
 			rc := &core.RunCtx{
 				Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 				SetStage: func(string, []core.TestRequirement) {},
@@ -177,8 +179,8 @@ func TestSessionLifecycleAndCleanup(t *testing.T) {
 					t.Fatalf("verdicts = %+v, want failure=%t", verdicts, failAt != "")
 				}
 			}
-			if len(sessions) != 2 || sessions[0] == sessions[1] {
-				t.Fatal("each job must create a fresh session")
+			if len(stub.bags) != 2 || stub.bags[0] == stub.bags[1] {
+				t.Fatal("each pipeline must create a fresh Bag")
 			}
 			want := allStages
 			if failAt != "" && failAt != "teardown" {
@@ -188,11 +190,11 @@ func TestSessionLifecycleAndCleanup(t *testing.T) {
 				}
 				want = append(slices.Clone(allStages[:slices.Index(allStages, stage)+1]), "teardown")
 			}
-			for _, session := range sessions {
-				if !slices.Equal(session.events, want) {
-					t.Errorf("stages = %v, want %v", session.events, want)
-				}
+			want = append(slices.Clone(want), want...)
+			if !slices.Equal(stub.events, want) {
+				t.Errorf("stages = %v, want %v", stub.events, want)
 			}
+
 		})
 	}
 }

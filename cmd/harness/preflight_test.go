@@ -18,37 +18,30 @@ import (
 )
 
 type preflightStub struct {
-	stages.Session
 	findings []core.Finding
 	err      error
 }
 
-func (p preflightStub) Preflight(context.Context, *core.RunCtx, []core.TestRequirement) ([]core.Finding, error) {
+func (p preflightStub) Check(context.Context, *core.RunCtx, *core.Bag, []core.TestRequirement) ([]core.Finding, error) {
 	return p.findings, p.err
 }
 
 func init() {
-	registry.Register(stages.ToolIntegration{Name: "test-preflight-clean", NewSession: func() stages.Session {
-		return preflightStub{findings: []core.Finding{
-			{Level: "info", Message: "binary available"},
-			{Level: "info", Message: "cluster reachable"},
-		}}
-	}})
-	registry.Register(stages.ToolIntegration{Name: "test-preflight-mixed", NewSession: func() stages.Session {
-		return preflightStub{findings: []core.Finding{
-			{Level: "error", Message: "first check failed\ncommand details"},
-			{Level: "info", Message: "later check passed"},
-			{Level: "skip", Message: "optional check: not configured"},
-		}}
-	}})
-	registry.Register(stages.ToolIntegration{Name: "test-preflight-partial", NewSession: func() stages.Session {
-		return preflightStub{
-			findings: []core.Finding{{Level: "info", Message: "first check passed"}},
-			err:      errors.New("remaining check could not complete"),
-		}
+	registry.Register(stages.ToolIntegration{Name: "test-preflight-clean", Preflight: preflightStub{findings: []core.Finding{
+		{Level: "info", Message: "binary available"},
+		{Level: "info", Message: "cluster reachable"},
+	}}})
+	registry.Register(stages.ToolIntegration{Name: "test-preflight-mixed", Preflight: preflightStub{findings: []core.Finding{
+		{Level: "error", Message: "first check failed\ncommand details"},
+		{Level: "info", Message: "later check passed"},
+		{Level: "skip", Message: "optional check: not configured"},
+	}}})
+	registry.Register(stages.ToolIntegration{Name: "test-preflight-partial", Preflight: preflightStub{
+		findings: []core.Finding{{Level: "info", Message: "first check passed"}},
+		err:      errors.New("remaining check could not complete"),
 	}})
 	registry.Register(stages.ToolIntegration{Name: "test-preflight-none"})
-	registry.Register(stages.ToolIntegration{Name: "test-preflight-empty", NewSession: func() stages.Session { return preflightStub{} }})
+	registry.Register(stages.ToolIntegration{Name: "test-preflight-empty", Preflight: preflightStub{}})
 }
 
 func TestPreflightOutput(t *testing.T) {

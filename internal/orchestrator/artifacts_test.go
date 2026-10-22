@@ -14,12 +14,9 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
-type artifactCollector struct {
-	sessionStub
-	workdir string
-}
+type artifactCollector struct{ workdir string }
 
-func (a *artifactCollector) Collect(_ context.Context, _ *core.RunCtx) (core.LogBundle, error) {
+func (a artifactCollector) Collect(_ context.Context, _ *core.RunCtx, _ *core.Bag, _ stages.RunHandle) (core.LogBundle, error) {
 	return core.LogBundle{Refs: []string{
 		filepath.Join(a.workdir, "virtbench/TR-ART-001/20261018-060401/2-disk/run/summary.json"),
 		"/somewhere/else/outside-the-workdir.json",
@@ -33,7 +30,7 @@ func (a *artifactCollector) Collect(_ context.Context, _ *core.RunCtx) (core.Log
 // anything outside that directory is dropped rather than recorded.
 func TestExecutionRecordsWorkdirRelativeArtifacts(t *testing.T) {
 	workdir := t.TempDir()
-	registry.Register(stages.ToolIntegration{Name: "artifact-recording-test", NewSession: func() stages.Session { return &artifactCollector{workdir: workdir} }})
+	registry.Register(stages.ToolIntegration{Name: "artifact-recording-test", LogCollector: artifactCollector{workdir: workdir}})
 	rc := &core.RunCtx{
 		RunID:   "20261018-060401",
 		WorkDir: workdir,
@@ -53,12 +50,9 @@ func TestExecutionRecordsWorkdirRelativeArtifacts(t *testing.T) {
 	}
 }
 
-type multiTRCollector struct {
-	sessionStub
-	workdir string
-}
+type multiTRCollector struct{ workdir string }
 
-func (m *multiTRCollector) Collect(_ context.Context, _ *core.RunCtx) (core.LogBundle, error) {
+func (m multiTRCollector) Collect(_ context.Context, _ *core.RunCtx, _ *core.Bag, _ stages.RunHandle) (core.LogBundle, error) {
 	a := filepath.Join(m.workdir, "kubeburner-results/TR-ART-A/collected-metrics/jobSummary.json")
 	b := filepath.Join(m.workdir, "kubeburner-results/TR-ART-B/collected-metrics/jobSummary.json")
 	return core.LogBundle{
@@ -73,7 +67,7 @@ func (m *multiTRCollector) Collect(_ context.Context, _ *core.RunCtx) (core.LogB
 // per-execution results root exists to prevent, reintroduced one layer up.
 func TestMultiTRJobAttributesArtifactsPerTR(t *testing.T) {
 	workdir := t.TempDir()
-	registry.Register(stages.ToolIntegration{Name: "multi-tr-artifact-test", NewSession: func() stages.Session { return &multiTRCollector{workdir: workdir} }})
+	registry.Register(stages.ToolIntegration{Name: "multi-tr-artifact-test", LogCollector: multiTRCollector{workdir: workdir}})
 	rc := &core.RunCtx{RunID: "20261018-060401", WorkDir: workdir, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	rep, err := Run(context.Background(), config.Config{}, []core.TestRequirement{
 		{ID: "TR-ART-A", AutomationTool: "multi-tr-artifact-test"},

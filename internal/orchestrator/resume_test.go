@@ -76,7 +76,7 @@ func TestResumeExecutionsRerunsAbortedExecutionDespiteCancellationVerdicts(t *te
 // execution the prior report had already completed — while the resume log
 // still claimed they were skipped.
 func TestRunExecutesOnlyTheGivenTRs(t *testing.T) {
-	registry.Register(stages.ToolIntegration{Name: "resume-scope-test", NewSession: func() stages.Session { return &sessionStub{} }})
+	registry.Register(stages.ToolIntegration{Name: "resume-scope-test", Runner: countingRunner{}})
 	all := []core.TestRequirement{
 		{ID: "TR-RESUME-A", AutomationTool: "resume-scope-test"},
 		{ID: "TR-RESUME-B", AutomationTool: "resume-scope-test"},
@@ -93,4 +93,10 @@ func TestRunExecutesOnlyTheGivenTRs(t *testing.T) {
 	if len(rep.Executions) != 1 || rep.Executions[0].TR != "TR-RESUME-B" {
 		t.Fatalf("executions = %+v, want only TR-RESUME-B", rep.Executions)
 	}
+}
+
+type countingRunner struct{}
+
+func (countingRunner) Run(_ context.Context, _ *core.RunCtx, _ *core.Bag, _ []core.TestRequirement) (stages.RunHandle, error) {
+	return stages.RunHandle{}, nil
 }

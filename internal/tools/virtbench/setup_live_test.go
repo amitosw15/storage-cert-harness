@@ -71,19 +71,20 @@ func TestSSHHelperAfterNodeDrain(t *testing.T) {
 			}
 			jobRC := *rc
 			jobRC.WorkDir = filepath.Join(root, tr.ID)
-			s := &session{sc: sc, trs: []core.TestRequirement{tr}}
-			defer func() { _ = s.Teardown(ctx, &jobRC) }()
-			if err := s.Provision(ctx, &jobRC); err != nil {
+			bag := core.NewBag()
+			defer func() { _ = (teardown{sc}).Teardown(ctx, &jobRC, bag) }()
+			if err := (provisioner{sc}).Provision(ctx, &jobRC, bag, []core.TestRequirement{tr}); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.Run(ctx, &jobRC); err != nil {
-				t.Fatal(err)
-			}
-			bundle, err := s.Collect(ctx, &jobRC)
+			handle, err := (runner{sc}).Run(ctx, &jobRC, bag, []core.TestRequirement{tr})
 			if err != nil {
 				t.Fatal(err)
 			}
-			results, err := s.Parse(ctx, &jobRC, bundle)
+			bundle, err := (collector{sc}).Collect(ctx, &jobRC, bag, handle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			results, err := sc.Parse(bundle.Data[sc.ResultFile], tr.ID)
 			if err != nil || len(results) == 0 {
 				t.Fatalf("parse results: %v", err)
 			}

@@ -11,32 +11,43 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
-// Scenario is the per-subcommand config used by the generic engine; scenario rows live in workloads.go (decisions/0008).
+// Scenario is the per-subcommand config that the generic engine (engine.go) is
+// parameterized over. Everything that differs between virtbench scenarios lives
+// here; everything that is the same lives in the engine. Adding a scenario is a
+// new row in scenarios below — no engine edits (decisions/0008).
 type Scenario struct {
-	// AutomationTool is the tool enum; ScenarioName selects this registered workload.
+	// AutomationTool is the catalog tool identity; ScenarioName selects its workload.
 	AutomationTool core.ToolName
 	ScenarioName   WorkloadName
 	// ProvidesTR is the single TR id this scenario runs.
 	ProvidesTR string
 	// ResultFile is the JSON file virtbench writes for this scenario.
 	ResultFile string
-	// NSPrefix is the default namespace prefix for CLI arguments and cleanup.
+	// NSPrefix is the default namespace prefix virtbench uses for this scenario's
+	// test namespaces (overridable per-TR via the "namespace_prefix" param). Used
+	// both to build the CLI and by Teardown's leftover-namespace sweep.
 	NSPrefix string
-	// BuildArgs builds the CLI from parameters, backend config, and session state.
-	BuildArgs func(rc *core.RunCtx, s *session, tr core.TestRequirement, resultsRoot string) ([]string, error)
-	// Run optionally replaces the shared runner with a scenario's command sequence.
-	Run func(ctx context.Context, rc *core.RunCtx, s *session, trs []core.TestRequirement) error
+	// BuildArgs assembles the CLI from params/backend only (never a threshold).
+	// resultsRoot is the harness workdir virtbench must write results into, passed
+	// via the scenario's results flag so the collector can find the output.
+	BuildArgs func(rc *core.RunCtx, bag *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error)
+	// Run optionally replaces the shared single-command runner for scenarios that
+	// need a supported multi-command tool lifecycle. Nil uses the shared runner.
+	Run func(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error)
 	// Parse turns the result file into normalized TestResults for the TR.
 	Parse func(data []byte, trID string) ([]core.TestResult, error)
-	// The fields below are optional hooks a scenario sets when it needs more than
-	// the generic plumbing; every clone/disk-ops scenario leaves them zero.
-
-	// Provision stages scenario resources after resultsRoot is ready, except in replay.
-	Provision func(ctx context.Context, rc *core.RunCtx, s *session, tr core.TestRequirement, resultsRoot string) error
-	// ProvisionVMs optionally creates scenario VMs before Run.
-	ProvisionVMs func(ctx context.Context, rc *core.RunCtx, s *session, trs []core.TestRequirement) error
-	// Teardown optionally adds cleanup before the shared namespace sweep.
-	Teardown func(ctx context.Context, rc *core.RunCtx, s *session) error
+	// Provision runs after the generic provisioner made resultsRoot (never in
+	// replay), for a scenario that must stage the cluster before Run — drain clones
+	// the VMs onto the target here. It may stash bag state for Teardown. Nil skips.
+	Provision func(ctx context.Context, rc *core.RunCtx, bag *core.Bag, tr core.TestRequirement, resultsRoot string) error
+	// ProvisionVMs, when non-nil, is called by the Provisioner after the results
+	// dir is ready and before virtbench runs — for scenarios that need to create
+	// VMs on the cluster (e.g. failure-recovery places VMs with node affinity).
+	ProvisionVMs func(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) error
+	// Teardown adds scenario-specific cleanup that the generic engine runs in
+	// addition to (before) its namespace sweep, on the same fresh bounded context —
+	// drain uncordons the workers it cordoned. Nil adds nothing.
+	Teardown func(ctx context.Context, rc *core.RunCtx, bag *core.Bag) error
 	// TolerateRunError keeps a non-zero exit from the CLI a graded result, not a
 	// pipeline error — drain-nodes exits 1 on a timeout, which is a FAIL to score
 	// from the log, not a crash.
@@ -59,10 +70,6 @@ type Scenario struct {
 	// evaluator appends them before grading — single-node's max_luns_per_node is
 	// successful VMs × num_disks. Nil adds nothing.
 	DeriveMetrics func(tr core.TestRequirement, res core.TestResult) []core.Metric
-}
-
-func (s Scenario) IntegrationName() string {
-	return string(s.AutomationTool) + " " + string(s.ScenarioName)
 }
 
 // resultsSubdir is this tool's directory under the run's working directory;
@@ -88,19 +95,22 @@ const (
 	DetailCloneFileName = "vm_creation_results.json"
 )
 
-// setupGroup is the shared-setup group key every virtbench scenario belongs to.
-// Its provider (sshPodSetup, setup.go) creates and cleans up the shared helper;
-// individual provisioners recheck it in case a previous scenario evicted it.
+// setupGroup identifies the helper shared by every VirtBench scenario.
 const setupGroup = "virtbench"
 
 func init() {
 	registry.RegisterSetup(sharedSSHSetup)
 	for _, sc := range scenarios {
 		registry.Register(stages.ToolIntegration{
-			Name:       sc.IntegrationName(),
-			Image:      "", // no upstream image; phase-1 local-exec (decisions/0007)
-			Provides:   []string{sc.ProvidesTR},
-			NewSession: func() stages.Session { return &session{sc: sc} },
+			Name:         sc.IntegrationName(),
+			Image:        "", // no upstream image; phase-1 local-exec (decisions/0007)
+			Provides:     []string{sc.ProvidesTR},
+			Preflight:    preflight{sc},
+			Provisioner:  provisioner{sc},
+			Runner:       runner{sc},
+			LogCollector: collector{sc},
+			ResultParser: parser{sc},
+			Teardown:     teardown{sc},
 
 			// virtbench drives a whole cluster's storage/virt stack at scale; never
 			// overlap it with another job.
@@ -160,4 +170,9 @@ func vmCount(res core.TestResult, name string) int {
 		}
 	}
 	return 0
+}
+
+// IntegrationName is the registry key for this tool scenario.
+func (s Scenario) IntegrationName() string {
+	return string(s.AutomationTool) + " " + string(s.ScenarioName)
 }

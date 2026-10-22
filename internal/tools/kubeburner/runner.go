@@ -15,71 +15,73 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
+
+type runner struct{}
 
 const cleanupTimeout = 30 * time.Second
 
-func (s *session) Run(ctx context.Context, rc *core.RunCtx) error {
-	if len(s.executions) == 0 {
-		return fmt.Errorf("kube-burner: no TRs to run (preflight first)")
+func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error) {
+	if len(trs) != 1 {
+		return stages.RunHandle{}, fmt.Errorf("kube-burner: expected exactly 1 TR, got %d", len(trs))
 	}
-	runs := s.executions
-	for _, run := range runs {
-		if run.Requirement.TR.ID == "" {
-			return fmt.Errorf("kube-burner: TR has empty id")
-		}
-		if run.Requirement.Err != nil {
-			return run.Requirement.Err
-		}
+	tr := trs[0]
+	if tr.ID == "" {
+		return stages.RunHandle{}, fmt.Errorf("kube-burner: TR has empty id")
 	}
-	resultsDir := s.resultsDir
+	resultsDir, _ := core.GetAs[string](bag, "results_dir")
 	if resultsDir == "" {
-		return fmt.Errorf("kube-burner: results directory missing (provision first)")
+		return stages.RunHandle{}, fmt.Errorf("kube-burner: results_dir missing (provision first)")
 	}
-	storageClass := ""
+	p := resolveParams(tr)
+	if configured, ok := core.GetAs[Params](bag, "params"); ok {
+		p.UsePopulator = configured.UsePopulator
+	}
+	if err := p.validateFor(tr.ID); err != nil {
+		return stages.RunHandle{}, err
+	}
+	sc := ""
 	if rc.Backend != nil {
-		storageClass = rc.Backend.StorageClass
+		sc = rc.Backend.StorageClass
 	}
-	if storageClass == "" {
-		return fmt.Errorf("kube-burner: storage_class required (pass --backends/--backend)")
+	if sc == "" {
+		return stages.RunHandle{}, fmt.Errorf("kube-burner: storage_class required (pass --backends/--backend)")
 	}
-	for i := range runs {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		run := &runs[i]
-		tr := run.Requirement.TR
-		params := run.Requirement.Params
-		sc := storageClass
-		if run.SnapshotStorageClass != "" {
-			sc = run.SnapshotStorageClass
-		}
-		if run.Selection.SnapshotClass != "" && rc.RecordStorageSelection != nil {
-			rc.RecordStorageSelection(core.StorageSelection{TR: tr.ID, Variant: tr.Variant, StorageClass: run.Selection.StorageClass, SnapshotClass: run.Selection.SnapshotClass, EffectiveStorageClass: sc})
-		}
-		run.Subdir = filepath.Join(resultsDir, tr.ID)
-		if err := os.RemoveAll(run.Subdir); err != nil {
-			return err
-		}
-		if err := safefs.MkdirAll(run.Subdir, 0o755); err != nil {
-			return err
-		}
-		if _, err := writeConfig(run.Subdir, params); err != nil {
-			return err
-		}
-		cmd, err := buildRunCmd(ctx, rc, buildEnv(params, sc), resultsDir, tr.ID)
-		if err != nil {
-			return err
-		}
-		cmd.Stdout = rc.ToolOutput(os.Stdout)
-		cmd.Stderr = rc.ToolOutput(os.Stderr)
-		rc.Logger.Info("kube-burner: running", "tr", tr.ID, "replicas", params.Replicas, "snapshot_count", params.SnapshotCount, "namespace", params.NS)
-		if err := cmd.Run(); err != nil {
-			run.RunErr = err.Error()
-			rc.Logger.Warn("kube-burner: run failed", "tr", tr.ID, "err", err)
-		}
+	if effective, ok := core.GetAs[string](bag, "snapshot_storage_class"); ok && effective != "" {
+		sc = effective
 	}
-	return nil
+	if selection, ok := core.GetAs[clustercheck.SnapshotSelection](bag, "snapshot_selection"); ok && rc.RecordStorageSelection != nil {
+		rc.RecordStorageSelection(core.StorageSelection{TR: tr.ID, Variant: tr.Variant, StorageClass: selection.StorageClass, SnapshotClass: selection.SnapshotClass, EffectiveStorageClass: sc})
+	}
+
+	subdir := filepath.Join(resultsDir, tr.ID)
+	if err := os.RemoveAll(subdir); err != nil {
+		return stages.RunHandle{}, err
+	}
+	if err := safefs.MkdirAll(subdir, 0o755); err != nil {
+		return stages.RunHandle{}, err
+	}
+	if _, err := writeConfig(subdir, p); err != nil {
+		return stages.RunHandle{}, err
+	}
+	cmd, err := buildRunCmd(ctx, rc, buildEnv(p, sc), resultsDir, tr.ID)
+	if err != nil {
+		return stages.RunHandle{}, err
+	}
+	cmd.Stdout = rc.ToolOutput(os.Stdout)
+	cmd.Stderr = rc.ToolOutput(os.Stderr)
+
+	rc.Logger.Info("kube-burner: running", "tr", tr.ID, "replicas", p.Replicas, "snapshot_count", p.SnapshotCount)
+	runErr := ""
+	if err := cmd.Run(); err != nil {
+		runErr = err.Error()
+		rc.Logger.Warn("kube-burner: run failed", "tr", tr.ID, "err", err)
+	}
+	bag.Set("kb_subdir", subdir)
+	bag.Set("kb_trid", tr.ID)
+	bag.Set("kb_runerr", runErr)
+	return stages.RunHandle{ID: "kube-burner"}, nil
 }
 
 // buildRunCmd runs kube-burner init -c using the host binary.
@@ -100,29 +102,18 @@ func buildRunCmd(ctx context.Context, rc *core.RunCtx, env []string, resultsDir,
 	return cmd, nil
 }
 
-func (s *session) Collect(_ context.Context, rc *core.RunCtx) (core.LogBundle, error) {
-	runs := s.executions
-	if runs == nil {
-		return core.LogBundle{}, fmt.Errorf("kube-burner: parameters missing (preflight first)")
+type collector struct{}
+
+func (collector) Collect(_ context.Context, rc *core.RunCtx, bag *core.Bag, _ stages.RunHandle) (core.LogBundle, error) {
+	subdir, _ := core.GetAs[string](bag, "kb_subdir")
+	trID, _ := core.GetAs[string](bag, "kb_trid")
+	m, files, err := findCollectedMetrics(subdir)
+	if err != nil {
+		rc.Logger.Warn("kube-burner: no results collected", "tr", trID, "err", err)
+		return core.LogBundle{}, nil // Parse emits a fail verdict
 	}
-	data := make(map[string][]byte)
-	refsByTR := make(map[string][]string, len(runs))
-	var refs []string
-	for _, run := range runs {
-		trID := run.Requirement.TR.ID
-		metrics, files, err := findCollectedMetrics(run.Subdir)
-		if err != nil {
-			rc.Logger.Warn("kube-burner: no results collected", "tr", trID, "err", err)
-			continue
-		}
-		rc.Logger.Info("kube-burner: collected results", "tr", trID, "files", len(metrics))
-		refs = append(refs, files...)
-		refsByTR[trID] = files
-		for name, content := range metrics {
-			data[trID+"/"+name] = content
-		}
-	}
-	return core.LogBundle{Refs: refs, RefsByTR: refsByTR, Data: data}, nil
+	rc.Logger.Info("kube-burner: collected results", "tr", trID, "files", len(m))
+	return core.LogBundle{Refs: files, Data: m}, nil
 }
 
 // findCollectedMetrics returns the metric files under root keyed by base name,
@@ -161,69 +152,55 @@ func findCollectedMetrics(root string) (map[string][]byte, []string, error) {
 	return data, paths, nil
 }
 
-func (s *session) Parse(_ context.Context, _ *core.RunCtx, logs core.LogBundle) ([]core.TestResult, error) {
-	runs := s.executions
-	if runs == nil {
-		return nil, fmt.Errorf("kube-burner: per-TR parameters missing (preflight first)")
+type parser struct{}
+
+func (parser) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, logs core.LogBundle) ([]core.TestResult, error) {
+	trID, _ := core.GetAs[string](bag, "kb_trid")
+	if _, ok := logs.Data["jobSummary.json"]; !ok {
+		reason := "kube-burner produced no jobSummary"
+		if e, _ := core.GetAs[string](bag, "kb_runerr"); e != "" {
+			reason = e
+		}
+		raw, _ := json.Marshal(map[string]string{"error": reason})
+		return []core.TestResult{{TRID: trID, Native: core.OutcomeFail, Raw: raw}}, nil
 	}
-	results := make([]core.TestResult, 0, len(runs))
-	for _, run := range runs {
-		trID := run.Requirement.TR.ID
-		data := make(map[string][]byte)
-		prefix := trID + "/"
-		for name, content := range logs.Data {
-			if strings.HasPrefix(name, prefix) {
-				data[strings.TrimPrefix(name, prefix)] = content
-			}
-		}
-		if _, ok := data["jobSummary.json"]; !ok {
-			reason := "kube-burner produced no jobSummary"
-			if run.RunErr != "" {
-				reason = run.RunErr
-			}
-			raw, _ := json.Marshal(map[string]string{"error": reason})
-			results = append(results, core.TestResult{TRID: trID, Native: core.OutcomeFail, Raw: raw})
-			continue
-		}
-		result, err := parseResultsWithScenario(trID, data, run.Requirement.Params.SnapshotCount, snapshotScenarios[trID])
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, result)
+	p, ok := core.GetAs[Params](bag, "params")
+	if !ok {
+		return nil, fmt.Errorf("kube-burner: params missing (preflight first)")
 	}
-	return results, nil
+	res, err := parseResultsWithScenario(trID, logs.Data, p.SnapshotCount, snapshotScenarios[trID])
+	if err != nil {
+		return nil, err
+	}
+	return []core.TestResult{res}, nil
 }
 
-// Teardown best-effort deletes each run namespace and private snapshot class.
-func (s *session) Teardown(ctx context.Context, rc *core.RunCtx) error {
-	runs := s.executions
+type teardown struct{}
+
+// Teardown best-effort deletes the run namespace (VMs, DataVolumes, snapshots).
+func (teardown) Teardown(ctx context.Context, rc *core.RunCtx, bag *core.Bag) error {
 	defer func() {
-		for _, run := range runs {
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-			if err := run.Selection.CleanupVMStorage(cleanupCtx, run.SnapshotStorageClass); err != nil {
-				rc.Logger.Warn("kube-burner: remove snapshot storage class", "err", err)
-			}
-			cancel()
+		selection, _ := core.GetAs[clustercheck.SnapshotSelection](bag, "snapshot_selection")
+		created, _ := core.GetAs[string](bag, "snapshot_storage_class")
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+		defer cancel()
+		if err := selection.CleanupVMStorage(cleanupCtx, created); err != nil {
+			rc.Logger.Warn("kube-burner: remove snapshot storage class", "err", err)
 		}
 	}()
+	p, ok := core.GetAs[Params](bag, "params")
+	if !ok || p.NS == "" {
+		return nil
+	}
 	cli := clustercheck.KubeCLI()
 	if cli == "" {
 		return nil
 	}
-	seen := make(map[string]bool, len(runs))
-	for _, run := range runs {
-		namespace := run.Requirement.Params.NS
-		if namespace == "" || seen[namespace] {
-			continue
-		}
-		seen[namespace] = true
-		rc.Logger.Info("kube-burner: removing run namespace", "ns", namespace)
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-		output, err := exec.CommandContext(cleanupCtx, cli, "delete", "ns", namespace, "--wait=false", "--ignore-not-found").CombinedOutput() // #nosec G204 -- CLI is resolved by clustercheck and arguments are structured.
-		cancel()
-		if err != nil {
-			rc.Logger.Warn("kube-burner: remove run namespace", "ns", namespace, "err", err, "output", strings.TrimSpace(string(output)))
-		}
+	rc.Logger.Info("kube-burner: removing run namespace", "ns", p.NS)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	if output, err := exec.CommandContext(cleanupCtx, cli, "delete", "ns", p.NS, "--wait=false", "--ignore-not-found").CombinedOutput(); err != nil { // #nosec G204 -- CLI is resolved by clustercheck and arguments are structured.
+		rc.Logger.Warn("kube-burner: remove run namespace", "ns", p.NS, "err", err, "output", strings.TrimSpace(string(output)))
 	}
 	return nil
 }

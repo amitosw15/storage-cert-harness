@@ -1,4 +1,11 @@
-// Package stages defines tool sessions, scoring interfaces, and shared setup contracts.
+// Package stages defines the harness "ports" — the small, single-purpose
+// adapter interfaces a test tool implements — and the ToolIntegration that
+// binds a set of them together. The core drives these interfaces and never
+// imports a concrete tool. See decisions/0003 and 0006.
+//
+// Every stage method takes context.Context first (cancellation, deadlines,
+// abort-on-failure) and a *core.Bag for stage-to-stage state. Stages operate on
+// the TestRequirements (TRs) selected for the tool.
 package stages
 
 import (
@@ -6,6 +13,48 @@ import (
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
+
+// RunHandle identifies an in-flight or completed run of a tool, so a
+// LogCollector knows what to collect.
+type RunHandle struct {
+	ID string
+}
+
+// Preflight checks prerequisites before anything is provisioned.
+// Return one finding for every check, including successes and skips (with a
+// reason). Continue independent checks after failures. An error may accompany
+// partial findings when the remaining checks cannot be completed.
+type Preflight interface {
+	Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) ([]core.Finding, error)
+}
+
+// Provisioner is the input/setup adapter: create namespaces, apply manifests,
+// deploy the tool's released image, etc.
+type Provisioner interface {
+	Provision(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) error
+}
+
+// Runner drives the tool to execute the TRs (typically by launching the tool's
+// released container image as a Job/Pod).
+type Runner interface {
+	Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) (RunHandle, error)
+}
+
+// LogCollector is the log-ingest adapter.
+type LogCollector interface {
+	Collect(ctx context.Context, rc *core.RunCtx, bag *core.Bag, h RunHandle) (core.LogBundle, error)
+}
+
+// ResultParser is the output-ingest adapter: turn raw logs/artifacts into
+// normalized TestResults.
+type ResultParser interface {
+	Parse(ctx context.Context, rc *core.RunCtx, bag *core.Bag, logs core.LogBundle) ([]core.TestResult, error)
+}
+
+// Teardown cleans up everything Provision created.
+type Teardown interface {
+	Teardown(ctx context.Context, rc *core.RunCtx, bag *core.Bag) error
+}
 
 // Evaluator fully scores one TR from its TestResult, returning a Verdict per
 // scorable item. The core grader handles standard sla/checks; a ToolIntegration
@@ -15,13 +64,20 @@ type Evaluator interface {
 	Evaluate(ctx context.Context, tr core.TestRequirement, res core.TestResult) ([]core.Verdict, error)
 }
 
-// ToolIntegration declares a tool and creates isolated sessions for its jobs.
+// ToolIntegration binds a named set of stage adapters into one pluggable tool.
+// Any field may reuse a shared/generic adapter. Image is the tool's released
+// container image (overridable); we run that image rather than compiling the
+// tool into the harness. See decisions/0003.
 type ToolIntegration struct {
-	Name     string
-	Image    string
-	Provides []string // TR ids this integration can run
-	// NewSession creates a fresh session for each pipeline invocation.
-	NewSession func() Session
+	Name         string
+	Image        string
+	Provides     []string // TR ids this integration can run
+	Preflight    Preflight
+	Provisioner  Provisioner
+	Runner       Runner
+	LogCollector LogCollector
+	ResultParser ResultParser
+	Teardown     Teardown
 
 	// Scheduling defaults (a plan may override per run — see config.ToolSchedule).
 	// ParallelSafe true lets this tool's job overlap other parallel-safe jobs.

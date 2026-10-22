@@ -13,7 +13,6 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/plan"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/registry"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/tools/common"
 )
 
 func readFixtures(t *testing.T, names ...string) map[string][]byte {
@@ -308,7 +307,7 @@ func TestParseResults_AggregatesSnapshotReadyQuantilesAcrossBatches(t *testing.T
 func TestPreflight_RequiresStorageClass(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	rc := &core.RunCtx{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	findings, err := (&session{}).Preflight(context.Background(), rc, []core.TestRequirement{{ID: "TR-VIRT-010", Params: map[string]any{"replicas": 1, "snapshot_count": 1}}})
+	findings, err := (preflight{}).Check(context.Background(), rc, core.NewBag(), []core.TestRequirement{{ID: "TR-VIRT-010", Params: map[string]any{"replicas": 1, "snapshot_count": 1}}})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -425,10 +424,11 @@ func TestTeardown_DeletesNamespaceAfterCancellation(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 
-	job := &session{executions: []execution{{Requirement: common.ResolvedRequirement[Params]{Params: Params{NS: "storage-cert-smoke"}}}}}
+	bag := core.NewBag()
+	bag.Set("params", Params{NS: "storage-cert-smoke"})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := job.Teardown(ctx, &core.RunCtx{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}); err != nil {
+	if err := (teardown{}).Teardown(ctx, &core.RunCtx{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}, bag); err != nil {
 		t.Fatalf("Teardown: %v", err)
 	}
 	got, err := os.ReadFile(output)

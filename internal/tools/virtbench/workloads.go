@@ -62,7 +62,7 @@ var scenarios = []Scenario{
 		ProvidesTR:     "TR-VIRT-018",
 		ResultFile:     SummaryFileName,
 		NSPrefix:       "virtbench",
-		BuildArgs: func(rc *core.RunCtx, _ *session, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+		BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
 			return cloneAtScaleArgs("virtbench")(rc, tr, resultsRoot)
 		},
 		Parse: ParseSummary,
@@ -99,7 +99,7 @@ var scenarios = []Scenario{
 		ProvidesTR:     "TR-VIRT-013",
 		ResultFile:     SummaryFileName,
 		NSPrefix:       singleNodeNSPrefix,
-		BuildArgs: func(rc *core.RunCtx, _ *session, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+		BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
 			return singleNodeCeilingArgs(singleNodeNSPrefix)(rc, tr, resultsRoot)
 		},
 		Parse:            ParseSingleNodeCeiling,
@@ -130,7 +130,7 @@ var workloadSpecs = map[string]workloadSpec{
 	"TR-VIRT-007": {checks: failureRecoveryChecks},
 }
 
-func workloadChecks(rc *core.RunCtx, s *session, trs []core.TestRequirement) []common.PreflightCheck {
+func workloadChecks(rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) []common.PreflightCheck {
 	replayPath := replayDir(trs)
 	replay := replayPath != ""
 	checks := make([]common.PreflightCheck, 0, len(trs)*4+1)
@@ -152,7 +152,7 @@ func workloadChecks(rc *core.RunCtx, s *session, trs []core.TestRequirement) []c
 			}
 		}
 		if spec.snapshotClone && usesSnapshot(tr) {
-			checks = append(checks, withReplay(snapshotCloneBinding(rc, s, tr), replay))
+			checks = append(checks, withReplay(snapshotCloneBinding(rc, bag, tr), replay))
 		}
 	}
 	return checks

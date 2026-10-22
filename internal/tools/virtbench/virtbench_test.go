@@ -270,7 +270,7 @@ func TestPreflightChecksFIOCommand(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 	trs := []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}}}
-	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
+	findings, err := checkPreflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestPreflightUsesEmbeddedFIOP99Template(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 	trs := []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}}}
-	findings, err := testSession(trs).Preflight(context.Background(), &core.RunCtx{}, trs)
+	findings, err := checkPreflight(context.Background(), &core.RunCtx{}, trs)
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestPreflightUsesEmbeddedFIOP99Template(t *testing.T) {
 // virtbench-specific scoring that survives ADR-0013 (measurability is now data).
 func TestScenarioEvaluatorNativeFail(t *testing.T) {
 	ev := scenarioEvaluator{}
-	tr := core.TestRequirement{ID: "TR-STOR-001", AutomationTool: string(core.ToolVirtbench), Scenario: string(WorkloadDiskOps),
+	tr := core.TestRequirement{ID: "TR-STOR-001", AutomationTool: "virtbench disk-ops",
 		SLAs: []core.SLA{{Metric: "pvc_attach_time", MeasuredBy: []string{"virtbench disk-ops"}}}}
 	res := core.TestResult{TRID: "TR-STOR-001", Native: core.OutcomeFail,
 		Metrics: []core.Metric{{Name: "vms_failed", Value: 2}, {Name: "vms_total", Value: 10}}}
@@ -320,7 +320,7 @@ func TestScenarioEvaluatorNativeFail(t *testing.T) {
 
 func TestScenarioEvaluatorLabelsFIOFleetP99(t *testing.T) {
 	limit := 5.0
-	tr := core.TestRequirement{ID: "TR-STOR-002", AutomationTool: string(core.ToolVirtbench), Scenario: string(WorkloadFIO), SLAStatus: core.StatusDefined, SLAs: []core.SLA{{
+	tr := core.TestRequirement{ID: "TR-STOR-002", AutomationTool: "virtbench fio", SLAStatus: core.StatusDefined, SLAs: []core.SLA{{
 		Metric: "read_latency", Operator: "<=", Value: &limit, Unit: "ms", Percentile: "p99", MeasuredBy: []string{"virtbench fio"},
 	}}}
 	result := core.TestResult{TRID: tr.ID, Metrics: []core.Metric{
@@ -581,7 +581,7 @@ func TestFIOUsesCustomRunnerOnly(t *testing.T) {
 			continue
 		}
 		if sc.Run != nil {
-			t.Errorf("%s unexpectedly has a custom runner", sc.IntegrationName())
+			t.Errorf("%s unexpectedly has a custom runner", sc.AutomationTool)
 		}
 	}
 }
@@ -714,7 +714,7 @@ func TestBuildArgsFailureRecovery(t *testing.T) {
 			"vm_recovery_timeout": 90,
 		},
 	}
-	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, &session{}, tr, "/work/res")
+	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, core.NewBag(), tr, "/work/res")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}
@@ -741,7 +741,7 @@ func TestBuildArgsFailureRecoveryFAR(t *testing.T) {
 		"mode":       "far-operator",
 		"far_config": "/far-config.json",
 	}}
-	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, &session{}, tr, "/work/res")
+	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, core.NewBag(), tr, "/work/res")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}
@@ -782,20 +782,21 @@ func TestFailureRecoveryValidate(t *testing.T) {
 	}
 }
 
-func TestBuildArgsFailureRecoveryNodeFromSession(t *testing.T) {
-	s := &session{pickedNode: "auto-worker-3"}
+func TestBuildArgsFailureRecoveryNodeFromBag(t *testing.T) {
+	b := core.NewBag()
+	b.Set("picked_node", "auto-worker-3")
 	tr := core.TestRequirement{ID: "TR-VIRT-007", Params: map[string]any{"storage_class": "sc", "far_config": "/far-config.json"}}
-	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, s, tr, "/work/res")
+	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, b, tr, "/work/res")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}
 	if !strings.Contains(strings.Join(got, " "), "--node auto-worker-3") {
-		t.Errorf("expected --node auto-worker-3 from session; got %v", got)
+		t.Errorf("expected --node auto-worker-3 from bag; got %v", got)
 	}
 }
 
 func TestBuildArgsFailureRecoveryRequiresNode(t *testing.T) {
-	if _, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, &session{}, core.TestRequirement{ID: "TR-VIRT-007"}, "/work/res"); err == nil {
+	if _, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, core.NewBag(), core.TestRequirement{ID: "TR-VIRT-007"}, "/work/res"); err == nil {
 		t.Error("missing node: want error, got nil")
 	}
 }
@@ -810,7 +811,7 @@ func TestBuildArgsFailureRecoveryOptionalFlags(t *testing.T) {
 			"vm_recovery_timeout": 300,
 		},
 	}
-	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, &session{}, tr, "/work/res")
+	got, err := failureRecoveryArgs("failure-recovery")(&core.RunCtx{}, core.NewBag(), tr, "/work/res")
 	if err != nil {
 		t.Fatalf("buildArgs: %v", err)
 	}

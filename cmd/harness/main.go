@@ -215,11 +215,11 @@ func newPreflightCmd() *cobra.Command {
 					results.add("FAIL", tool, "tool not registered")
 					continue
 				}
-				if ti.NewSession == nil {
+				if ti.Preflight == nil {
 					results.add("SKIP", tool, "no preflight checks implemented")
 					continue
 				}
-				findings, err := ti.NewSession().Preflight(cmd.Context(), rc, ts)
+				findings, err := ti.Preflight.Check(cmd.Context(), rc, core.NewBag(), ts)
 				for _, f := range findings {
 					switch f.Level {
 					case "info":
