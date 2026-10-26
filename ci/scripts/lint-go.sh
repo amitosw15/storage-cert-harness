@@ -21,7 +21,7 @@ require_cmd golangci-lint
 
 gcl_ver="$(golangci-lint version 2>&1 || true)"
 if [[ "${gcl_ver}" =~ built\ with\ go1\.([0-9]+) ]] && [[ "${BASH_REMATCH[1]}" -lt 26 ]]; then
-	die "golangci-lint at $(command -v golangci-lint) was built with go1.${BASH_REMATCH[1]} (need go1.26.9+ for this module). Run ./ci/install-tools.sh"
+	die "golangci-lint at $(command -v golangci-lint) was built with go1.${BASH_REMATCH[1]} (need go1.26.9+ for this module). Run ./ci/scripts/install-tools.sh"
 fi
 
 dirty="$(git ls-files '*.go' | grep -v '^vendor/' | xargs -r gofmt -l || true)"

@@ -1,14 +1,63 @@
 # storage-cert-harness
 
 Storage certification test harness for OpenShift / OpenShift Virtualization. It
-orchestrates upstream test tools, grades their results against SLA gates and
-functional checks, and emits a certification report.
+orchestrates upstream test tools, grades their results against SLA gates, and
+emits a certification report.
+
+## Partner and customer certification
+
+If you are certifying storage on your cluster, start here:
+
+**[PARTNER-CERTIFICATION-GUIDE.md](PARTNER-CERTIFICATION-GUIDE.md)**
+
+That guide runs the published image
+[`quay.io/virtarraycert/storage-cert-harness:main`](https://quay.io/repository/virtarraycert/storage-cert-harness?tab=tags)
+with Podman (no local build). Quick commands after preparing `backends.yaml` and
+`KUBECONFIG`:
+
+```sh
+export BACKEND=partner-storage KUBECONFIG=/path/to/kubeconfig
+make partner-preflight
+make partner-cert-load-80
+make partner-cert-no-load-80
+make partner-package-results   # Level 3 bundle after load-80 + no-load-80 runs
+```
+
+Level 3 uses `plans/level3-customer-load-80.yaml`,
+`plans/level3-customer-no-load-80.yaml`, and root `thresholds.json` for both runs.
+Set `BACKEND` to match your `backends.yaml` entry; customize plan placeholders
+(nodes, snapshots) per the guide **§3**. Each `make partner-*` run also writes
+a transcript under `logs/` in the repo; see the guide for `run.log` paths when
+reporting errors.
+
+Host tools for `make partner-*` (install once, then `make` as usual):
+
+```sh
+./ci/scripts/install-partner-tools.sh          # installs missing tools, then verifies each binary
+./ci/scripts/install-partner-tools.sh --check  # same verification without installing
+```
+
+See **Verify prerequisites** in [PARTNER-CERTIFICATION-GUIDE.md](PARTNER-CERTIFICATION-GUIDE.md) for manual copy-paste checks.
+
+`install-partner-tools` is **not** a Make target. It uses **dnf** or **apt** (or
+**brew** on macOS) for **podman** when missing; **yq** and **jq** are always
+installed under **`~/.local/bin`** for your user (curl from GitHub), not
+`/usr/bin`. New terminals do not pick that up until you run
+`source ./ci/scripts/partner-host-env.sh` (or put `~/.local/bin` on `PATH`).
+**git**, **make**, and **oc** use the system or your existing install (`oc` from
+Red Hat). Re-run `./ci/scripts/install-partner-tools.sh` if you removed `~/.local/bin/yq`
+or `~/.local/bin/jq` while testing. See
+[PARTNER-CERTIFICATION-GUIDE.md](PARTNER-CERTIFICATION-GUIDE.md) Prerequisites.
+
+---
+
+## Developers and contributors
 
 > **Status:** early scaffold. The architecture and contracts are in place with a
 > working reference tool (`example`) that runs offline. Real tool integrations
 > and a live-cluster runner are in progress.
 
-## Prerequisites
+### Prerequisites
 
 - GNU Make
 - Go 1.26.9 or newer
@@ -20,7 +69,7 @@ make --version
 go version
 ```
 
-## Quickstart
+### Quickstart
 
 ```sh
 make build
@@ -34,9 +83,7 @@ make build
 `thresholds.json` is supplied with the repository inputs and is passed at run
 time via `--thresholds <path>` or `HARNESS_THRESHOLDS`.
 
-Partner certification workflow: [`PARTNER-CERTIFICATION-GUIDE.md`](PARTNER-CERTIFICATION-GUIDE.md).
-
-## Preflight checks
+### Preflight checks
 
 Use the same catalog, plan, and backend options as the intended run:
 
@@ -51,7 +98,7 @@ such as replay mode or a missing CLI needed to query the cluster. Independent
 checks continue after failures. Any failed check makes the command exit non-zero;
 skips alone do not. Invalid input files also exit non-zero before checks run.
 
-## Run artifacts
+### Run artifacts
 
 Pass the same writable directory to `--workdir` and `--output` when collecting
 results for submission:
@@ -97,7 +144,7 @@ The offline scenario generator exercises report consumers without a cluster:
 ./bin/harness simulate-report --output ./out/report-scenarios
 ```
 
-## How it works
+### How it works
 
 Ports-and-adapters. The KB export **v2.0 two-file contract** drives a run —
 `catalog.json` (per-Test-Requirement metadata) and `thresholds.json` (SLA
@@ -109,29 +156,29 @@ a report. See [`docs/architecture.md`](docs/architecture.md),
 [ADR-0003](decisions/0003-harness-architecture-ports-and-adapters.md), and
 [ADR-0006](decisions/0006-adopt-kb-export-v2-contract.md).
 
-## Adding a tool
+### Adding a tool
 
 Copy `internal/tools/example/` and follow
 [`docs/adapter-authoring.md`](docs/adapter-authoring.md). Virtbench’s shared
 `ssh-test-pod` uses a pinned `quay.io/virtarraycert/ssh-helper` digest;
 see [`docs/ssh-helper-image.md`](docs/ssh-helper-image.md) to update it.
 
-## Secret handling
+### Secret handling
 
 `thresholds.json` is a repository input for certification runs. Backend
 credentials remain references to files or Kubernetes Secrets; do not commit
 plaintext backend credentials. Use `backends.example.yaml` as the template.
 
-## Layout
+### Layout
 
 See [`AGENTS.md`](AGENTS.md) for the directory map and contributor rules (internal
 GitLab only), [`docs/ci.md`](docs/ci.md) for CI, and [`decisions/`](decisions/)
 for architecture decision records.
 
-## Release artifact
+### Release artifact
 
 The harness **ships as a container image** ([ADR-0011](decisions/0011-harness-ships-as-container-image.md)):
-`quay.io/eco-special-projects/storage-cert-harness:<image_version>` (`:main` on the
+`quay.io/virtarraycert/storage-cert-harness:<image_version>` (`:main` on the
 default branch). The image includes `harness`, `kube-burner-ocp`, and `virtbench`
 on `PATH`. `harness version` reports the **binary** version track;
 the image tag uses the **image** version track. See [`docs/ci.md` Versioning](docs/ci.md#versioning).
@@ -139,13 +186,13 @@ the image tag uses the **image** version track. See [`docs/ci.md` Versioning](do
 `make build` still produces a local `bin/harness` for development. CI
 build/scan/push: [`docs/ci.md`](docs/ci.md).
 
-## CI
+### CI
 
 Lint, unit tests, secret-scan, supply-chain, offline replay-smoke, binary build
 (linux/amd64 artifact), and container image build/scan (podman locally):
 [`docs/ci.md`](docs/ci.md). One-time: `./ci/scripts/install-tools.sh`.
 
-### Live cluster smoke (contributor responsibility)
+#### Live cluster smoke (contributor responsibility)
 
 Shared-cluster CI smoke is defined in
 [`docs/design/storage-cert-harness-ci-smoke-test.md`](docs/design/storage-cert-harness-ci-smoke-test.md)
@@ -178,11 +225,7 @@ your `work/backends.local.yaml` must define that name). When CI live smoke is
 enabled, see [`docs/contributing.md`](docs/contributing.md) for on-demand re-runs
 (`/run-live-smoke`, GitHub Actions UI, or `gh pr comment`).
 
-## License
-
-Apache-2.0 (see `LICENSE`).
-
-## Report metrics
+### Report metrics
 
 Reports include measurements matching each test's catalog `sla` descriptors by
 default, even when no threshold is set. A descriptor with a percentile includes
@@ -208,7 +251,7 @@ still receives every parsed metric, and required SLA failures retain their
 existing behavior. Extras must already be produced by the tool; requesting a
 metric does not enable additional collection.
 
-## Named plan variants
+### Named plan variants
 
 A plan can run a selected TR with several parameter combinations:
 
@@ -252,3 +295,7 @@ executions are run. Use `--retry-failed` when failed/error executions should be
 rerun explicitly. Distinct variants and scenarios are retained, and a rerun of
 the same TR, scenario, variant, and item replaces its earlier result while the
 run-part history remains in the composed report.
+
+## License
+
+Apache-2.0 (see `LICENSE`).

@@ -46,3 +46,7 @@ report.md
 .DS_Store
 *.swp
 work1/kubeconfig-ecosys2
+certification-results*
+
+# Local-only partner install test helper (not shipped)
+ci/scripts/uninstall-partner-tools.sh

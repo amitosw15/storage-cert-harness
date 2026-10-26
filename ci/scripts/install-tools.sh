@@ -6,8 +6,8 @@
 # Podman is the default container engine; OS-package it if missing.
 #
 # Usage:
-#   ./ci/install-tools.sh          # install only what is missing or wrong version
-#   ./ci/install-tools.sh --check  # print status only (no installs)
+#   ./ci/scripts/install-tools.sh          # install only what is missing or wrong version
+#   ./ci/scripts/install-tools.sh --check  # print status only (no installs)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -402,7 +402,7 @@ if [[ "${check_only}" -eq 1 ]]; then
 		fi
 		have "${c}" || missing=1
 	done
-	[[ "${missing}" -eq 0 ]] || die "one or more tools missing (run ./ci/install-tools.sh)"
+	[[ "${missing}" -eq 0 ]] || die "one or more tools missing (run ./ci/scripts/install-tools.sh)"
 	echo "all CI tools present"
 	exit 0
 fi

@@ -12,7 +12,8 @@ endif
 .PHONY: all build test unittest vet lint lint-yaml lint-actions lint-md lint-go tidy cover \
 	run-example run-tr-stor-006 clean clean-image-cache ci ci-image replay-smoke image-build \
 	image-build-fresh image-build-local run-harness-smoke \
-	run-quay-image-tests \
+	run-quay-image-tests partner-preflight partner-cert-load-80 partner-cert-no-load-80 \
+	partner-package-results \
 	image-contents-check image-scan-trivy image-scan-dive image-scan image-push \
 	secret-scan supply-chain install-tools mirror-ci-tools sync-images set-next-version
 
@@ -103,6 +104,24 @@ run-harness-smoke:
 # Example: make run-quay-image-tests VERSION=1.0.0
 run-quay-image-tests:
 	./ci/scripts/run-quay-image-tests.sh "$(or $(VERSION),latest)" "$(or $(KUBECONFIG),work/kubeconfig)"
+
+# Partner certification against the published image (no local build).
+# Example:
+#   export KUBECONFIG=/path/to/kubeconfig BACKEND=partner-storage
+#   make partner-preflight
+#   make partner-cert-load-80
+#   make partner-cert-no-load-80
+partner-preflight:
+	./ci/scripts/run-partner-preflight.sh "$(or $(KUBECONFIG),kubeconfig)"
+
+partner-cert-load-80:
+	./ci/scripts/run-partner-cert.sh load-80 "$(or $(KUBECONFIG),kubeconfig)"
+
+partner-cert-no-load-80:
+	./ci/scripts/run-partner-cert.sh no-load-80 "$(or $(KUBECONFIG),kubeconfig)"
+
+partner-package-results:
+	PARTNER_PACKAGE_MODE=level3 ./ci/scripts/run-partner-package-results.sh
 
 image-contents-check:
 	./ci/scripts/image-contents-check.sh

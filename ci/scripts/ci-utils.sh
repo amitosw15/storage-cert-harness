@@ -156,7 +156,7 @@ container_engine() {
 	podman | buildah | docker) ;;
 	*) die "unsupported CONTAINER_ENGINE=${eng} (want podman, buildah, or docker)" ;;
 	esac
-	command -v "${eng}" >/dev/null 2>&1 || die "required command not found: ${eng} (default is podman; see docs/ci.md / ./ci/install-tools.sh)"
+	command -v "${eng}" >/dev/null 2>&1 || die "required command not found: ${eng} (default is podman; see docs/ci.md / ./ci/scripts/install-tools.sh)"
 	echo "${eng}"
 }
 
