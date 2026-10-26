@@ -673,9 +673,7 @@ func fioProfile(tr core.TestRequirement) (string, error) {
 	}
 }
 
-// runFIO delegates deployment, guest FIO completion waiting, result collection,
-// and persistence to Virtbench's run-all workflow. The harness still owns
-// cancellation-safe cleanup and parses the saved per-VM results for grading.
+// runFIO delegates FIO execution and collection to Virtbench while retaining harness cleanup and grading.
 func runFIO(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error) {
 	if len(trs) == 0 {
 		return stages.RunHandle{}, fmt.Errorf("virtbench: no FIO test requirement")
@@ -715,9 +713,7 @@ func runFIO(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.Test
 	return stages.RunHandle{ID: "virtbench-" + rc.RunID}, nil
 }
 
-// fioRunAllArgs preserves the plan's collection retry settings while letting
-// Virtbench own the complete deploy/wait/gather flow. Cleanup is left to runFIO's
-// cancellation-safe defer instead of Virtbench's success-only --cleanup path.
+// fioRunAllArgs configures Virtbench's full FIO workflow and leaves cleanup to the harness.
 func fioRunAllArgs(base []string, retries, delay int) []string {
 	args := fioActionArgs(base, "run-all")
 	return append(args,

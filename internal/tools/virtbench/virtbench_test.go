@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -528,19 +530,87 @@ func TestFIOActionArgs(t *testing.T) {
 
 func TestFIORunAllArgs(t *testing.T) {
 	base := []string{"fio", "--action", "run-all", "--cleanup", "--save-results", "--start", "1"}
-	got := strings.Join(fioRunAllArgs(base, 8, 20), " ")
-	for _, want := range []string{
-		"fio --action run-all --save-results --start 1",
-		"--collect-retries 8",
-		"--collect-retry-delay 20",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("run-all args missing %q; got %q", want, got)
+	want := []string{
+		"fio", "--action", "run-all", "--save-results", "--start", "1",
+		"--collect-retries", "8", "--collect-retry-delay", "20",
+	}
+	if got := fioRunAllArgs(base, 8, 20); !reflect.DeepEqual(got, want) {
+		t.Fatalf("run-all args = %#v; want %#v", got, want)
+	}
+}
+
+func TestRunFIOInvokesRunAll(t *testing.T) {
+	binDir := t.TempDir()
+	argsPath := filepath.Join(t.TempDir(), "virtbench-args.log")
+	fakeCLI := "#!/bin/sh\nprintf '%s\\n' '--CALL--' \"$@\" >> \"$VIRTBENCH_ARGS\"\n"
+	if err := os.WriteFile(filepath.Join(binDir, binary), []byte(fakeCLI), 0o755); err != nil {
+		t.Fatalf("write fake Virtbench CLI: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("VIRTBENCH_ARGS", argsPath)
+
+	resultsRoot := t.TempDir()
+	bag := core.NewBag()
+	bag.Set("results_root", resultsRoot)
+	rc := &core.RunCtx{
+		RunID:   "test-run",
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Backend: &core.ResolvedBackend{StorageClass: "test-sc"},
+	}
+	tr := core.TestRequirement{ID: "TR-STOR-002", Params: map[string]any{
+		"num_vms":                 3,
+		"fio_bs":                  "4k",
+		"fio_runtime":             30,
+		"fio_collect_retries":     8,
+		"fio_collect_retry_delay": 20,
+	}}
+	if _, err := runFIO(context.Background(), rc, bag, []core.TestRequirement{tr}); err != nil {
+		t.Fatalf("runFIO: %v", err)
+	}
+
+	data, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read fake CLI arguments: %v", err)
+	}
+	log := strings.TrimSpace(string(data))
+	calls := strings.Split(strings.TrimPrefix(log, "--CALL--\n"), "\n--CALL--\n")
+	if len(calls) != 2 {
+		t.Fatalf("fake Virtbench calls = %d; want run-all and cleanup; log:\n%s", len(calls), data)
+	}
+	runArgs := strings.Split(calls[0], "\n")
+	cleanupArgs := strings.Split(calls[1], "\n")
+	if len(runArgs) < 3 || !reflect.DeepEqual(runArgs[:3], []string{"fio", "--action", "run-all"}) {
+		t.Fatalf("first Virtbench call = %#v; want run-all", runArgs)
+	}
+	for _, pair := range [][2]string{{"--collect-retries", "8"}, {"--collect-retry-delay", "20"}} {
+		if !hasArgPair(runArgs, pair[0], pair[1]) {
+			t.Errorf("run-all call missing %s %s: %#v", pair[0], pair[1], runArgs)
 		}
 	}
-	if strings.Contains(got, "--cleanup") {
-		t.Errorf("run-all args should leave cleanup to the harness; got %q", got)
+	if containsArg(runArgs, "--cleanup") {
+		t.Errorf("run-all call should leave cleanup to the harness: %#v", runArgs)
 	}
+	if len(cleanupArgs) < 3 || !reflect.DeepEqual(cleanupArgs[:3], []string{"fio", "--action", "cleanup"}) {
+		t.Fatalf("second Virtbench call = %#v; want cleanup", cleanupArgs)
+	}
+}
+
+func hasArgPair(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func containsArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestFIOWaitAndCollectionSettings(t *testing.T) {
