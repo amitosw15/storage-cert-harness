@@ -526,6 +526,23 @@ func TestFIOActionArgs(t *testing.T) {
 	}
 }
 
+func TestFIORunAllArgs(t *testing.T) {
+	base := []string{"fio", "--action", "run-all", "--cleanup", "--save-results", "--start", "1"}
+	got := strings.Join(fioRunAllArgs(base, 8, 20), " ")
+	for _, want := range []string{
+		"fio --action run-all --save-results --start 1",
+		"--collect-retries 8",
+		"--collect-retry-delay 20",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("run-all args missing %q; got %q", want, got)
+		}
+	}
+	if strings.Contains(got, "--cleanup") {
+		t.Errorf("run-all args should leave cleanup to the harness; got %q", got)
+	}
+}
+
 func TestFIOWaitAndCollectionSettings(t *testing.T) {
 	tr := core.TestRequirement{Params: map[string]any{"fio_runtime": 600}}
 	timeout, err := fioVMReadyTimeout(tr)
@@ -550,27 +567,6 @@ func TestFIOWaitAndCollectionSettings(t *testing.T) {
 	tr.Params["vm_ready_timeout"] = 0
 	if _, err := fioVMReadyTimeout(tr); err == nil {
 		t.Error("zero VM ready timeout: want error")
-	}
-}
-
-func TestFIOVMStates(t *testing.T) {
-	wanted := map[string]struct{}{
-		"fio-1/fio-vm": {},
-		"fio-2/fio-vm": {},
-	}
-	data := []byte(`{"items":[
-		{"metadata":{"namespace":"fio-1","name":"fio-vm"},"status":{"phase":"Running","interfaces":[{"ipAddress":"10.0.0.1"}]}},
-		{"metadata":{"namespace":"fio-2","name":"fio-vm"},"status":{"phase":"Failed"}},
-		{"metadata":{"namespace":"other","name":"fio-vm"},"status":{"phase":"Running","interfaces":[{"ipAddress":"10.0.0.2"}]}}
-	]}`)
-	ready, failed, err := fioVMStates(data, wanted)
-	if err != nil || ready != 1 || failed != 1 {
-		t.Errorf("VM states = ready=%d failed=%d err=%v; want 1, 1, nil", ready, failed, err)
-	}
-	noIP := []byte(`{"items":[{"metadata":{"namespace":"fio-1","name":"fio-vm"},"status":{"phase":"Running"}}]}`)
-	ready, failed, err = fioVMStates(noIP, wanted)
-	if err != nil || ready != 0 || failed != 0 {
-		t.Errorf("running VM without IP = ready=%d failed=%d err=%v; want 0, 0, nil", ready, failed, err)
 	}
 }
 

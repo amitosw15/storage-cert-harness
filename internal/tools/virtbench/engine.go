@@ -673,9 +673,9 @@ func fioProfile(tr core.TestRequirement) (string, error) {
 	}
 }
 
-// runFIO avoids Virtbench's fixed five-minute VM boot wait. FIO starts during
-// guest boot; this runner waits for every VM to be Running, then runs gather-results
-// with collect retries (virtbench SSH from the helper pod — not duplicated in harness).
+// runFIO delegates deployment, guest FIO completion waiting, result collection,
+// and persistence to Virtbench's run-all workflow. The harness still owns
+// cancellation-safe cleanup and parses the saved per-VM results for grading.
 func runFIO(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error) {
 	if len(trs) == 0 {
 		return stages.RunHandle{}, fmt.Errorf("virtbench: no FIO test requirement")
@@ -689,17 +689,12 @@ func runFIO(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.Test
 	if err != nil {
 		return stages.RunHandle{}, err
 	}
-	deploy := fioActionArgs(base, "deploy")
-	gather := fioActionArgs(base, "gather-results")
-	cleanup := fioActionArgs(base, "cleanup")
 	retries, delay, err := fioCollectionSettings(tr)
 	if err != nil {
 		return stages.RunHandle{}, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 	}
-	gather = append(gather,
-		"--collect-retries", strconv.Itoa(retries),
-		"--collect-retry-delay", strconv.Itoa(delay),
-	)
+	runAll := fioRunAllArgs(base, retries, delay)
+	cleanup := fioActionArgs(base, "cleanup")
 
 	deployed := false
 	defer func() {
@@ -714,16 +709,21 @@ func runFIO(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.Test
 	}()
 
 	deployed = true
-	if err := runVirtbench(ctx, rc, root, deploy); err != nil {
-		return stages.RunHandle{}, fmt.Errorf("virtbench fio: deploy: %w", err)
-	}
-	if err := waitForFIOVMs(ctx, rc, tr); err != nil {
-		return stages.RunHandle{}, err
-	}
-	if err := runVirtbench(ctx, rc, root, gather); err != nil {
-		return stages.RunHandle{}, fmt.Errorf("virtbench fio: gather results: %w", err)
+	if err := runVirtbench(ctx, rc, root, runAll); err != nil {
+		return stages.RunHandle{}, fmt.Errorf("virtbench fio: run-all: %w", err)
 	}
 	return stages.RunHandle{ID: "virtbench-" + rc.RunID}, nil
+}
+
+// fioRunAllArgs preserves the plan's collection retry settings while letting
+// Virtbench own the complete deploy/wait/gather flow. Cleanup is left to runFIO's
+// cancellation-safe defer instead of Virtbench's success-only --cleanup path.
+func fioRunAllArgs(base []string, retries, delay int) []string {
+	args := fioActionArgs(base, "run-all")
+	return append(args,
+		"--collect-retries", strconv.Itoa(retries),
+		"--collect-retry-delay", strconv.Itoa(delay),
+	)
 }
 
 func fioActionArgs(base []string, action string) []string {
@@ -767,107 +767,6 @@ func fioCollectionSettings(tr core.TestRequirement) (retries, delay int, err err
 		return 0, 0, fmt.Errorf("fio_collect_retries must be >= 1")
 	}
 	return retries, delay, nil
-}
-
-type fioVMIList struct {
-	Items []fioVMI `json:"items"`
-}
-
-type fioVMI struct {
-	Metadata fioVMIMetadata `json:"metadata"`
-	Status   fioVMIStatus   `json:"status"`
-}
-
-type fioVMIMetadata struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-}
-
-type fioVMIStatus struct {
-	Phase      string            `json:"phase"`
-	Interfaces []fioVMIInterface `json:"interfaces"`
-}
-
-type fioVMIInterface struct {
-	IPAddress string `json:"ipAddress"`
-}
-
-func waitForFIOVMs(ctx context.Context, rc *core.RunCtx, tr core.TestRequirement) error {
-	timeout, err := fioVMReadyTimeout(tr)
-	if err != nil {
-		return fmt.Errorf("virtbench: %s: %w", tr.ID, err)
-	}
-	start, end, err := fioVMRange(tr)
-	if err != nil {
-		return fmt.Errorf("virtbench: %s: %w", tr.ID, err)
-	}
-	prefix := strParamOr(tr, "namespace_prefix", "fio-latency")
-	wanted := make(map[string]struct{}, end-start+1)
-	for index := start; index <= end; index++ {
-		wanted[fmt.Sprintf("%s-%d/%s", prefix, index, defaultFIOVMName)] = struct{}{}
-	}
-	deadline := time.Now().Add(timeout)
-	kubeconfig := strParamOr(tr, "kubeconfig", "")
-	for {
-		out, ok, runErr := runKubectl(ctx, kubeconfig, "get", "vmi", "--all-namespaces", "-o", "json")
-		if runErr != nil {
-			return fmt.Errorf("virtbench fio: list VM instances: %w", runErr)
-		}
-		if !ok {
-			return fmt.Errorf("virtbench fio: list VM instances: %s", strings.TrimSpace(out))
-		}
-		ready, failed, err := fioVMStates([]byte(out), wanted)
-		if err != nil {
-			return err
-		}
-		if failed > 0 {
-			return fmt.Errorf("virtbench fio: %d VM instances entered Failed state", failed)
-		}
-		if ready == len(wanted) {
-			rc.Logger.Info("virtbench fio: all VMs ready", "vms", ready)
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("virtbench fio: %d of %d VMs ready after %s", ready, len(wanted), timeout)
-		}
-		rc.Logger.Info("virtbench fio: waiting for VM readiness", "ready", ready, "total", len(wanted), "timeout", timeout)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(5 * time.Second):
-		}
-	}
-}
-
-func fioVMStates(data []byte, wanted map[string]struct{}) (ready, failed int, err error) {
-	var list fioVMIList
-	if err := json.Unmarshal(data, &list); err != nil {
-		return 0, 0, fmt.Errorf("virtbench fio: parse VM instance list: %w", err)
-	}
-	for _, item := range list.Items {
-		if _, ok := wanted[item.Metadata.Namespace+"/"+item.Metadata.Name]; !ok {
-			continue
-		}
-		switch item.Status.Phase {
-		case "Running":
-			if !fioVMIHasIP(item) {
-				continue
-			}
-			ready++
-		case "Failed":
-			failed++
-		}
-	}
-	return ready, failed, nil
-}
-
-func fioVMIHasIP(item fioVMI) bool {
-	for _, iface := range item.Status.Interfaces {
-		if iface.IPAddress != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func fioValidate(tr core.TestRequirement) error {
