@@ -77,16 +77,15 @@ type fioJob struct {
 }
 
 type fioDirection struct {
-	IOPS  float64    `json:"iops"`
-	LatNS fioLatency `json:"lat_ns"`
+	IOPS   float64    `json:"iops"`
+	ClatNS fioLatency `json:"clat_ns"`
 }
 
 type fioLatency struct {
 	Percentile map[string]float64 `json:"percentile"`
 }
 
-// ParseFIO converts one raw FIO result or a collected VM range into p99
-// read/write latency metrics. A VM range is graded by its worst per-VM p99.
+// ParseFIO emits p99 completion latency, using the worst per-VM p99 for a fleet.
 func ParseFIO(data []byte, trID string) ([]core.TestResult, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("virtbench: empty fio payload")
@@ -126,13 +125,13 @@ func parseCollectedFIO(collected fioCollectedResults, raw []byte, trID string) (
 		if err != nil {
 			return nil, err
 		}
-		read, err := fioP99(job.Read.LatNS.Percentile)
+		read, err := fioP99(job.Read.ClatNS.Percentile)
 		if err != nil {
-			return nil, fmt.Errorf("virtbench: read latency: %w", err)
+			return nil, fmt.Errorf("virtbench: read completion latency (clat_ns): %w", err)
 		}
-		write, err := fioP99(job.Write.LatNS.Percentile)
+		write, err := fioP99(job.Write.ClatNS.Percentile)
 		if err != nil {
-			return nil, fmt.Errorf("virtbench: write latency: %w", err)
+			return nil, fmt.Errorf("virtbench: write completion latency (clat_ns): %w", err)
 		}
 		if read > readP99 {
 			readP99 = read
@@ -157,13 +156,13 @@ func parseFIORaw(data []byte, trID string) ([]core.TestResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	readP99, err := fioP99(job.Read.LatNS.Percentile)
+	readP99, err := fioP99(job.Read.ClatNS.Percentile)
 	if err != nil {
-		return nil, fmt.Errorf("virtbench: read latency: %w", err)
+		return nil, fmt.Errorf("virtbench: read completion latency (clat_ns): %w", err)
 	}
-	writeP99, err := fioP99(job.Write.LatNS.Percentile)
+	writeP99, err := fioP99(job.Write.ClatNS.Percentile)
 	if err != nil {
-		return nil, fmt.Errorf("virtbench: write latency: %w", err)
+		return nil, fmt.Errorf("virtbench: write completion latency (clat_ns): %w", err)
 	}
 
 	return []core.TestResult{{
