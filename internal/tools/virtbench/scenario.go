@@ -27,6 +27,8 @@ type Scenario struct {
 	// test namespaces (overridable per-TR via the "namespace_prefix" param). Used
 	// both to build the CLI and by Teardown's leftover-namespace sweep.
 	NSPrefix string
+	// VMRange is shared by execution and namespace-local source checks.
+	VMRange func(core.TestRequirement) (int, int, error)
 	// BuildArgs assembles the CLI from params/backend only (never a threshold).
 	// resultsRoot is the harness workdir virtbench must write results into, passed
 	// via the scenario's results flag so the collector can find the output.
@@ -119,6 +121,7 @@ var scenarios = []Scenario{
 		ProvidesTR:     "TR-VIRT-002",
 		ResultFile:     SummaryFileName,
 		NSPrefix:       "virtbench",
+		VMRange:        cloneVMRange,
 		BuildArgs:      datasourceCloneArgs(false, "virtbench"),
 		Parse:          ParseSummary,
 		// all SLAs (clone_duration / time_to_running / time_to_ping) are measured.
@@ -128,6 +131,7 @@ var scenarios = []Scenario{
 		ProvidesTR:     "TR-VIRT-001",
 		ResultFile:     BootStormFileName,
 		NSPrefix:       "virtbench",
+		VMRange:        cloneVMRange,
 		BuildArgs:      datasourceCloneArgs(true, "virtbench"),
 		Parse:          ParseBootStorm,
 	},
@@ -136,6 +140,7 @@ var scenarios = []Scenario{
 		ProvidesTR:     "TR-STOR-001",
 		ResultFile:     DiskOpsFileName,
 		NSPrefix:       "disk-ops",
+		VMRange:        diskOpsVMRange,
 		BuildArgs:      diskOpsArgs("disk-ops"),
 		Parse:          ParseDiskOps,
 	},
@@ -150,6 +155,7 @@ var scenarios = []Scenario{
 		ProvidesTR:     "TR-VIRT-018",
 		ResultFile:     SummaryFileName,
 		NSPrefix:       "virtbench",
+		VMRange:        scaleVMRange,
 		BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
 			return cloneAtScaleArgs("virtbench")(rc, tr, resultsRoot)
 		},
@@ -165,6 +171,7 @@ var scenarios = []Scenario{
 		ProvidesTR:       "TR-VIRT-008",
 		ResultFile:       DrainFileName,
 		NSPrefix:         drainNSPrefix,
+		VMRange:          drainVMRange,
 		BuildArgs:        drainArgs,
 		Parse:            ParseDrain,
 		Preflight:        drainPreflight,
@@ -177,6 +184,7 @@ var scenarios = []Scenario{
 		ProvidesTR:     "TR-STOR-002",
 		ResultFile:     FIOFileName,
 		NSPrefix:       "fio-latency",
+		VMRange:        fioVMRange,
 		BuildArgs:      fioArgs("fio-latency"),
 		Run:            runFIO,
 		Parse:          ParseFIO,
@@ -189,6 +197,7 @@ var scenarios = []Scenario{
 		ProvidesTR:     "TR-VIRT-013",
 		ResultFile:     SummaryFileName,
 		NSPrefix:       singleNodeNSPrefix,
+		VMRange:        singleNodeVMRange,
 		BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
 			return singleNodeCeilingArgs(singleNodeNSPrefix)(rc, tr, resultsRoot)
 		},
@@ -205,6 +214,7 @@ var scenarios = []Scenario{
 		ProvidesTR:     "TR-VIRT-007",
 		ResultFile:     FailureRecoveryFileName,
 		NSPrefix:       "failure-recovery",
+		VMRange:        recoveryVMRange,
 		BuildArgs:      failureRecoveryArgs("failure-recovery"),
 		Parse:          ParseFailureRecovery,
 		Validate:       failureRecoveryValidate,

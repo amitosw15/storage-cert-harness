@@ -41,8 +41,10 @@ func singleNodeCeilingArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRe
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 		}
-		start := intParam(tr, "start", 1)
-		end := intParam(tr, "attempt_vms", singleNodeDefaultCount)
+		start, end, err := singleNodeVMRange(tr)
+		if err != nil {
+			return nil, err
+		}
 
 		args := clusterArgs(tr)
 		args = append(args, "datasource-clone",
@@ -58,8 +60,8 @@ func singleNodeCeilingArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRe
 		if node := strParamOr(tr, "node_name", ""); node != "" {
 			args = append(args, "--node-name", node)
 		}
-		if tmpl := strParamOr(tr, "vm_template", ""); tmpl != "" {
-			staged, err := stageTemplate(resultsRoot, tmpl)
+		if strParamOr(tr, "vm_template", "") != "" || selectedDataSource(rc, tr) != "" {
+			staged, err := stageSelectedTemplate(rc, tr, resultsRoot)
 			if err != nil {
 				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 			}

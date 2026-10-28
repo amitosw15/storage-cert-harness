@@ -53,12 +53,23 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 
 	nsPrefix := strParamOr(tr, "namespace_prefix", "failure-recovery")
 	vmName := strParamOr(tr, "vm_name", defaultVMName)
-	count := intParam(tr, "vm_count", 3)
+	start, count, err := recoveryVMRange(tr)
+	if err != nil {
+		return err
+	}
 	createTimeout := intParam(tr, "vm_create_timeout", 300)
 
 	rc.Logger.Info("virtbench: creating VMs on target node", "node", node, "count", count, "storage_class", sc)
 
-	for i := 1; i <= count; i++ {
+	data, defaults, err := vmSourceTemplate(tr)
+	if err != nil {
+		return err
+	}
+	data, _, err = rewriteVMSource(data, selectedDataSource(rc, tr), defaults)
+	if err != nil {
+		return err
+	}
+	for i := start; i <= count; i++ {
 		ns := nsPrefix + "-" + strconv.Itoa(i)
 		if err := ensureNamespace(ctx, kubeconfig, ns); err != nil {
 			return fmt.Errorf("virtbench: create namespace %s: %w", ns, err)
@@ -69,7 +80,7 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 			"{{NODE_NAME}}", node,
 			"{{HOSTNAME_LABEL}}", hostnameLabel,
 			"{{STORAGE_CLASS_NAME}}", sc,
-		).Replace(failureRecoveryVMTemplate)
+		).Replace(string(data))
 		if err := kubectlApply(ctx, kubeconfig, manifest); err != nil {
 			return fmt.Errorf("virtbench: apply VM in %s: %w", ns, err)
 		}
@@ -77,7 +88,7 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 	}
 
 	rc.Logger.Info("virtbench: waiting for VMs to reach Running", "count", count, "timeout_s", createTimeout)
-	for i := 1; i <= count; i++ {
+	for i := start; i <= count; i++ {
 		ns := nsPrefix + "-" + strconv.Itoa(i)
 		if err := waitForVMRunning(ctx, kubeconfig, ns, vmName, createTimeout); err != nil {
 			return fmt.Errorf("virtbench: VM %s/%s not ready: %w", ns, vmName, err)

@@ -22,7 +22,6 @@ spec:
             requests:
               storage: 30Gi
           storageClassName: {{STORAGE_CLASS_NAME}}
-          volumeMode: Block
   runStrategy: Always
   template:
     metadata:

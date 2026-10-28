@@ -108,6 +108,18 @@ func (p preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, tr
 		}
 	}
 	for _, tr := range trs {
+		if dir == "" {
+			refs, err := datasourcePreflight(ctx, rc, tr)
+			if err != nil {
+				findings = append(findings, core.Finding{Level: "error", Message: tr.ID + " datasource: " + err.Error()})
+			} else if len(refs) == 0 {
+				findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " VM template uses its existing non-DataSource image source"})
+			} else {
+				for _, ref := range refs {
+					findings = append(findings, core.Finding{Level: "info", Message: fmt.Sprintf("%s datasource=%s/%s storage_class=%s", tr.ID, ref.Namespace, ref.Name, storageClass(rc, tr))})
+				}
+			}
+		}
 		if dir == "" && usesSnapshot(tr) && strings.HasPrefix(p.sc.AutomationTool, "virtbench datasource-clone") {
 			clone, err := snapshotClonePreflight(ctx, rc, tr)
 			if err != nil {
@@ -211,6 +223,19 @@ func (r runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []c
 	args, err := r.sc.BuildArgs(rc, bag, trs[0], root)
 	if err != nil {
 		return stages.RunHandle{}, err
+	}
+	hasTemplate := false
+	for _, arg := range args {
+		if arg == "--vm-template" {
+			hasTemplate = true
+		}
+	}
+	if !hasTemplate && (strings.Contains(r.sc.AutomationTool, "datasource-clone") || strings.Contains(r.sc.AutomationTool, "disk-ops")) {
+		staged, err := stageSelectedTemplate(rc, trs[0], root)
+		if err != nil {
+			return stages.RunHandle{}, err
+		}
+		args = append(args, "--vm-template", staged)
 	}
 	if clone, ok := core.GetAs[*snapshotClone](bag, "snapshot_clone"); ok {
 		path, err := clone.prepare(ctx, root)
@@ -477,9 +502,10 @@ func datasourceCloneArgs(bootStorm bool, nsPrefix string) func(rc *core.RunCtx, 
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 		}
-		start := intParam(tr, "start", 1)
-		end := intParam(tr, "iteration_clones", 100) // TR-VIRT-018
-		end = intParam(tr, "num_vms", end)           // TR-VIRT-001
+		start, end, err := cloneVMRange(tr)
+		if err != nil {
+			return nil, err
+		}
 
 		args := clusterArgs(tr)
 		args = append(args, "datasource-clone",
@@ -491,8 +517,8 @@ func datasourceCloneArgs(bootStorm bool, nsPrefix string) func(rc *core.RunCtx, 
 			"--save-results",
 			"--results-folder", resultsRoot,
 		)
-		if tmpl := strParamOr(tr, "vm_template", ""); tmpl != "" {
-			staged, err := stageTemplate(resultsRoot, tmpl)
+		if strParamOr(tr, "vm_template", "") != "" || selectedDataSource(rc, tr) != "" {
+			staged, err := stageSelectedTemplate(rc, tr, resultsRoot)
 			if err != nil {
 				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 			}
@@ -528,8 +554,10 @@ func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.Tes
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 		}
-		start := intParam(tr, "start", 1)
-		end := intParam(tr, "end", intParam(tr, "count", 100))
+		start, end, err := diskOpsVMRange(tr)
+		if err != nil {
+			return nil, err
+		}
 
 		args := clusterArgs(tr)
 		args = append(args, "disk-ops",
@@ -541,8 +569,8 @@ func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.Tes
 			"--save-results",
 			"--results-dir", resultsRoot,
 		)
-		if tmpl := strParamOr(tr, "vm_template", ""); tmpl != "" {
-			staged, err := stageTemplate(resultsRoot, tmpl)
+		if strParamOr(tr, "vm_template", "") != "" || selectedDataSource(rc, tr) != "" {
+			staged, err := stageSelectedTemplate(rc, tr, resultsRoot)
 			if err != nil {
 				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 			}
@@ -556,22 +584,6 @@ func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.Tes
 		args = append(args, "--create-vms", "--cleanup")
 		return args, nil
 	}
-}
-
-// stageTemplate copies the VM template into resultsRoot and returns the copy's
-// absolute path. virtbench substitutes {{STORAGE_CLASS_NAME}} into the template
-// file in place, so it must run against a throwaway copy in the workdir — never
-// the repo template, which would get mutated (and its placeholder clobbered).
-func stageTemplate(resultsRoot, tmpl string) (string, error) {
-	data, err := safefs.ReadFile(tmpl)
-	if err != nil {
-		return "", fmt.Errorf("read vm_template %q: %w", tmpl, err)
-	}
-	dst := filepath.Join(resultsRoot, filepath.Base(tmpl))
-	if err := safefs.WriteFile(dst, data, 0o600); err != nil {
-		return "", fmt.Errorf("stage vm_template: %w", err)
-	}
-	return filepath.Abs(dst)
 }
 
 const defaultFIORuntime = 600
@@ -611,7 +623,7 @@ func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestReq
 		if bs != "4k" {
 			return nil, fmt.Errorf("virtbench: %s: fio_bs must be 4k for read/write latency", tr.ID)
 		}
-		staged, err := stageFIOTemplate(resultsRoot, tr)
+		staged, err := stageSelectedTemplate(rc, tr, resultsRoot)
 		if err != nil {
 			return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 		}
@@ -882,25 +894,6 @@ func fioValidate(tr core.TestRequirement) error {
 		return err
 	}
 	return nil
-}
-
-// stageFIOTemplate stages the embedded default or a caller-supplied custom
-// template into the run workdir. virtbench mutates the staged file while
-// substituting the storage class, so neither the embedded bytes nor a custom
-// source file are ever passed to it directly.
-func stageFIOTemplate(resultsRoot string, tr core.TestRequirement) (string, error) {
-	template, err := fioTemplate(tr)
-	if err != nil {
-		return "", err
-	}
-	if template == "" {
-		dst := filepath.Join(resultsRoot, fioVMTemplateFile)
-		if err := safefs.WriteFile(dst, []byte(fioVMTemplate), 0o600); err != nil {
-			return "", fmt.Errorf("stage embedded fio vm template: %w", err)
-		}
-		return filepath.Abs(dst)
-	}
-	return stageTemplate(resultsRoot, template)
 }
 
 func fioTemplate(tr core.TestRequirement) (string, error) {

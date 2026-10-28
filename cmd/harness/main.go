@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -163,6 +164,7 @@ func newPreflightCmd() *cobra.Command {
 		planPath     string
 		backendsPath string
 		backendName  string
+		datasource   string
 	)
 	var verbose bool
 	cmd := &cobra.Command{
@@ -183,10 +185,13 @@ func newPreflightCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rc := &core.RunCtx{RunID: "preflight", Logger: logger, Backend: resolved}
+			rc := &core.RunCtx{RunID: "preflight", Logger: logger, Backend: resolved, DataSource: datasource}
 			out := cmd.OutOrStdout()
 			byTool := map[string][]core.TestRequirement{}
 			for _, tr := range trs {
+				if datasource != "" && !strings.HasPrefix(tr.AutomationTool, "virtbench ") {
+					fmt.Fprintf(out, "%s: --datasource affects Virtbench only; retaining adapter image source\n", tr.ID)
+				}
 				key := tr.AutomationTool
 				if tr.Variant != "" {
 					key = core.ExecutionLabel(key+":"+tr.ID, tr.Variant)
@@ -243,6 +248,7 @@ func newPreflightCmd() *cobra.Command {
 	cmd.Flags().StringVar(&planPath, "plan", "", "path to a test plan (YAML); provides selection/backend defaults")
 	cmd.Flags().StringVar(&backendsPath, "backends", "", "path to a backends file (YAML)")
 	cmd.Flags().StringVar(&backendName, "backend", "", "name of the active storage backend (overrides the plan)")
+	cmd.Flags().StringVar(&datasource, "datasource", "", "Virtbench only: DataSource name or namespace/name (default namespace openshift-virtualization-os-images)")
 	cmd.Flags().StringSliceVar(&filter.Tools, "tool", nil, "restrict to these automation tools")
 	cmd.Flags().StringSliceVar(&filter.IDs, "id", nil, "restrict to these TR ids")
 	cmd.Flags().IntSliceVar(&filter.PartnerLevels, "partner-level", nil, "restrict to these partner levels (1|2|3)")
@@ -260,6 +266,7 @@ func newRunCmd() *cobra.Command {
 		planPath         string
 		backendsPath     string
 		backendName      string
+		datasource       string
 		attestationsPath string
 		attnQuestions    string
 		noAttestations   bool
@@ -334,6 +341,11 @@ func newRunCmd() *cobra.Command {
 			}
 
 			selected := orchestrator.SelectTRs(trs, cfg.Filter)
+			for _, tr := range selected {
+				if datasource != "" && !strings.HasPrefix(tr.AutomationTool, "virtbench ") {
+					logger.Info("--datasource affects Virtbench only; retaining adapter image source", "tr", tr.ID)
+				}
+			}
 			if len(selected) == 0 {
 				return fmt.Errorf("no test requirements selected")
 			}
@@ -359,7 +371,7 @@ func newRunCmd() *cobra.Command {
 			if abs, err := filepath.Abs(workdir); err == nil {
 				workdir = abs
 			}
-			rc := &core.RunCtx{RunID: runID, WorkDir: workdir, Logger: logger, LogOutput: logFile, Backend: resolved}
+			rc := &core.RunCtx{RunID: runID, WorkDir: workdir, Logger: logger, LogOutput: logFile, Backend: resolved, DataSource: datasource}
 
 			// Resolve the prior report and self attestations before running cluster
 			// tests, so the human gate is the first run phase.
@@ -526,6 +538,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&planPath, "plan", "", "path to a test plan (YAML); provides selection/concurrency/backend defaults")
 	cmd.Flags().StringVar(&backendsPath, "backends", "", "path to a backends file (YAML)")
 	cmd.Flags().StringVar(&backendName, "backend", "", "name of the active storage backend (overrides the plan)")
+	cmd.Flags().StringVar(&datasource, "datasource", "", "Virtbench only: DataSource name or namespace/name (default namespace openshift-virtualization-os-images)")
 	cmd.Flags().StringVar(&attestationsPath, "attestations", "", "path to attestation JSON (self-reported, unobservable claims)")
 	cmd.Flags().StringVar(&attnQuestions, "attestation-questions", "", "path to a custom attestation question set (YAML); defaults to the built-in set")
 	cmd.Flags().BoolVar(&noAttestations, "no-attestations", false, "do not prompt for manual attestations")

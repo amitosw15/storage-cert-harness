@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,7 @@ type snapshotClone struct {
 	Volumes   []map[string]any
 	Sources   map[int]cloneSource
 	Created   []cloneSource
+	Target    core.TestRequirement
 }
 
 func usesSnapshot(tr core.TestRequirement) bool {
@@ -46,11 +48,15 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 	if err != nil {
 		return nil, err
 	}
-	data, err := snapshotTemplate(tr)
+	data, defaults, err := vmSourceTemplate(tr)
 	if err != nil {
 		return nil, err
 	}
-	c := &snapshotClone{Selection: selection, Sources: map[int]cloneSource{}}
+	data, _, err = rewriteVMSource(data, selectedDataSource(rc, tr), defaults)
+	if err != nil {
+		return nil, err
+	}
+	c := &snapshotClone{Selection: selection, Sources: map[int]cloneSource{}, Target: tr}
 	// virtbench also substitutes this placeholder before reading YAML.
 	data = []byte(strings.ReplaceAll(string(data), "{{STORAGE_CLASS_NAME}}", selection.StorageClass))
 	if err := yaml.Unmarshal(data, &c.Template); err != nil {
@@ -120,15 +126,19 @@ func snapshotTemplate(tr core.TestRequirement) ([]byte, error) {
 	if tr.ID == "TR-VIRT-018" {
 		return []byte(twoDiskVMTemplate), nil
 	}
+	template := "examples/vm-templates/rhel9-vm-datasource.yaml"
+	if tr.ID == "TR-STOR-001" {
+		template = "disk-ops-benchmark/vm-template.yaml"
+	}
 	for _, root := range []string{os.Getenv("VIRTBENCH_REPO"), "/opt/virtbench-runtime", "."} {
 		if root == "" {
 			continue
 		}
-		if data, err := safefs.ReadFile(filepath.Join(root, "examples/vm-templates/rhel9-vm-datasource.yaml")); err == nil {
+		if data, err := safefs.ReadFile(filepath.Join(root, template)); err == nil {
 			return data, nil
 		}
 	}
-	return nil, fmt.Errorf("use_snapshot: cannot locate virtbench's default VM template; set vm_template or VIRTBENCH_REPO")
+	return nil, fmt.Errorf("cannot locate virtbench default VM template %s; set vm_template or VIRTBENCH_REPO", template)
 }
 
 func (c *snapshotClone) get(ctx context.Context, obj any, kind string, source cloneSource) error {
@@ -149,15 +159,32 @@ func (c *snapshotClone) resolveSource(ctx context.Context, v map[string]any) (ma
 		}
 		name, _ := ref["name"].(string)
 		ns, _ := ref["namespace"].(string)
-		var ds struct {
-			Spec struct {
-				Source map[string]cloneSource `json:"source"`
-			} `json:"spec"`
-		}
-		if err := c.get(ctx, &ds, "datasource", cloneSource{Name: name, Namespace: ns}); err != nil {
+		refs, err := resolveLocalDataSources(c.Target, []cloneSource{{Name: name, Namespace: ns}})
+		if err != nil {
 			return nil, err
 		}
-		return ds.Spec.Source, nil
+		var resolved map[string]cloneSource
+		for _, local := range refs {
+			var ds struct {
+				Spec struct {
+					Source map[string]cloneSource `json:"source"`
+				} `json:"spec"`
+			}
+			if err := c.get(ctx, &ds, "datasource", local); err != nil {
+				return nil, err
+			}
+			for kind, source := range ds.Spec.Source {
+				if source.Namespace == "" {
+					source.Namespace = local.Namespace
+					ds.Spec.Source[kind] = source
+				}
+			}
+			if resolved != nil && !maps.Equal(resolved, ds.Spec.Source) {
+				return nil, fmt.Errorf("use_snapshot: namespace-local DataSource %q resolves to different sources across VM namespaces; use sourceRef.namespace or --datasource namespace/name to select a shared source", name)
+			}
+			resolved = ds.Spec.Source
+		}
+		return resolved, nil
 	}
 	source, _ := v["source"].(map[string]any)
 	if _, blank := source["blank"]; blank {

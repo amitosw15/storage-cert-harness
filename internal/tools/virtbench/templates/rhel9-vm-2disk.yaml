@@ -20,7 +20,6 @@ spec:
             requests:
               storage: 30Gi
           storageClassName: {{STORAGE_CLASS_NAME}}
-          volumeMode: Block
     - metadata:
         name: rhel-9-vm-data
       spec:
@@ -33,7 +32,6 @@ spec:
             requests:
               storage: 10Gi
           storageClassName: {{STORAGE_CLASS_NAME}}
-          volumeMode: Block
   runStrategy: Always
   template:
     metadata:

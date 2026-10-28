@@ -98,6 +98,11 @@ such as replay mode or a missing CLI needed to query the cluster. Independent
 checks continue after failures. Any failed check makes the command exit non-zero;
 skips alone do not. Invalid input files also exit non-zero before checks run.
 
+For Virtbench VM workloads, `run` and `preflight` accept `--datasource name` or
+`--datasource namespace/name`. This overrides the plan's `datasource` parameter;
+other adapters keep their existing image sources. See
+[DataSource selection and NAS smoke procedure](docs/virtbench-datasource.md).
+
 ### Run artifacts
 
 Pass the same writable directory to `--workdir` and `--output` when collecting

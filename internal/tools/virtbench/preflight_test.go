@@ -18,10 +18,10 @@ func TestPreflightMissingBinaryStillChecksParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 4 {
-		t.Fatalf("findings = %+v, want binary, command, storage class, and parameter checks", findings)
+	if len(findings) != 5 {
+		t.Fatalf("findings = %+v, want binary, command, source, storage class, and parameter checks", findings)
 	}
-	for i, level := range []string{"error", "skip", "error", "error"} {
+	for i, level := range []string{"error", "skip", "error", "error", "error"} {
 		if findings[i].Level != level {
 			t.Errorf("check %d = %+v, want %s", i, findings[i], level)
 		}

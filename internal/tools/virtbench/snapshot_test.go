@@ -169,3 +169,58 @@ func TestSnapshotCloneReplayDoesNotReadCluster(t *testing.T) {
 		t.Fatalf("replay accessed cluster: %v", err)
 	}
 }
+
+func TestSnapshotCloneLocalDataSourceNamespaces(t *testing.T) {
+	for _, tt := range []struct {
+		name, selection, backing string
+		count                    int
+		wantNamespaces           []string
+		wantSourceNamespace      string
+		wantError                string
+	}{
+		{name: "one local VM", count: 1, backing: `{"pvc":{"name":"source-pvc"}}`, wantNamespaces: []string{"local-1"}, wantSourceNamespace: "local-1"},
+		{name: "multiple locals share source", count: 2, backing: `{"pvc":{"name":"source-pvc","namespace":"shared"}}`, wantNamespaces: []string{"local-1", "local-2"}, wantSourceNamespace: "shared"},
+		{name: "different local sources", count: 2, backing: `{"pvc":{"name":"source-pvc"}}`, wantNamespaces: []string{"local-1", "local-2"}, wantError: "resolves to different sources"},
+		{name: "explicit override", count: 2, selection: "fedora-local", backing: `{"pvc":{"name":"source-pvc"}}`, wantNamespaces: []string{imageNamespace}, wantSourceNamespace: imageNamespace},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := cloneSnapshotCLI(t)
+			t.Setenv("TEST_DATASOURCE", `{"spec":{"source":`+tt.backing+`}}`)
+			template := strings.Replace(twoDiskVMTemplate, "namespace: openshift-virtualization-os-images", "", 1)
+			path := filepath.Join(dir, "local.yaml")
+			if err := os.WriteFile(path, []byte(template), 0600); err != nil {
+				t.Fatal(err)
+			}
+			tr := core.TestRequirement{ID: "TR-VIRT-018", Params: map[string]any{"vm_template": path, "namespace_prefix": "local", "iteration_clones": tt.count}}
+			rc := &core.RunCtx{DataSource: tt.selection, Backend: &core.ResolvedBackend{StorageClass: "backend", SnapshotClass: "nondefault"}}
+			clone, err := snapshotClonePreflight(context.Background(), rc, tr)
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) || !strings.Contains(err.Error(), "--datasource namespace/name") {
+					t.Fatalf("want actionable error %q, got %v", tt.wantError, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if source := clone.Sources[0]; source.Namespace != tt.wantSourceNamespace || source.Name != "source-pvc" {
+					t.Fatalf("resolved wrong backing source: %+v", source)
+				}
+			}
+			commands, err := os.ReadFile(filepath.Join(dir, "commands"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, ns := range tt.wantNamespaces {
+				if !strings.Contains(string(commands), "get datasource ") || !strings.Contains(string(commands), " -n "+ns+" -o json") {
+					t.Fatalf("missing local lookup in %s: %s", ns, commands)
+				}
+			}
+			if tt.selection == "" && strings.Contains(string(commands), " -n "+imageNamespace+" ") {
+				t.Fatalf("looked up unrelated image namespace: %s", commands)
+			}
+			if strings.Contains(string(commands), "create ") {
+				t.Fatalf("preflight created resources: %s", commands)
+			}
+		})
+	}
+}
