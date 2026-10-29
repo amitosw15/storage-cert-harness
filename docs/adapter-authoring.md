@@ -121,6 +121,7 @@ fields and claim defaults while replacing metadata and omitting copied status.
 The created StorageClass name is retained on later failure so cleanup can remove
 it without modifying the backend's original resources. Tests cover preservation,
 omitted defaults, and cleanup after partial failure.
+
 ## Virtbench command manifests
 
 Clone, disk-ops, and FIO resolve explicit template values before launching
