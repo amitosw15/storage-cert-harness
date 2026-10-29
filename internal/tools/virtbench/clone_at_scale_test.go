@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 )
 
 // TestCloneAtScaleArgsDefaultsToEmbeddedTemplate confirms the fix's default
@@ -86,22 +87,25 @@ func TestCloneAtScaleArgsStagedTemplateHasTwoDataVolumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cloneAtScaleArgs: %v", err)
 	}
+	args, err = manifests.Prepare(t.Context(), manifest.Request{Directory: root, Args: args})
+	if err != nil {
+		t.Fatal(err)
+	}
 	staged, _ := findTemplateAndDisks(t, args)
 	data, err := os.ReadFile(staged)
 	if err != nil {
 		t.Fatalf("read staged template: %v", err)
 	}
-	// virtbench substitutes {{STORAGE_CLASS_NAME}} at run time; unresolved, it
-	// isn't valid YAML, so neutralize it before parsing (this test runs before
-	// virtbench ever touches the file).
-	clean := strings.ReplaceAll(string(data), "{{STORAGE_CLASS_NAME}}", "placeholder-sc")
+	if strings.Contains(string(data), "{{") {
+		t.Fatal("unresolved template")
+	}
 
 	var doc struct {
 		Spec struct {
 			DataVolumeTemplates []map[string]any `yaml:"dataVolumeTemplates"`
 		} `yaml:"spec"`
 	}
-	if err := yaml.Unmarshal([]byte(clean), &doc); err != nil {
+	if err := yaml.Unmarshal(data, &doc); err != nil {
 		t.Fatalf("parse staged template: %v", err)
 	}
 	if got := len(doc.Spec.DataVolumeTemplates); got != 2 {

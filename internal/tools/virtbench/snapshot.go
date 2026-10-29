@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
+	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -26,6 +24,7 @@ type snapshotClone struct {
 	Template  map[string]any
 	Volumes   []map[string]any
 	Sources   map[int]cloneSource
+	Snapshots map[string]cloneSource
 	Created   []cloneSource
 }
 
@@ -50,9 +49,15 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 	if err != nil {
 		return nil, err
 	}
-	c := &snapshotClone{Selection: selection, Sources: map[int]cloneSource{}}
-	// virtbench also substitutes this placeholder before reading YAML.
-	data = []byte(strings.ReplaceAll(string(data), "{{STORAGE_CLASS_NAME}}", selection.StorageClass))
+	c := &snapshotClone{Selection: selection, Sources: map[int]cloneSource{}, Snapshots: map[string]cloneSource{}}
+	values, err := resolveTemplateValues("datasource-clone", []string{"--storage-class", selection.StorageClass, "--vm-name", strParamOr(tr, "vm_name", defaultVMName)})
+	if err != nil {
+		return nil, err
+	}
+	data, err = renderVMTemplate("snapshot-source.yaml", data, values)
+	if err != nil {
+		return nil, err
+	}
 	if err := yaml.Unmarshal(data, &c.Template); err != nil {
 		return nil, fmt.Errorf("snapshot clone VM template: %w", err)
 	}
@@ -101,8 +106,7 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 			if obj.Spec.Class != selection.SnapshotClass {
 				return nil, fmt.Errorf("source snapshot %s/%s uses snapshot class %q, requested %q", snapshot.Namespace, snapshot.Name, obj.Spec.Class, selection.SnapshotClass)
 			}
-			delete(v, "sourceRef")
-			v["source"] = map[string]any{"snapshot": map[string]any{"name": snapshot.Name, "namespace": snapshot.Namespace}}
+			c.Snapshots[strconv.Itoa(i)] = snapshot
 		} else {
 			return nil, fmt.Errorf("use_snapshot requires PVC or snapshot clone sources")
 		}
@@ -120,15 +124,7 @@ func snapshotTemplate(tr core.TestRequirement) ([]byte, error) {
 	if tr.ID == "TR-VIRT-018" {
 		return []byte(twoDiskVMTemplate), nil
 	}
-	for _, root := range []string{os.Getenv("VIRTBENCH_REPO"), "/opt/virtbench-runtime", "."} {
-		if root == "" {
-			continue
-		}
-		if data, err := safefs.ReadFile(filepath.Join(root, "examples/vm-templates/rhel9-vm-datasource.yaml")); err == nil {
-			return data, nil
-		}
-	}
-	return nil, fmt.Errorf("use_snapshot: cannot locate virtbench's default VM template; set vm_template or VIRTBENCH_REPO")
+	return runtimeTemplate("examples/vm-templates/rhel9-vm-datasource.yaml")
 }
 
 func (c *snapshotClone) get(ctx context.Context, obj any, kind string, source cloneSource) error {
@@ -180,18 +176,14 @@ func (c *snapshotClone) resolveSource(ctx context.Context, v map[string]any) (ma
 // prepare creates only new snapshots; source PVCs and DataSources are read-only.
 // Created is populated before waiting so partial failures are cleaned up too.
 func (c *snapshotClone) prepare(ctx context.Context, root string) (string, error) {
-	for i, v := range c.Volumes {
+	for i := range c.Volumes {
 		source, ok := c.Sources[i]
 		if !ok {
 			continue
 		}
-		obj := map[string]any{
-			"apiVersion": "snapshot.storage.k8s.io/v1", "kind": "VolumeSnapshot",
-			"metadata": map[string]any{"generateName": "storage-cert-clone-", "namespace": source.Namespace,
-				"labels": map[string]string{"app.kubernetes.io/managed-by": "storage-cert-harness"}},
-			"spec": map[string]any{"volumeSnapshotClassName": c.Selection.SnapshotClass, "source": map[string]string{"persistentVolumeClaimName": source.Name}},
-		}
-		data, err := json.Marshal(obj)
+		data, err := vmRenderer.Render("volume-snapshot.yaml", []byte(volumeSnapshotTemplate), map[string]any{
+			"NAMESPACE": source.Namespace, "PVC_NAME": source.Name, "SNAPSHOT_CLASS": c.Selection.SnapshotClass,
+		})
 		if err != nil {
 			return "", err
 		}
@@ -209,18 +201,13 @@ func (c *snapshotClone) prepare(ctx context.Context, root string) (string, error
 		if _, err := clustercheck.SnapshotCommand(ctx, c.Selection.Kubeconfig, nil, "wait", "volumesnapshot/"+made.Metadata.Name, "-n", made.Metadata.Namespace, "--for=jsonpath={.status.readyToUse}=true", "--timeout=5m"); err != nil {
 			return "", err
 		}
-		delete(v, "sourceRef")
-		v["source"] = map[string]any{"snapshot": map[string]any{"name": made.Metadata.Name, "namespace": made.Metadata.Namespace}}
+		c.Snapshots[strconv.Itoa(i)] = made.Metadata
 	}
-	data, err := yaml.Marshal(c.Template)
+	data, err := vmRenderer.Render("snapshot-vm.yaml", []byte(snapshotVMTemplate), map[string]any{"VM": c.Template, "SNAPSHOTS": c.Snapshots})
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(root, "snapshot-vm.yaml")
-	if err := safefs.WriteFile(path, data, 0o600); err != nil {
-		return "", err
-	}
-	return filepath.Abs(path)
+	return writeTemplateFile(root, "snapshot-vm.yaml", data)
 }
 
 func (c *snapshotClone) cleanup(ctx context.Context, rc *core.RunCtx) {

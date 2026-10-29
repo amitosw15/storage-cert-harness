@@ -199,7 +199,7 @@ func writeTemplate(t *testing.T, dir string, n int) string {
 func TestTemplateDiskCount(t *testing.T) {
 	dir := t.TempDir()
 	for _, want := range []int{1, 2, 3} {
-		got, err := templateDiskCount(writeTemplate(t, dir, want))
+		got, err := templateDiskCount(writeTemplate(t, dir, want), core.TestRequirement{})
 		if err != nil {
 			t.Fatalf("templateDiskCount(%d disks): %v", want, err)
 		}

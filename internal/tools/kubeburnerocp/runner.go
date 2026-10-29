@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
@@ -110,6 +111,10 @@ func buildRunCmd(ctx context.Context, rc *core.RunCtx, args []string, resultsDir
 	path, err := exec.LookPath("kube-burner-ocp")
 	if err != nil {
 		return nil, fmt.Errorf("kube-burner-ocp: kube-burner-ocp not on PATH: %w", err)
+	}
+	args, err = (manifest.Native{}).Prepare(ctx, manifest.Request{Directory: filepath.Join(resultsDir, subdir), Args: args})
+	if err != nil {
+		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, path, args...) // #nosec G204 -- path comes from LookPath and args are harness-generated.
 	cmd.Dir = filepath.Join(resultsDir, subdir)

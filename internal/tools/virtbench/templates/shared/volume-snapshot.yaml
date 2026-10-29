@@ -1,0 +1,11 @@
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  generateName: storage-cert-clone-
+  namespace: {{ .NAMESPACE | quote }}
+  labels:
+    app.kubernetes.io/managed-by: storage-cert-harness
+spec:
+  volumeSnapshotClassName: {{ .SNAPSHOT_CLASS | quote }}
+  source:
+    persistentVolumeClaimName: {{ .PVC_NAME | quote }}

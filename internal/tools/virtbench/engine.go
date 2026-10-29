@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,7 @@ import (
 	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
@@ -117,9 +119,15 @@ func (p preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, tr
 			findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " storage_class=" + sc})
 		}
 		if p.sc.Validate != nil {
+			validationTR := tr
+			validationTR.Params = maps.Clone(tr.Params)
+			if validationTR.Params == nil {
+				validationTR.Params = map[string]any{}
+			}
+			validationTR.Params["storage_class"] = storageClass(rc, tr)
 			if dir != "" {
 				findings = append(findings, core.Finding{Level: "skip", Message: tr.ID + " scenario parameters: replay mode"})
-			} else if err := p.sc.Validate(tr); err != nil {
+			} else if err := p.sc.Validate(validationTR); err != nil {
 				findings = append(findings, core.Finding{Level: "error", Message: tr.ID + " scenario parameters: " + err.Error()})
 			} else {
 				findings = append(findings, core.Finding{Level: "info", Message: tr.ID + " scenario parameters valid"})
@@ -209,16 +217,7 @@ func (r runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []c
 		if err != nil {
 			return stages.RunHandle{}, fmt.Errorf("prepare snapshot clone: %w", err)
 		}
-		found := false
-		for i := 0; i+1 < len(args); i++ {
-			if args[i] == "--vm-template" {
-				args[i+1], found = path, true
-				break
-			}
-		}
-		if !found {
-			args = append(args, "--vm-template", path)
-		}
+		args = setArgument(args, "--vm-template", path)
 		if rc.RecordStorageSelection != nil {
 			rc.RecordStorageSelection(core.StorageSelection{TR: trs[0].ID, Variant: trs[0].Variant, StorageClass: clone.Selection.StorageClass, SnapshotClass: clone.Selection.SnapshotClass})
 		}
@@ -484,7 +483,7 @@ func datasourceCloneArgs(bootStorm bool, nsPrefix string) func(rc *core.RunCtx, 
 			"--results-folder", resultsRoot,
 		)
 		if tmpl := strParamOr(tr, "vm_template", ""); tmpl != "" {
-			staged, err := stageTemplate(resultsRoot, tmpl)
+			staged, err := stageTemplate(resultsRoot, tmpl, "", "")
 			if err != nil {
 				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 			}
@@ -510,10 +509,7 @@ func datasourceCloneArgs(bootStorm bool, nsPrefix string) func(rc *core.RunCtx, 
 	}
 }
 
-// diskOpsArgs builds the CLI for the disk-ops scenario (a different subcommand
-// with its own flags — note --results-dir vs the clone family's --results-folder,
-// and disk-ops templates its own VM name so no --vm-name fix is needed). Same
-// secret-hygiene rule as datasourceCloneArgs.
+// diskOpsArgs builds the disk-ops CLI with explicit manifest inputs.
 func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
 	return func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
 		sc := storageClass(rc, tr)
@@ -525,6 +521,7 @@ func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.Tes
 
 		args := clusterArgs(tr)
 		args = append(args, "disk-ops",
+			"--vm-name", strParamOr(tr, "vm_name", "disk-ops-vm"),
 			"--start", strconv.Itoa(start),
 			"--end", strconv.Itoa(end),
 			"--namespace-prefix", strParamOr(tr, "namespace_prefix", nsPrefix),
@@ -534,7 +531,7 @@ func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.Tes
 			"--results-dir", resultsRoot,
 		)
 		if tmpl := strParamOr(tr, "vm_template", ""); tmpl != "" {
-			staged, err := stageTemplate(resultsRoot, tmpl)
+			staged, err := stageTemplate(resultsRoot, tmpl, "", "")
 			if err != nil {
 				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 			}
@@ -548,22 +545,6 @@ func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.Tes
 		args = append(args, "--create-vms", "--cleanup")
 		return args, nil
 	}
-}
-
-// stageTemplate copies the VM template into resultsRoot and returns the copy's
-// absolute path. virtbench substitutes {{STORAGE_CLASS_NAME}} into the template
-// file in place, so it must run against a throwaway copy in the workdir — never
-// the repo template, which would get mutated (and its placeholder clobbered).
-func stageTemplate(resultsRoot, tmpl string) (string, error) {
-	data, err := safefs.ReadFile(tmpl)
-	if err != nil {
-		return "", fmt.Errorf("read vm_template %q: %w", tmpl, err)
-	}
-	dst := filepath.Join(resultsRoot, filepath.Base(tmpl))
-	if err := safefs.WriteFile(dst, data, 0o600); err != nil {
-		return "", fmt.Errorf("stage vm_template: %w", err)
-	}
-	return filepath.Abs(dst)
 }
 
 const defaultFIORuntime = 600
@@ -603,7 +584,11 @@ func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestReq
 		if bs != "4k" {
 			return nil, fmt.Errorf("virtbench: %s: fio_bs must be 4k for read/write latency", tr.ID)
 		}
-		staged, err := stageFIOTemplate(resultsRoot, tr)
+		template, err := fioTemplate(tr)
+		if err != nil {
+			return nil, err
+		}
+		staged, err := stageTemplate(resultsRoot, template, fioVMTemplateFile, fioVMTemplate)
 		if err != nil {
 			return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 		}
@@ -611,6 +596,7 @@ func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestReq
 		args := clusterArgs(tr)
 		args = append(args, "fio",
 			"--action", "run-all",
+			"--vm-name", strParamOr(tr, "vm_name", defaultFIOVMName),
 			"--start", strconv.Itoa(start),
 			"--end", strconv.Itoa(end),
 			"--namespace-prefix", strParamOr(tr, "namespace_prefix", nsPrefix),
@@ -627,11 +613,10 @@ func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestReq
 			return nil, fmt.Errorf("virtbench: %s: fio_runtime must be >= 1", tr.ID)
 		}
 		args = append(args, "--fio-runtime", strconv.Itoa(runtime))
-		if n := intParam(tr, "fio_iodepth", 0); n > 0 {
-			args = append(args, "--fio-iodepth", strconv.Itoa(n))
-		}
-		if n := intParam(tr, "fio_numjobs", 0); n > 0 {
-			args = append(args, "--fio-numjobs", strconv.Itoa(n))
+		for _, key := range []string{"fio_iodepth", "fio_numjobs"} {
+			if value, present := tr.Params[key]; present {
+				args = append(args, "--"+strings.ReplaceAll(key, "_", "-"), fmt.Sprint(value))
+			}
 		}
 		if size := strParamOr(tr, "fio_size", ""); size != "" {
 			args = append(args, "--fio-size", size)
@@ -641,6 +626,9 @@ func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestReq
 		}
 		if driver := strParamOr(tr, "storage_driver", ""); driver != "" {
 			args = append(args, "--storage-driver", driver)
+		}
+		if _, err := resolveTemplateValues("fio", args); err != nil {
+			return nil, err
 		}
 		return args, nil
 	}
@@ -796,7 +784,7 @@ func waitForFIOVMs(ctx context.Context, rc *core.RunCtx, tr core.TestRequirement
 	prefix := strParamOr(tr, "namespace_prefix", "fio-latency")
 	wanted := make(map[string]struct{}, end-start+1)
 	for index := start; index <= end; index++ {
-		wanted[fmt.Sprintf("%s-%d/%s", prefix, index, defaultFIOVMName)] = struct{}{}
+		wanted[fmt.Sprintf("%s-%d/%s", prefix, index, strParamOr(tr, "vm_name", defaultFIOVMName))] = struct{}{}
 	}
 	deadline := time.Now().Add(timeout)
 	kubeconfig := strParamOr(tr, "kubeconfig", "")
@@ -876,25 +864,6 @@ func fioValidate(tr core.TestRequirement) error {
 	return nil
 }
 
-// stageFIOTemplate stages the embedded default or a caller-supplied custom
-// template into the run workdir. virtbench mutates the staged file while
-// substituting the storage class, so neither the embedded bytes nor a custom
-// source file are ever passed to it directly.
-func stageFIOTemplate(resultsRoot string, tr core.TestRequirement) (string, error) {
-	template, err := fioTemplate(tr)
-	if err != nil {
-		return "", err
-	}
-	if template == "" {
-		dst := filepath.Join(resultsRoot, fioVMTemplateFile)
-		if err := safefs.WriteFile(dst, []byte(fioVMTemplate), 0o600); err != nil {
-			return "", fmt.Errorf("stage embedded fio vm template: %w", err)
-		}
-		return filepath.Abs(dst)
-	}
-	return stageTemplate(resultsRoot, template)
-}
-
 func fioTemplate(tr core.TestRequirement) (string, error) {
 	template := strParamOr(tr, "fio_vm_template", "")
 	if template == "" {
@@ -940,6 +909,10 @@ func (w logWriter) Write(p []byte) (int, error) {
 
 // execVirtbench runs the virtbench CLI in dir, forwarding output to the logger.
 func execVirtbench(ctx context.Context, rc *core.RunCtx, dir string, args []string) error {
+	args, err := manifests.Prepare(ctx, manifest.Request{Directory: dir, Args: args})
+	if err != nil {
+		return err
+	}
 	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204 -- arguments are assembled by the harness scenario.
 	cmd.Dir = dir
 	cmd.Stdout = logWriter{log: rc.Logger, stream: "stdout"}

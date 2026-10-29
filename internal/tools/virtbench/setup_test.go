@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"gopkg.in/yaml.v3"
 )
 
 // fakeSSHCluster models pod state across separate kubectl invocations, including
@@ -468,14 +469,17 @@ func TestSSHHelperReplayDoesNotUseCluster(t *testing.T) {
 }
 
 func TestSSHHelperManifestAvoidsTargetNodes(t *testing.T) {
-	manifest := sshPodManifestForNodes(map[string]struct{}{
+	manifest, err := sshPodManifestForNodes(map[string]struct{}{
 		"worker-05": {},
 	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{
 		"requiredDuringSchedulingIgnoredDuringExecution",
 		"key: kubernetes.io/hostname",
 		"operator: NotIn",
-		`- "worker-05"`,
+		`"worker-05"`,
 	} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("manifest missing %q:\n%s", want, manifest)
@@ -484,7 +488,10 @@ func TestSSHHelperManifestAvoidsTargetNodes(t *testing.T) {
 }
 
 func TestSSHHelperManifestWithoutTargetKeepsDefaultScheduling(t *testing.T) {
-	manifest := sshPodManifestForNodes(nil, nil)
+	manifest, err := sshPodManifestForNodes(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(manifest, "nodeAffinity") {
 		t.Fatalf("unexpected node affinity without a target node:\n%s", manifest)
 	}
@@ -492,16 +499,18 @@ func TestSSHHelperManifestWithoutTargetKeepsDefaultScheduling(t *testing.T) {
 
 func TestSSHHelperManifestIncludesBootstrapAnnotations(t *testing.T) {
 	rc := &core.RunCtx{RunID: "run-abc", PartKind: "initial"}
-	manifest := sshPodManifestForNodes(nil, sshPodBootstrapAnnotations(rc))
-	for _, want := range []string{
-		"annotations:",
-		"storage-cert-harness.redhat.com/run-id: \"run-abc\"",
-		"storage-cert-harness.redhat.com/part-kind: \"initial\"",
-		"storage-cert-harness.redhat.com/bootstrap-at:",
-	} {
-		if !strings.Contains(manifest, want) {
-			t.Errorf("manifest missing %q:\n%s", want, manifest)
-		}
+	manifest, err := sshPodManifestForNodes(nil, sshPodBootstrapAnnotations(rc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pod struct {
+		Metadata struct{ Annotations map[string]string }
+	}
+	if err := yaml.Unmarshal([]byte(manifest), &pod); err != nil {
+		t.Fatal(err)
+	}
+	if pod.Metadata.Annotations[sshPodAnnotPrefix+"run-id"] != "run-abc" || pod.Metadata.Annotations[sshPodAnnotPrefix+"part-kind"] != "initial" || pod.Metadata.Annotations[sshPodAnnotPrefix+"bootstrap-at"] == "" {
+		t.Fatalf("unexpected annotations: %+v", pod.Metadata.Annotations)
 	}
 }
 

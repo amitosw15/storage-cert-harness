@@ -4,13 +4,13 @@
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: "{{VM_NAME}}"
+  name: {{ .VM_NAME | quote }}
   labels:
     app: fio-benchmark
 spec:
   dataVolumeTemplates:
     - metadata:
-        name: "{{VM_NAME}}-rootdisk"
+        name: {{ printf "%s-rootdisk" .VM_NAME | quote }}
       spec:
         sourceRef:
           kind: DataSource
@@ -20,10 +20,10 @@ spec:
           resources:
             requests:
               storage: 30Gi
-          storageClassName: "{{STORAGE_CLASS_NAME}}"
+          storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
           volumeMode: Block
     - metadata:
-        name: "{{VM_NAME}}-scratch"
+        name: {{ printf "%s-scratch" .VM_NAME | quote }}
       spec:
         source:
           blank: {}
@@ -31,7 +31,7 @@ spec:
           resources:
             requests:
               storage: 50Gi
-          storageClassName: "{{STORAGE_CLASS_NAME}}"
+          storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
           volumeMode: Block
   runStrategy: Always
   template:
@@ -79,16 +79,16 @@ spec:
       volumes:
         - name: rootdisk
           dataVolume:
-            name: "{{VM_NAME}}-rootdisk"
+            name: {{ printf "%s-rootdisk" .VM_NAME | quote }}
         - name: scratchdisk
           dataVolume:
-            name: "{{VM_NAME}}-scratch"
+            name: {{ printf "%s-scratch" .VM_NAME | quote }}
         - name: cloudinitdisk
           cloudInitNoCloud:
             userData: |
               #cloud-config
               user: cloud-user
-              password: "{{VM_PASSWORD}}"
+              password: {{ .VM_PASSWORD | quote }}
               chpasswd:
                 expire: false
               ssh_pwauth: true
@@ -110,18 +110,18 @@ spec:
                   [global]
                   name=fio-benchmark
                   directory=/scratch/
-                  rw={{FIO_RW}}
-                  bs={{FIO_BS}}
+                  rw={{ .FIO_RW }}
+                  bs={{ .FIO_BS }}
                   direct=1
                   ioengine=libaio
-                  iodepth={{FIO_IODEPTH}}
-                  numjobs={{FIO_NUMJOBS}}
+                  iodepth={{ .FIO_IODEPTH }}
+                  numjobs={{ .FIO_NUMJOBS }}
                   group_reporting=1
                   lat_percentiles=1
                   percentile_list=99
                   time_based=1
-                  runtime={{FIO_RUNTIME}}
-                  size={{FIO_SIZE}}
+                  runtime={{ .FIO_RUNTIME }}
+                  size={{ .FIO_SIZE }}
                   [test]
                   FIOJOB
                   fio /tmp/fio.job --output-format=json --output=/tmp/fio_results.json

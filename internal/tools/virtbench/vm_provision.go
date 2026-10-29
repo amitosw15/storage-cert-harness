@@ -56,17 +56,18 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 
 	for i := 1; i <= count; i++ {
 		ns := nsPrefix + "-" + strconv.Itoa(i)
+		rendered, err := renderVMTemplate("failure-recovery.yaml", []byte(failureRecoveryVMTemplate), map[string]any{
+			"VM_NAME": vmName, "NAMESPACE": ns, "NODE_NAME": node,
+			"HOSTNAME_LABEL": hostnameLabel, "STORAGE_CLASS_NAME": sc,
+		})
+		if err != nil {
+			return err
+		}
 		if err := ensureNamespace(ctx, kubeconfig, ns); err != nil {
 			return fmt.Errorf("virtbench: create namespace %s: %w", ns, err)
 		}
-		manifest := strings.NewReplacer(
-			"{{VM_NAME}}", vmName,
-			"{{NAMESPACE}}", ns,
-			"{{NODE_NAME}}", node,
-			"{{HOSTNAME_LABEL}}", hostnameLabel,
-			"{{STORAGE_CLASS_NAME}}", sc,
-		).Replace(failureRecoveryVMTemplate)
-		if err := kubectlApply(ctx, kubeconfig, manifest); err != nil {
+
+		if err := kubectlApply(ctx, kubeconfig, string(rendered)); err != nil {
 			return fmt.Errorf("virtbench: apply VM in %s: %w", ns, err)
 		}
 		rc.Logger.Info("virtbench: VM applied", "namespace", ns, "vm", vmName)
@@ -177,5 +178,9 @@ func waitForVMRunning(ctx context.Context, kubeconfig, ns, vmName string, timeou
 
 // ensureNamespace creates a namespace if it does not already exist.
 func ensureNamespace(ctx context.Context, kubeconfig, ns string) error {
-	return kubectlApply(ctx, kubeconfig, "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: "+ns+"\n")
+	rendered, err := vmRenderer.Render("namespace.yaml", []byte(namespaceTemplate), map[string]any{"NAMESPACE": ns})
+	if err != nil {
+		return err
+	}
+	return kubectlApply(ctx, kubeconfig, string(rendered))
 }

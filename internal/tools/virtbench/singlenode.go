@@ -9,17 +9,18 @@
 package virtbench
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
 const (
@@ -59,7 +60,7 @@ func singleNodeCeilingArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRe
 			args = append(args, "--node-name", node)
 		}
 		if tmpl := strParamOr(tr, "vm_template", ""); tmpl != "" {
-			staged, err := stageTemplate(resultsRoot, tmpl)
+			staged, err := stageTemplate(resultsRoot, tmpl, "", "")
 			if err != nil {
 				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 			}
@@ -106,7 +107,7 @@ func singleNodeCeilingValidate(tr core.TestRequirement) error {
 		}
 		return nil
 	}
-	got, err := templateDiskCount(tmpl)
+	got, err := templateDiskCount(tmpl, tr)
 	if err != nil {
 		return fmt.Errorf("virtbench: %s: cannot count disks in vm_template %q: %w", tr.ID, tmpl, err)
 	}
@@ -116,20 +117,30 @@ func singleNodeCeilingValidate(tr core.TestRequirement) error {
 	return nil
 }
 
-// templateDiskCount returns the number of non-cloud-init volumes in a VM
-// template, matching virtbench's own detect_disk_count_from_template
-// (datasource-clone): it counts spec.template.spec.volumes, excluding
-// cloud-init. The {{STORAGE_CLASS_NAME}} placeholder is neutralized before
-// parsing (virtbench substitutes it at run time; unresolved, it is not valid
-// YAML).
-func templateDiskCount(path string) (int, error) {
-	data, err := os.ReadFile(path) // #nosec G304 -- path is an operator-provided plan param, read-only.
+// templateDiskCount renders a template before counting its non-cloud-init volumes.
+func templateDiskCount(path string, tr core.TestRequirement) (int, error) {
+	data, err := safefs.ReadFile(path)
 	if err != nil {
 		return 0, err
 	}
-	clean := strings.ReplaceAll(string(data), "{{STORAGE_CLASS_NAME}}", "placeholder-sc")
+	args := []string{"--vm-name", strParamOr(tr, "vm_name", defaultVMName)}
+	if sc := storageClass(nil, tr); sc != "" {
+		args = append(args, "--storage-class", sc)
+	}
+	values, err := resolveTemplateValues("datasource-clone", args)
+	if err != nil {
+		return 0, err
+	}
+	clean, err := vmRenderer.Render(filepath.Base(path), data, values)
+	if err != nil {
+		return 0, err
+	}
 
-	dec := yaml.NewDecoder(strings.NewReader(clean))
+	return manifestDiskCount(clean)
+}
+
+func manifestDiskCount(data []byte) (int, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	for {
 		var doc struct {
 			Kind string `yaml:"kind"`

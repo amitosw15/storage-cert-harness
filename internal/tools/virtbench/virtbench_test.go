@@ -902,7 +902,7 @@ func TestStageTemplateRejectsSymlinkEscape(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if _, err := stageTemplate(resultsDir, template); err == nil {
+	if _, err := stageTemplate(resultsDir, template, "", ""); err == nil {
 		t.Fatal("stageTemplate accepted a symlink escaping the source directory")
 	}
 }

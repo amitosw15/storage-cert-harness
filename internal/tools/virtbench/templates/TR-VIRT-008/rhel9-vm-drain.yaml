@@ -4,14 +4,12 @@
 #     shutting it down, so it evacuates to another node.
 #   * accessModes: [ReadWriteMany]    — live migration needs the volume mountable
 #     on source and destination at once; RWO makes migration impossible.
-#   * soft nodeAffinity ({{TARGET_NODE}}) — a *preferred* (not required) affinity
+#   * soft nodeAffinity ({{ .TARGET_NODE }}) — a *preferred* (not required) affinity
 #     concentrates the VMs on the drain target without cordoning shared nodes.
 #     Preferred + IgnoredDuringExecution keeps the VM spec migratable: the
 #     live-migration target pod is free to land on any other node. A *required*
 #     rule (or nodeSelector) would re-pin the migration target and break drain.
-# {{STORAGE_CLASS_NAME}} is substituted by virtbench datasource-clone;
-# {{TARGET_NODE}} is substituted by the harness before the clone. The VM name
-# must stay rhel-9-vm (datasource-clone polls the VM by that name).
+# The harness renders all inputs before invoking datasource-clone.
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
@@ -33,7 +31,7 @@ spec:
           resources:
             requests:
               storage: 30Gi
-          storageClassName: {{STORAGE_CLASS_NAME}}
+          storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
           volumeMode: Block
   runStrategy: Always
   template:
@@ -51,7 +49,7 @@ spec:
                   - key: kubernetes.io/hostname
                     operator: In
                     values:
-                      - {{TARGET_NODE}}
+                      - {{ .TARGET_NODE | quote }}
       domain:
         cpu:
           cores: 1

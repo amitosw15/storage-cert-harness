@@ -13,11 +13,9 @@ package virtbench
 
 import (
 	"fmt"
-	"path/filepath"
 	"strconv"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
 const (
@@ -39,7 +37,7 @@ func cloneAtScaleArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRequire
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 		}
-		staged, err := stageCloneAtScaleTemplate(resultsRoot, tr)
+		staged, err := stageTemplate(resultsRoot, strParamOr(tr, "vm_template", ""), twoDiskVMTemplateFile, twoDiskVMTemplate)
 		if err != nil {
 			return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 		}
@@ -51,7 +49,7 @@ func cloneAtScaleArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRequire
 		args = append(args, "datasource-clone",
 			"--start", strconv.Itoa(start),
 			"--end", strconv.Itoa(end),
-			"--vm-name", defaultVMName,
+			"--vm-name", strParamOr(tr, "vm_name", defaultVMName),
 			"--namespace-prefix", strParamOr(tr, "namespace_prefix", nsPrefix),
 			"--storage-class", sc,
 			"--vm-template", staged,
@@ -62,20 +60,6 @@ func cloneAtScaleArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRequire
 		)
 		return args, nil
 	}
-}
-
-// stageCloneAtScaleTemplate stages a plan-supplied vm_template (reusing the
-// shared stageTemplate, engine.go — the same helper TR-VIRT-013's single-node
-// ceiling uses for the same reason) or, absent one, the embedded default.
-func stageCloneAtScaleTemplate(resultsRoot string, tr core.TestRequirement) (string, error) {
-	if tmpl := strParamOr(tr, "vm_template", ""); tmpl != "" {
-		return stageTemplate(resultsRoot, tmpl)
-	}
-	dst := filepath.Join(resultsRoot, twoDiskVMTemplateFile)
-	if err := safefs.WriteFile(dst, []byte(twoDiskVMTemplate), 0o600); err != nil {
-		return "", fmt.Errorf("stage embedded 2-disk vm template: %w", err)
-	}
-	return filepath.Abs(dst)
 }
 
 // cloneAtScaleValidate checks num_disks and vm_template agree before setup
@@ -94,7 +78,7 @@ func cloneAtScaleValidate(tr core.TestRequirement) error {
 		}
 		return nil
 	}
-	got, err := templateDiskCount(tmpl)
+	got, err := templateDiskCount(tmpl, tr)
 	if err != nil {
 		return fmt.Errorf("virtbench: %s: cannot count disks in vm_template %q: %w", tr.ID, tmpl, err)
 	}
