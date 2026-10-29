@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -164,7 +163,6 @@ func newPreflightCmd() *cobra.Command {
 		planPath     string
 		backendsPath string
 		backendName  string
-		datasource   string
 	)
 	var verbose bool
 	cmd := &cobra.Command{
@@ -181,7 +179,7 @@ func newPreflightCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			trs, err := resolveCLIExecutions(kb.FromCatalog(cat), cfg, datasource)
+			trs, err := orchestrator.ResolveExecutions(kb.FromCatalog(cat), cfg)
 			if err != nil {
 				return err
 			}
@@ -245,7 +243,6 @@ func newPreflightCmd() *cobra.Command {
 	cmd.Flags().StringVar(&planPath, "plan", "", "path to a test plan (YAML); provides selection/backend defaults")
 	cmd.Flags().StringVar(&backendsPath, "backends", "", "path to a backends file (YAML)")
 	cmd.Flags().StringVar(&backendName, "backend", "", "name of the active storage backend (overrides the plan)")
-	cmd.Flags().StringVar(&datasource, "datasource", "", "Virtbench only: DataSource name or namespace/name (default namespace openshift-virtualization-os-images)")
 	cmd.Flags().StringSliceVar(&filter.Tools, "tool", nil, "restrict to these automation tools")
 	cmd.Flags().StringSliceVar(&filter.IDs, "id", nil, "restrict to these TR ids")
 	cmd.Flags().IntSliceVar(&filter.PartnerLevels, "partner-level", nil, "restrict to these partner levels (1|2|3)")
@@ -263,7 +260,6 @@ func newRunCmd() *cobra.Command {
 		planPath         string
 		backendsPath     string
 		backendName      string
-		datasource       string
 		attestationsPath string
 		attnQuestions    string
 		noAttestations   bool
@@ -337,12 +333,7 @@ func newRunCmd() *cobra.Command {
 				trs = kb.FromCatalog(cat)
 			}
 
-			selected, err := resolveCLIExecutions(trs, cfg, datasource)
-			if err != nil {
-				return err
-			}
-			// Parameters and variants are resolved before CLI overrides are applied.
-			cfg.Overrides, cfg.Variants = nil, nil
+			selected := orchestrator.SelectTRs(trs, cfg.Filter)
 			if len(selected) == 0 {
 				return fmt.Errorf("no test requirements selected")
 			}
@@ -535,7 +526,6 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&planPath, "plan", "", "path to a test plan (YAML); provides selection/concurrency/backend defaults")
 	cmd.Flags().StringVar(&backendsPath, "backends", "", "path to a backends file (YAML)")
 	cmd.Flags().StringVar(&backendName, "backend", "", "name of the active storage backend (overrides the plan)")
-	cmd.Flags().StringVar(&datasource, "datasource", "", "Virtbench only: DataSource name or namespace/name (default namespace openshift-virtualization-os-images)")
 	cmd.Flags().StringVar(&attestationsPath, "attestations", "", "path to attestation JSON (self-reported, unobservable claims)")
 	cmd.Flags().StringVar(&attnQuestions, "attestation-questions", "", "path to a custom attestation question set (YAML); defaults to the built-in set")
 	cmd.Flags().BoolVar(&noAttestations, "no-attestations", false, "do not prompt for manual attestations")
@@ -712,23 +702,4 @@ func configureExecution(cmd *cobra.Command, cfg *config.Config, planPath, backen
 	}
 	logger.Info("using backend", "name", resolved.Name, "vendor", resolved.Vendor, "storage_class", resolved.StorageClass)
 	return resolved, nil
-}
-
-func resolveCLIExecutions(trs []core.TestRequirement, cfg config.Config, datasource string) ([]core.TestRequirement, error) {
-	executions, err := orchestrator.ResolveExecutions(trs, cfg)
-	if err != nil {
-		return nil, err
-	}
-	if datasource == "" {
-		return executions, nil
-	}
-	for i := range executions {
-		params := maps.Clone(executions[i].Params)
-		if params == nil {
-			params = map[string]any{}
-		}
-		params["datasource"] = datasource
-		executions[i].Params = params
-	}
-	return executions, nil
 }

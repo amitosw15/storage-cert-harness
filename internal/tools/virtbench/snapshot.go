@@ -164,7 +164,7 @@ func (c *snapshotClone) resolveSource(ctx context.Context, v map[string]any) (ma
 				return nil, err
 			}
 			if resolved != nil && !maps.Equal(resolved, ds.Spec.Source) {
-				return nil, fmt.Errorf("use_snapshot: namespace-local DataSource %q resolves to different sources across VM namespaces; use sourceRef.namespace or --datasource namespace/name to select a shared source", name)
+				return nil, fmt.Errorf("use_snapshot: namespace-local DataSource %q resolves to different sources across VM namespaces; use sourceRef.namespace or datasource: namespace/name to select a shared source", name)
 			}
 			resolved = ds.Spec.Source
 		}

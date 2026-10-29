@@ -196,7 +196,7 @@ func TestSnapshotCloneLocalDataSourceNamespaces(t *testing.T) {
 			rc := &core.RunCtx{Backend: &core.ResolvedBackend{StorageClass: "backend", SnapshotClass: "nondefault"}}
 			clone, err := snapshotClonePreflight(context.Background(), rc, tr)
 			if tt.wantError != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantError) || !strings.Contains(err.Error(), "--datasource namespace/name") {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) || !strings.Contains(err.Error(), "datasource: namespace/name") {
 					t.Fatalf("want actionable error %q, got %v", tt.wantError, err)
 				}
 			} else {

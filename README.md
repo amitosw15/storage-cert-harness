@@ -100,26 +100,14 @@ skips alone do not. Invalid input files also exit non-zero before checks run.
 
 ### Virtbench DataSource selection
 
-`harness run` and `harness preflight` accept `--datasource name` or
-`--datasource namespace/name`. An unqualified name uses
-`openshift-virtualization-os-images`. Selection precedence is CLI flag, resolved
-per-test or variant `datasource` parameter, then the original template source.
-The image namespace default applies only to explicit selections. Without an
-override, an omitted or empty template `sourceRef.namespace` follows CDI's
-default: the receiving DataVolume's namespace. Preflight checks each VM's actual
-namespace, as selected by the workload's namespace prefix and VM range.
-For example:
+Set the ordinary `datasource` test parameter to a DataSource name or
+`namespace/name`. An unqualified name uses `openshift-virtualization-os-images`.
+The existing parameter resolution applies: catalog defaults, then per-test plan
+overrides, then variant parameters. Without a selection, the template source is
+used. An omitted template `sourceRef.namespace` defaults to the receiving
+DataVolume's namespace, following CDI behavior.
 
-```sh
-harness preflight --catalog catalog.json --plan plans/virtbench-fio-live-smoke.yaml \
-  --backends backends.local.yaml --backend tlvbm-nas --datasource fedora-nas
-harness run --catalog catalog.json --thresholds thresholds.json \
-  --plan plans/virtbench-fio-live-smoke.yaml --backends backends.local.yaml \
-  --backend tlvbm-nas --datasource fedora-nas --concurrency 1 \
-  --workdir out/nas-fio/work --output out/nas-fio/report --no-attestations
-```
-
-A plan can set the same selection:
+For example, add these overrides to your plan:
 
 ```yaml
 overrides:
@@ -129,8 +117,7 @@ overrides:
     datasource: openshift-virtualization-os-images/rhel9-nas
 ```
 
-The CLI passes this option through test parameters; adapters decide whether to
-use it. Virtbench currently consumes it. In particular,
+Virtbench consumes this parameter. In particular,
 kube-burner VM snapshots and kube-burner-ocp lifecycle workloads still use their
 existing `vm_image` sources.
 
@@ -141,7 +128,7 @@ applied before `use_snapshot` source resolution. Source DataSources, PVCs and
 snapshots remain read-only. Replay (`results_dir`) does not contact the cluster.
 Snapshot cloning stages one shared source template. If namespace-local
 DataSources resolve to different backing sources across VMs, preflight asks for
-an explicit shared `sourceRef.namespace` or `--datasource namespace/name`.
+an explicit shared `sourceRef.namespace` or `datasource: namespace/name`.
 
 Templates are staged in each execution's work directory. Only DataSource
 `sourceRef` entries in DataVolume templates receive the override; blank disks,

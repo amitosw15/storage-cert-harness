@@ -207,8 +207,10 @@ func configureScenarios() {
 			ProvidesTR:     "TR-VIRT-013",
 			ResultFile:     SummaryFileName,
 			NSPrefix:       singleNodeNSPrefix,
-			VMRange:        singleNodeVMRange,
-			Template:       vmTemplateConfig{Upstream: "examples/vm-templates/rhel9-vm-datasource.yaml"},
+			VMRange: func(tr core.TestRequirement) (int, int, error) {
+				return validateVMRange(tr, intParam(tr, "start", 1), intParam(tr, "attempt_vms", singleNodeDefaultCount))
+			},
+			Template: vmTemplateConfig{Upstream: "examples/vm-templates/rhel9-vm-datasource.yaml"},
 			BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
 				return singleNodeCeilingArgs(singleNodeNSPrefix)(rc, tr, resultsRoot)
 			},

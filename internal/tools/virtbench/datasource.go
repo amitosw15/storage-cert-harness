@@ -195,7 +195,7 @@ func resolveLocalDataSources(tr core.TestRequirement, refs []cloneSource) ([]clo
 func vmTargetNamespaces(tr core.TestRequirement) ([]string, error) {
 	sc, ok := scenarioFor(tr)
 	if !ok || sc.VMRange == nil {
-		return nil, fmt.Errorf("cannot resolve local DataSource namespace for %s; specify sourceRef.namespace or --datasource namespace/name", tr.ID)
+		return nil, fmt.Errorf("cannot resolve local DataSource namespace for %s; specify sourceRef.namespace or datasource: namespace/name", tr.ID)
 	}
 	start, end, err := sc.VMRange(tr)
 	if err != nil {

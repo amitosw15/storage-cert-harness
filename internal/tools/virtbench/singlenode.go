@@ -41,10 +41,8 @@ func singleNodeCeilingArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRe
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 		}
-		start, end, err := singleNodeVMRange(tr)
-		if err != nil {
-			return nil, err
-		}
+		start := intParam(tr, "start", 1)
+		end := intParam(tr, "attempt_vms", singleNodeDefaultCount)
 
 		args := clusterArgs(tr)
 		args = append(args, "datasource-clone",
@@ -210,8 +208,4 @@ func singleNodeLunMetric(tr core.TestRequirement, res core.TestResult) []core.Me
 	disks := intParam(tr, "num_disks", 1)
 	vms := vmCount(res, "max_vms_per_node")
 	return []core.Metric{{Name: "max_luns_per_node", Value: float64(vms * disks), Unit: "count"}}
-}
-
-func singleNodeVMRange(tr core.TestRequirement) (int, int, error) {
-	return validateVMRange(tr, intParam(tr, "start", 1), intParam(tr, "attempt_vms", singleNodeDefaultCount))
 }
