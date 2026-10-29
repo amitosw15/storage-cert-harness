@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
 const (
@@ -88,34 +87,12 @@ func drainProvision(ctx context.Context, rc *core.RunCtx, _ *core.Bag, tr core.T
 	}
 	nsPrefix := strParamOr(tr, "namespace_prefix", drainNSPrefix)
 
-	source := []byte(drainVMTemplate)
-	if custom := strParamOr(tr, "vm_template", ""); custom != "" {
-		var err error
-		source, err = safefs.ReadFile(custom)
-		if err != nil {
-			return err
-		}
-	}
-	values, err := resolveTemplateValues("datasource-clone", []string{"--storage-class", storageClass(rc, tr)})
-	if err != nil {
-		return err
-	}
-	values["TARGET_NODE"] = target
-	rendered, err := renderVMTemplate(drainTemplateFile, source, values)
-	if err != nil {
-		return err
-	}
-	tmplPath, err := writeTemplateFile(resultsRoot, "rendered-drain.yaml", rendered)
-	if err != nil {
-		return fmt.Errorf("virtbench: drain: write vm template: %w", err)
-	}
-
-	args, err := drainCloneArgs(rc, tr, resultsRoot, tmplPath, nsPrefix)
+	args, err := drainCloneArgs(rc, tr, resultsRoot, strParamOr(tr, "vm_template", ""), nsPrefix)
 	if err != nil {
 		return err
 	}
 	rc.Logger.Info("virtbench: drain: cloning VMs onto target", "node", target, "args", args)
-	if err := execVirtbench(ctx, rc, resultsRoot, args); err != nil {
+	if err := execVirtbench(ctx, rc, manifestRequest{Directory: resultsRoot, Args: args, TR: tr}); err != nil {
 		return fmt.Errorf("virtbench: drain: clone VMs: %w", err)
 	}
 	return nil
@@ -176,22 +153,26 @@ func drainCloneArgs(rc *core.RunCtx, tr core.TestRequirement, resultsRoot, templ
 	if sc == "" {
 		return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 	}
-	start := intParam(tr, "start", 1)
-	end := intParam(tr, "end", intParam(tr, "count", drainDefaultCount))
+	start, end, err := drainVMRange(tr)
+	if err != nil {
+		return nil, err
+	}
 
 	args := clusterArgs(tr)
 	args = append(args, "datasource-clone",
 		"--start", strconv.Itoa(start),
 		"--end", strconv.Itoa(end),
-		"--vm-name", defaultVMName,
+		"--vm-name", strParamOr(tr, "vm_name", defaultVMName),
 		"--namespace-prefix", nsPrefix,
 		"--storage-class", sc,
-		"--vm-template", template,
 		"--save-results",
 		"--results-folder", resultsRoot,
 	)
 	if driver := strParamOr(tr, "storage_driver", ""); driver != "" {
 		args = append(args, "--storage-driver", driver)
+	}
+	if template != "" {
+		args = append(args, "--vm-template", template)
 	}
 	return args, nil
 }

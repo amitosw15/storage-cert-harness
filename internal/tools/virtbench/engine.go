@@ -57,8 +57,6 @@ const (
 	defaultVMName = "rhel-9-vm"
 )
 
-const fioVMTemplateFile = "fio-vm-template.yaml"
-
 // teardownBudget bounds the best-effort cleanup, which runs on a fresh context so
 // it still happens when the run ctx was cancelled.
 const teardownBudget = 120 * time.Second
@@ -101,6 +99,17 @@ func (p preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, tr
 		}
 	}
 	for _, tr := range trs {
+		if dir == "" {
+			refs, err := datasourcePreflight(ctx, rc, tr)
+			if err != nil {
+				findings = append(findings, core.Finding{Level: "error", Message: tr.ID + " datasource: " + err.Error()})
+			} else {
+				for _, ref := range refs {
+					findings = append(findings, core.Finding{Level: "info", Message: fmt.Sprintf("%s datasource=%s/%s", tr.ID, ref.Namespace, ref.Name)})
+				}
+			}
+		}
+
 		if dir == "" && usesSnapshot(tr) && strings.HasPrefix(p.sc.AutomationTool, "virtbench datasource-clone") {
 			clone, err := snapshotClonePreflight(ctx, rc, tr)
 			if err != nil {
@@ -211,18 +220,20 @@ func (r runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []c
 	if err != nil {
 		return stages.RunHandle{}, err
 	}
+	prepared := false
 	if clone, ok := core.GetAs[*snapshotClone](bag, "snapshot_clone"); ok {
 		path, err := clone.prepare(ctx, root)
 		if err != nil {
 			return stages.RunHandle{}, fmt.Errorf("prepare snapshot clone: %w", err)
 		}
 		args = setArgument(args, "--vm-template", path)
+		prepared = true
 		if rc.RecordStorageSelection != nil {
 			rc.RecordStorageSelection(core.StorageSelection{TR: trs[0].ID, Variant: trs[0].Variant, StorageClass: clone.Selection.StorageClass, SnapshotClass: clone.Selection.SnapshotClass})
 		}
 	}
 	rc.Logger.Info("virtbench: exec", "cmd", binary, "args", args, "dir", root)
-	if err := execVirtbench(ctx, rc, root, args); err != nil {
+	if err := execVirtbench(ctx, rc, manifestRequest{Directory: root, Args: args, TR: trs[0], Prepared: prepared}); err != nil {
 		// drain-nodes exits 1 on a timeout — a gradeable FAIL, not a crash. Keep
 		// going to Collect/Parse so the log is still scored (decisions/0013).
 		if !r.sc.TolerateRunError {
@@ -233,9 +244,9 @@ func (r runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []c
 	return stages.RunHandle{ID: "virtbench-" + rc.RunID}, nil
 }
 
-func runVirtbench(ctx context.Context, rc *core.RunCtx, root string, args []string) error {
+func runVirtbench(ctx context.Context, rc *core.RunCtx, root string, args []string, tr core.TestRequirement) error {
 	rc.Logger.Info("virtbench: exec", "cmd", binary, "args", args, "dir", root)
-	if err := execVirtbench(ctx, rc, root, args); err != nil {
+	if err := execVirtbench(ctx, rc, manifestRequest{Directory: root, Args: args, TR: tr}); err != nil {
 		return fmt.Errorf("virtbench: run failed: %w", err)
 	}
 	return nil
@@ -467,9 +478,10 @@ func datasourceCloneArgs(bootStorm bool, nsPrefix string) func(rc *core.RunCtx, 
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 		}
-		start := intParam(tr, "start", 1)
-		end := intParam(tr, "iteration_clones", 100) // TR-VIRT-018
-		end = intParam(tr, "num_vms", end)           // TR-VIRT-001
+		start, end, err := cloneVMRange(tr)
+		if err != nil {
+			return nil, err
+		}
 
 		args := clusterArgs(tr)
 		args = append(args, "datasource-clone",
@@ -482,11 +494,7 @@ func datasourceCloneArgs(bootStorm bool, nsPrefix string) func(rc *core.RunCtx, 
 			"--results-folder", resultsRoot,
 		)
 		if tmpl := strParamOr(tr, "vm_template", ""); tmpl != "" {
-			staged, err := stageTemplate(resultsRoot, tmpl, "", "")
-			if err != nil {
-				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
-			}
-			args = append(args, "--vm-template", staged)
+			args = append(args, "--vm-template", tmpl)
 		}
 		if driver := strParamOr(tr, "storage_driver", ""); driver != "" {
 			args = append(args, "--storage-driver", driver)
@@ -515,8 +523,10 @@ func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.Tes
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 		}
-		start := intParam(tr, "start", 1)
-		end := intParam(tr, "end", intParam(tr, "count", 100))
+		start, end, err := diskOpsVMRange(tr)
+		if err != nil {
+			return nil, err
+		}
 
 		args := clusterArgs(tr)
 		args = append(args, "disk-ops",
@@ -530,11 +540,7 @@ func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.Tes
 			"--results-dir", resultsRoot,
 		)
 		if tmpl := strParamOr(tr, "vm_template", ""); tmpl != "" {
-			staged, err := stageTemplate(resultsRoot, tmpl, "", "")
-			if err != nil {
-				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
-			}
-			args = append(args, "--vm-template", staged)
+			args = append(args, "--vm-template", tmpl)
 		}
 		if disks := intParam(tr, "disks", 0); disks > 0 {
 			args = append(args, "--disks", strconv.Itoa(disks))
@@ -587,10 +593,6 @@ func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestReq
 		if err != nil {
 			return nil, err
 		}
-		staged, err := stageTemplate(resultsRoot, template, fioVMTemplateFile, fioVMTemplate)
-		if err != nil {
-			return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
-		}
 
 		args := clusterArgs(tr)
 		args = append(args, "fio",
@@ -600,13 +602,15 @@ func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestReq
 			"--end", strconv.Itoa(end),
 			"--namespace-prefix", strParamOr(tr, "namespace_prefix", nsPrefix),
 			"--storage-class", sc,
-			"--vm-template", staged,
 			"--fio-rw", "randrw",
 			"--fio-bs", bs,
 			"--save-results",
 			"--results-dir", resultsRoot,
 			"--cleanup",
 		)
+		if template != "" {
+			args = append(args, "--vm-template", template)
+		}
 		runtime := intParam(tr, "fio_runtime", defaultFIORuntime)
 		if runtime < 1 {
 			return nil, fmt.Errorf("virtbench: %s: fio_runtime must be >= 1", tr.ID)
@@ -687,19 +691,19 @@ func runFIO(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.Test
 		}
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
-		if err := runVirtbench(cleanupCtx, rc, root, cleanup); err != nil {
+		if err := runVirtbench(cleanupCtx, rc, root, cleanup, tr); err != nil {
 			rc.Logger.Warn("virtbench fio: cleanup failed; teardown will retry", "err", err)
 		}
 	}()
 
 	deployed = true
-	if err := runVirtbench(ctx, rc, root, deploy); err != nil {
+	if err := runVirtbench(ctx, rc, root, deploy, tr); err != nil {
 		return stages.RunHandle{}, fmt.Errorf("virtbench fio: deploy: %w", err)
 	}
 	if err := waitForFIOVMs(ctx, rc, tr); err != nil {
 		return stages.RunHandle{}, err
 	}
-	if err := runVirtbench(ctx, rc, root, gather); err != nil {
+	if err := runVirtbench(ctx, rc, root, gather, tr); err != nil {
 		return stages.RunHandle{}, fmt.Errorf("virtbench fio: gather results: %w", err)
 	}
 	return stages.RunHandle{ID: "virtbench-" + rc.RunID}, nil
@@ -907,13 +911,13 @@ func (w logWriter) Write(p []byte) (int, error) {
 }
 
 // execVirtbench runs the virtbench CLI in dir, forwarding output to the logger.
-func execVirtbench(ctx context.Context, rc *core.RunCtx, dir string, args []string) error {
-	args, err := prepareManifest(ctx, manifestRequest{Directory: dir, Args: args})
+func execVirtbench(ctx context.Context, rc *core.RunCtx, request manifestRequest) error {
+	args, err := prepareManifest(ctx, request)
 	if err != nil {
 		return err
 	}
 	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204 -- arguments are assembled by the harness scenario.
-	cmd.Dir = dir
+	cmd.Dir = request.Directory
 	cmd.Stdout = logWriter{log: rc.Logger, stream: "stdout"}
 	cmd.Stderr = logWriter{log: rc.Logger, stream: "stderr"}
 	return cmd.Run()

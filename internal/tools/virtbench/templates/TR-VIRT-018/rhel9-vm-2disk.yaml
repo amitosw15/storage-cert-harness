@@ -20,7 +20,6 @@ spec:
             requests:
               storage: 30Gi
           storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
-          volumeMode: Block
     - metadata:
         name: {{ printf "%s-data" .VM_NAME | quote }}
       spec:
@@ -33,7 +32,6 @@ spec:
             requests:
               storage: 10Gi
           storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
-          volumeMode: Block
   runStrategy: Always
   template:
     metadata:

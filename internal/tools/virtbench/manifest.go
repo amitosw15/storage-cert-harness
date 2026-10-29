@@ -11,11 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
 type manifestRequest struct {
+	Prepared  bool
+	TR        core.TestRequirement
 	Directory string
 	Args      []string
 }
@@ -93,7 +96,7 @@ func prepareManifest(ctx context.Context, request manifestRequest) ([]string, er
 	if command != "datasource-clone" && command != "fio" && command != "disk-ops" {
 		return args, nil
 	}
-	values, err := resolveTemplateValues(command, args)
+	values, err := resolveTemplateValues(command, append(slices.Clone(args), planTemplateArgs(command, request.TR)...))
 	if err != nil {
 		return nil, err
 	}
@@ -117,27 +120,44 @@ func prepareManifest(ctx context.Context, request manifestRequest) ([]string, er
 	}
 	path, custom := argument(args, "--vm-template")
 	var source []byte
+	defaults := !custom
 	if custom {
 		source, err = safefs.ReadFile(path)
 	} else {
-		path = "examples/vm-templates/rhel9-vm-datasource.yaml"
-		switch command {
-		case "disk-ops":
-			path = "disk-ops-benchmark/vm-template.yaml"
-		case "fio":
-			path = fioVMTemplateFile
-			source = []byte(fioVMTemplate)
+		tr := request.TR
+		if tr.ID == "" {
+			tr.ID = "TR-VIRT-002"
+			if command == "fio" {
+				tr.ID = "TR-STOR-002"
+			}
+			if command == "disk-ops" {
+				tr.ID = "TR-STOR-001"
+			}
 		}
-		if source == nil {
-			source, err = runtimeTemplate(ctx, path)
-		}
+		source, defaults, err = vmSourceTemplate(ctx, tr)
+		path = tr.ID + "-vm.yaml"
 	}
 	if err != nil {
 		return nil, fmt.Errorf("virtbench: load template %s: %w", path, err)
 	}
-	rendered, err := renderVMTemplate(path, source, values)
-	if err != nil {
-		return nil, err
+	values["TARGET_NODE"] = strParamOr(request.TR, "target_node", "")
+	rendered := source
+	if request.Prepared {
+		if !custom {
+			return nil, fmt.Errorf("prepared VM requires --vm-template")
+		}
+		if err := validateVMTemplate(rendered, values); err != nil {
+			return nil, err
+		}
+	} else {
+		rendered, err = renderVMTemplate(path, source, values)
+		if err != nil {
+			return nil, err
+		}
+		rendered, _, err = selectVMSource(rendered, strParamOr(request.TR, "datasource", ""), defaults)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if raw, present := argument(args, "--num-disks"); present && command == "datasource-clone" {
 		wanted, err := strconv.Atoi(raw)
@@ -152,29 +172,32 @@ func prepareManifest(ctx context.Context, request manifestRequest) ([]string, er
 			return nil, fmt.Errorf("virtbench: --num-disks=%d but rendered VM defines %d disks", wanted, got)
 		}
 	}
-	dir := filepath.Join(request.Directory, "rendered")
-	destination, err := writeTemplateFile(dir, command+"-vm.yaml", rendered)
-	if err != nil {
-		return nil, err
+	destination := path
+	if !request.Prepared {
+		dir := filepath.Join(request.Directory, "rendered")
+		if custom {
+			original, err := filepath.Abs(path)
+			if err != nil {
+				return nil, err
+			}
+			output, err := filepath.Abs(filepath.Join(dir, command+"-vm.yaml"))
+			if err != nil {
+				return nil, err
+			}
+			if original == output {
+				return nil, fmt.Errorf("VM template is inside the rendering destination; choose a separate workdir to preserve %s", path)
+			}
+		}
+		destination, err = writeTemplateFile(dir, command+"-vm.yaml", rendered)
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	if command == "datasource-clone" {
 		args = removeArgument(args, "--storage-class")
 	}
 	return setArgument(args, "--vm-template", destination), nil
-}
-
-// stageTemplate copies a custom or embedded source without modifying the original.
-func stageTemplate(directory, path, defaultName, defaultContent string) (string, error) {
-	name, data := defaultName, []byte(defaultContent)
-	if path != "" {
-		var err error
-		data, err = safefs.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("read vm_template %q: %w", path, err)
-		}
-		name = filepath.Base(path)
-	}
-	return writeTemplateFile(directory, name, data)
 }
 
 func writeTemplateFile(directory, name string, data []byte) (string, error) {
@@ -196,12 +219,19 @@ func renderVMTemplate(name string, source []byte, values map[string]any) ([]byte
 	if err != nil {
 		return nil, err
 	}
-	documents, err := manifest.Documents(rendered)
-	if err != nil {
+	if err := validateVMTemplate(rendered, values); err != nil {
 		return nil, err
 	}
+	return rendered, nil
+}
+
+func validateVMTemplate(rendered []byte, values map[string]any) error {
+	documents, err := manifest.Documents(rendered)
+	if err != nil {
+		return err
+	}
 	if len(documents) != 1 {
-		return nil, fmt.Errorf("virtbench: VM template must contain one YAML document")
+		return fmt.Errorf("virtbench: VM template must contain one YAML document")
 	}
 	count := 0
 	for _, object := range documents {
@@ -210,20 +240,20 @@ func renderVMTemplate(name string, source []byte, values map[string]any) ([]byte
 		}
 		count++
 		if version, _ := object["apiVersion"].(string); version == "" {
-			return nil, fmt.Errorf("virtbench: VM template requires apiVersion")
+			return fmt.Errorf("virtbench: VM template requires apiVersion")
 		}
 		metadata, _ := object["metadata"].(map[string]any)
 		if name, _ := metadata["name"].(string); name == "" || name != values["VM_NAME"] {
-			return nil, fmt.Errorf("virtbench: VM metadata.name must match --vm-name")
+			return fmt.Errorf("virtbench: VM metadata.name must match --vm-name")
 		}
 		if _, ok := object["spec"].(map[string]any); !ok {
-			return nil, fmt.Errorf("virtbench: VM template requires a spec mapping")
+			return fmt.Errorf("virtbench: VM template requires a spec mapping")
 		}
 	}
 	if count != 1 {
-		return nil, fmt.Errorf("virtbench: template must contain exactly one VirtualMachine, found %d", count)
+		return fmt.Errorf("virtbench: template must contain exactly one VirtualMachine, found %d", count)
 	}
-	return rendered, nil
+	return nil
 }
 
 func runtimeTemplate(ctx context.Context, relative string) ([]byte, error) {
@@ -341,4 +371,53 @@ func removeArgument(args []string, flag string) []string {
 		}
 	}
 	return result
+}
+
+// vmSourceTemplate selects raw bytes; custom templates preserve their storage settings.
+func vmSourceTemplate(ctx context.Context, tr core.TestRequirement) ([]byte, bool, error) {
+	sc, ok := scenarioFor(tr)
+	if !ok {
+		return nil, false, fmt.Errorf("no VM template for %s", tr.ID)
+	}
+	param := sc.Template.Param
+	if param == "" {
+		param = "vm_template"
+	}
+	path := strParamOr(tr, param, "")
+	if param == "fio_vm_template" {
+		var err error
+		path, err = fioTemplate(tr)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	if path != "" {
+		data, err := safefs.ReadFile(path)
+		return data, false, err
+	}
+	if sc.Template.Source != "" {
+		return []byte(sc.Template.Source), true, nil
+	}
+	data, err := runtimeTemplate(ctx, sc.Template.Upstream)
+	return data, true, err
+}
+
+// planTemplateArgs maps ordinary plan parameters to the shared input resolver.
+func planTemplateArgs(command string, tr core.TestRequirement) []string {
+	var args []string
+	for _, input := range templateInputs(command) {
+		param := strings.ReplaceAll(strings.TrimPrefix(input.flag, "--"), "-", "_")
+		if value, ok := tr.Params[param]; ok {
+			args = append(args, input.flag, fmt.Sprint(value))
+		}
+	}
+	return args
+}
+
+func resolvePlanTemplateValues(command string, rc *core.RunCtx, tr core.TestRequirement) (map[string]any, error) {
+	args := planTemplateArgs(command, tr)
+	if sc := storageClass(rc, tr); sc != "" {
+		args = setArgument(args, "--storage-class", sc)
+	}
+	return resolveTemplateValues(command, args)
 }

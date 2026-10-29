@@ -50,3 +50,9 @@ entry. Tests render every owned VB template and exercise the execution boundary;
 KB's snapshot-job list is rendered by its native template from explicit JSON
 values. Raw Go-template YAML is excluded from yamllint. See
 [adapter authoring](../docs/adapter-authoring.md#runtime-manifest-rendering).
+
+DataSource selection is a normal plan parameter. Read-only checks resolve source
+readiness and namespace defaults in Virtbench; `selected-vm.yaml` expresses the
+source changes. Snapshot conversion consumes the selected source and hands its
+final artifact directly to execution validation. CLI argument builders perform
+no staging IO.

@@ -227,6 +227,10 @@ func TestSingleNodeCeilingArgsIncludesTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("singleNodeCeilingArgs: %v", err)
 	}
+	args, err = prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args, TR: tr})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var staged string
 	for i, a := range args {
 		if a == "--vm-template" && i+1 < len(args) {
@@ -236,7 +240,7 @@ func TestSingleNodeCeilingArgsIncludesTemplate(t *testing.T) {
 	if staged == "" {
 		t.Fatalf("--vm-template not passed; args = %v", args)
 	}
-	if filepath.Dir(staged) != root {
+	if filepath.Dir(staged) != filepath.Join(root, "rendered") {
 		t.Errorf("template staged at %q, want inside results root %q", staged, root)
 	}
 	if _, err := os.Stat(staged); err != nil {

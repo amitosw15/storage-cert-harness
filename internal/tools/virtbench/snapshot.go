@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 	"time"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
 type cloneSource struct {
@@ -21,6 +21,7 @@ type cloneSource struct {
 }
 
 type snapshotClone struct {
+	Target    core.TestRequirement
 	Selection clustercheck.SnapshotSelection
 	Template  map[string]any
 	Volumes   []map[string]any
@@ -46,16 +47,20 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 	if err != nil {
 		return nil, err
 	}
-	data, err := snapshotTemplate(ctx, tr)
+	data, defaults, err := vmSourceTemplate(ctx, tr)
 	if err != nil {
 		return nil, err
 	}
-	c := &snapshotClone{Selection: selection, Sources: map[int]cloneSource{}, Snapshots: map[string]cloneSource{}}
-	values, err := resolveTemplateValues("datasource-clone", []string{"--storage-class", selection.StorageClass, "--vm-name", strParamOr(tr, "vm_name", defaultVMName)})
+	c := &snapshotClone{Target: tr, Selection: selection, Sources: map[int]cloneSource{}, Snapshots: map[string]cloneSource{}}
+	values, err := resolvePlanTemplateValues("datasource-clone", rc, tr)
 	if err != nil {
 		return nil, err
 	}
 	data, err = renderVMTemplate("snapshot-source.yaml", data, values)
+	if err != nil {
+		return nil, err
+	}
+	data, _, err = selectVMSource(data, strParamOr(tr, "datasource", ""), defaults)
 	if err != nil {
 		return nil, err
 	}
@@ -118,25 +123,8 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 	return c, nil
 }
 
-func snapshotTemplate(ctx context.Context, tr core.TestRequirement) ([]byte, error) {
-	if path := strParamOr(tr, "vm_template", ""); path != "" {
-		return safefs.ReadFile(path)
-	}
-	if tr.ID == "TR-VIRT-018" {
-		return []byte(twoDiskVMTemplate), nil
-	}
-	return runtimeTemplate(ctx, "examples/vm-templates/rhel9-vm-datasource.yaml")
-}
-
 func (c *snapshotClone) get(ctx context.Context, obj any, kind string, source cloneSource) error {
-	if source.Name == "" || source.Namespace == "" {
-		return fmt.Errorf("snapshot clone: %s source requires name and namespace", kind)
-	}
-	out, err := clustercheck.SnapshotCommand(ctx, c.Selection.Kubeconfig, nil, "get", kind, source.Name, "-n", source.Namespace, "-o", "json")
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(out, obj)
+	return getCloneObject(ctx, c.Selection.Kubeconfig, obj, kind, source)
 }
 
 func (c *snapshotClone) resolveSource(ctx context.Context, v map[string]any) (map[string]cloneSource, error) {
@@ -146,15 +134,22 @@ func (c *snapshotClone) resolveSource(ctx context.Context, v map[string]any) (ma
 		}
 		name, _ := ref["name"].(string)
 		ns, _ := ref["namespace"].(string)
-		var ds struct {
-			Spec struct {
-				Source map[string]cloneSource `json:"source"`
-			} `json:"spec"`
-		}
-		if err := c.get(ctx, &ds, "datasource", cloneSource{Name: name, Namespace: ns}); err != nil {
+		refs, err := resolveLocalDataSources(c.Target, []cloneSource{{Name: name, Namespace: ns}})
+		if err != nil {
 			return nil, err
 		}
-		return ds.Spec.Source, nil
+		var source map[string]cloneSource
+		for _, ref := range refs {
+			ds, err := loadDataSource(ctx, c.Selection.Kubeconfig, ref)
+			if err != nil {
+				return nil, err
+			}
+			if source != nil && !maps.Equal(source, ds.Spec.Source) {
+				return nil, fmt.Errorf("local DataSource %s resolves to different sources; specify datasource: namespace/name", name)
+			}
+			source = ds.Spec.Source
+		}
+		return source, nil
 	}
 	source, _ := v["source"].(map[string]any)
 	if _, blank := source["blank"]; blank {

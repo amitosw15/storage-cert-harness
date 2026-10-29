@@ -130,7 +130,7 @@ exit 1
 	}
 	t.Setenv("PATH", root)
 	rc := &core.RunCtx{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	if err := execVirtbench(t.Context(), rc, root, []string{"fio", "--storage-class", "fast"}); err != nil {
+	if err := execVirtbench(t.Context(), rc, manifestRequest{Directory: root, Args: []string{"fio", "--storage-class", "fast"}}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "received.yaml"))
@@ -156,7 +156,7 @@ func TestInvalidManifestNeverStartsVirtbench(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tt.source), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			err := execVirtbench(t.Context(), &core.RunCtx{}, root, []string{"fio", "--storage-class", "fast", "--vm-template", path})
+			err := execVirtbench(t.Context(), &core.RunCtx{}, manifestRequest{Directory: root, Args: []string{"fio", "--storage-class", "fast", "--vm-template", path}})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error=%v, want %s", err, tt.want)
 			}
@@ -189,6 +189,8 @@ func TestAllOwnedTemplatesRender(t *testing.T) {
 		t.Fatal(err)
 	}
 	values["VM"] = docs[0]
+	values["DATASOURCE"] = cloneSource{Name: "selected", Namespace: "images"}
+	values["DEFAULTS"] = true
 	values["SNAPSHOTS"] = map[string]cloneSource{"0": {Name: "existing", Namespace: "images"}}
 	paths, err := filepath.Glob("templates/*/*.yaml")
 	if err != nil || len(paths) == 0 {

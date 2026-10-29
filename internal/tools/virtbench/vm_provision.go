@@ -50,20 +50,38 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 
 	nsPrefix := strParamOr(tr, "namespace_prefix", "failure-recovery")
 	vmName := strParamOr(tr, "vm_name", defaultVMName)
-	count := intParam(tr, "vm_count", 3)
+	start, count, err := recoveryVMRange(tr)
+	if err != nil {
+		return err
+	}
 	createTimeout := intParam(tr, "vm_create_timeout", 300)
 
 	rc.Logger.Info("virtbench: creating VMs on target node", "node", node, "count", count, "storage_class", sc)
 
-	for i := 1; i <= count; i++ {
+	source, defaults, err := vmSourceTemplate(ctx, tr)
+	if err != nil {
+		return err
+	}
+
+	values, err := resolvePlanTemplateValues("datasource-clone", rc, tr)
+	if err != nil {
+		return err
+	}
+	values["NODE_NAME"] = node
+	values["HOSTNAME_LABEL"] = hostnameLabel
+
+	for i := start; i <= count; i++ {
 		ns := nsPrefix + "-" + strconv.Itoa(i)
-		rendered, err := renderVMTemplate("failure-recovery.yaml", []byte(failureRecoveryVMTemplate), map[string]any{
-			"VM_NAME": vmName, "NAMESPACE": ns, "NODE_NAME": node,
-			"HOSTNAME_LABEL": hostnameLabel, "STORAGE_CLASS_NAME": sc,
-		})
+		values["NAMESPACE"] = ns
+		rendered, err := renderVMTemplate("failure-recovery.yaml", source, values)
 		if err != nil {
 			return err
 		}
+		rendered, _, err = selectVMSource(rendered, strParamOr(tr, "datasource", ""), defaults)
+		if err != nil {
+			return err
+		}
+
 		if err := ensureNamespace(ctx, kubeconfig, ns); err != nil {
 			return fmt.Errorf("virtbench: create namespace %s: %w", ns, err)
 		}
@@ -75,7 +93,7 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 	}
 
 	rc.Logger.Info("virtbench: waiting for VMs to reach Running", "count", count, "timeout_s", createTimeout)
-	for i := 1; i <= count; i++ {
+	for i := start; i <= count; i++ {
 		ns := nsPrefix + "-" + strconv.Itoa(i)
 		if err := waitForVMRunning(ctx, kubeconfig, ns, vmName, createTimeout); err != nil {
 			return fmt.Errorf("virtbench: VM %s/%s not ready: %w", ns, vmName, err)

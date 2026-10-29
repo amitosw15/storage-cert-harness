@@ -25,11 +25,15 @@ func TestCloneAtScaleArgsDefaultsToEmbeddedTemplate(t *testing.T) {
 		t.Fatalf("cloneAtScaleArgs: %v", err)
 	}
 
+	args, err = prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args, TR: tr})
+	if err != nil {
+		t.Fatal(err)
+	}
 	staged, disks := findTemplateAndDisks(t, args)
 	if disks != "2" {
 		t.Errorf("--num-disks = %q, want 2", disks)
 	}
-	if filepath.Dir(staged) != root || filepath.Base(staged) != twoDiskVMTemplateFile {
+	if filepath.Dir(staged) != filepath.Join(root, "rendered") || filepath.Base(staged) != "datasource-clone-vm.yaml" {
 		t.Errorf("staged template = %q, want the embedded default inside %q", staged, root)
 	}
 }
@@ -48,11 +52,15 @@ func TestCloneAtScaleArgsUsesPlanTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cloneAtScaleArgs: %v", err)
 	}
+	args, err = prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args, TR: tr})
+	if err != nil {
+		t.Fatal(err)
+	}
 	staged, disks := findTemplateAndDisks(t, args)
 	if disks != "3" {
 		t.Errorf("--num-disks = %q, want 3", disks)
 	}
-	if filepath.Dir(staged) != root {
+	if filepath.Dir(staged) != filepath.Join(root, "rendered") {
 		t.Errorf("template staged at %q, want inside results root %q", staged, root)
 	}
 	if _, err := os.Stat(staged); err != nil {
@@ -86,7 +94,7 @@ func TestCloneAtScaleArgsStagedTemplateHasTwoDataVolumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cloneAtScaleArgs: %v", err)
 	}
-	args, err = prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args})
+	args, err = prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args, TR: tr})
 	if err != nil {
 		t.Fatal(err)
 	}

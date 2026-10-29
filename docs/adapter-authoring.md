@@ -132,8 +132,8 @@ as in kube-burner, with one added `toYaml` helper. Go control flow and legacy
 VB aliases use the same engine. Environment variables are not merged into the
 values map; Sprig's explicit `env`/`expandenv` functions remain available.
 
-VB inputs come from the final CLI arguments plus the defaults in
-`virtbench/templateInputs`. Explicit arguments override defaults. The adapter
+VB inputs come from the final CLI arguments, plan parameters, and the defaults in
+`virtbench/templateInputs`. Explicit arguments override plan parameters and defaults. The adapter
 passes resolved execution defaults back to the CLI so VM identity and FIO
 settings agree with the manifest. Guest password defaults remain internal;
 backend credentials are never template inputs. Scenario provisioning supplies
@@ -166,6 +166,33 @@ directories. Template tests validate every owned template after rendering;
 renderer and adapter tests cover failure cases and the execution boundary.
 Replay runs do not render manifests or access the cluster.
 
+### Virtbench DataSource selection
+
+Set `datasource: images/my-image` in a TR's plan parameters or variant. A bare
+name uses `openshift-virtualization-os-images`. The ordinary catalog/plan/variant
+parameter resolution applies; there is no separate global flag.
+
+`selected-vm.yaml` changes only DataSource `sourceRef` entries. Without a
+selection, existing image sources remain intact. An explicit selection fails
+if the template has no DataSource reference. Blank disks, cloud-init, unrelated
+VM fields, and custom storage settings are preserved. Default templates omit
+`volumeMode` so CDI can use the StorageProfile; their access modes remain explicit.
+
+Live preflight checks DataSource `Ready=True` and a Bound backing PVC or a
+readyToUse backing snapshot. An unqualified template `sourceRef` is resolved in
+each receiving workload namespace, using the same scenario range as execution.
+A backing source without a namespace inherits the DataSource namespace. For
+snapshot clones, selection happens before source resolution; local DataSources
+must resolve to a common backing source, or the plan must choose an explicit
+`namespace/name`. Preflight reads sources without modifying them, and replay
+performs no source lookup. These behaviors incorporate PR #155 through the
+renderer rather than its placeholder masking and YAML-node edits.
+
+Each ordinary CLI provisioning path writes one private rendered VM file. Drain
+uses that same preparation path. Snapshot conversion produces its final file
+once, and execution validates and reuses it. Failure recovery renders each VM
+with its namespace and placement values before applying it.
+
 ### Migration inventory
 
 The runtime manifest audit covers all registered tools and their provisioning,
@@ -177,7 +204,7 @@ their owners after the migration.
 | KB `snapshotJobs`, `legacySnapshotJob`, marker replacement in `writeConfig` | `snapshotJobInputs` builds values; native `config.yaml` builds the YAML |
 | KB `writeConfig`, `buildEnv` | Copy sources unchanged; pass explicit environment values to KB |
 | KBO workload flags | Upstream owns the workload templates |
-| VB `stageTemplate`, `stageFIOTemplate`, `stageCloneAtScaleTemplate` | One `stageTemplate` in `virtbench/manifest.go` |
+| VB `stageTemplate`, `stageFIOTemplate`, `stageCloneAtScaleTemplate` | Removed; `vmSourceTemplate` selects raw bytes and `prepareManifest` writes the rendered artifact once |
 | VB datasource-clone, disk-ops, FIO substitution | `prepareManifest` resolves all values, renders, validates, and selects the runtime file |
 | VB `renderDrainVMTemplate` string replacement | Shared renderer with explicit drain inputs |
 | VB failure-recovery `strings.NewReplacer` | Shared renderer with VM, namespace, storage, and node inputs |

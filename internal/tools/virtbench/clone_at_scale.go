@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	twoDiskVMTemplateFile = "rhel9-vm-2disk.yaml"
 	// cloneAtScaleDefaultDisks is both the num_disks default and the built-in
 	// template's real disk count (asserted by
 	// TestCloneAtScaleArgsStagedTemplateHasTwoDataVolumes).
@@ -37,13 +36,11 @@ func cloneAtScaleArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRequire
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 		}
-		staged, err := stageTemplate(resultsRoot, strParamOr(tr, "vm_template", ""), twoDiskVMTemplateFile, twoDiskVMTemplate)
-		if err != nil {
-			return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
-		}
 		disks := intParam(tr, "num_disks", cloneAtScaleDefaultDisks)
-		start := intParam(tr, "start", 1)
-		end := intParam(tr, "iteration_clones", 100)
+		start, end, err := cloneAtScaleRange(tr)
+		if err != nil {
+			return nil, err
+		}
 
 		args := clusterArgs(tr)
 		args = append(args, "datasource-clone",
@@ -52,12 +49,14 @@ func cloneAtScaleArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRequire
 			"--vm-name", strParamOr(tr, "vm_name", defaultVMName),
 			"--namespace-prefix", strParamOr(tr, "namespace_prefix", nsPrefix),
 			"--storage-class", sc,
-			"--vm-template", staged,
 			"--num-disks", strconv.Itoa(disks),
 			"--save-results",
 			"--results-folder", resultsRoot,
 			"--cleanup", "--cleanup-on-failure", "--yes",
 		)
+		if path := strParamOr(tr, "vm_template", ""); path != "" {
+			args = append(args, "--vm-template", path)
+		}
 		return args, nil
 	}
 }
