@@ -104,6 +104,16 @@ and need no `templates.go`. Keep upstream-owned templates in their released
 runtime; do not copy them into the harness merely to populate a TR directory.
 User-supplied template paths remain external inputs.
 
+## Kube-burner storage setup
+
+Private StorageClass and StorageProfile setup is owned by the harness and uses
+`manifest.GoTemplate`, independently of kube-burner's native workload rendering.
+Templates live under `templates/TR-VIRT-010/setup/`. They preserve provisioning
+fields and claim defaults while replacing metadata and omitting copied status.
+The created StorageClass name is retained on later failure so cleanup can remove
+it without modifying the backend's original resources. Tests cover preservation,
+omitted defaults, and cleanup after partial failure.
+
 ## Multi-scenario tools = a scenario table
 
 Some tools expose several subcommands, each mapping to a different TR and (often)
