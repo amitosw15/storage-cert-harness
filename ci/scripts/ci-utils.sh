@@ -100,6 +100,25 @@ image_version() {
 
 # Tee stdout/stderr to logs/<name>.log for the rest of the process.
 _ci_log_tee=0
+# Real stdout (terminal or make pipe) before the first tee; reused when switching log files.
+_ci_log_out_fd=""
+
+_ci_log_bind_out_fd() {
+	if [[ -n "${_ci_log_out_fd}" ]]; then
+		return 0
+	fi
+	exec 3>&1
+	_ci_log_out_fd=3
+}
+
+_ci_log_start_tee() {
+	local log="$1"
+	_ci_log_bind_out_fd
+	# Tee must write to the saved fd: after a prior tee, fd 1 is a pipe, not the terminal.
+	exec > >(tee -a "${log}" >&"${_ci_log_out_fd}") 2>&1
+	_ci_log_tee=1
+}
+
 ci_log_init() {
 	local name="$1"
 	local log="${LOG_DIR}/${name}.log"
@@ -109,15 +128,15 @@ ci_log_init() {
 	: >"${log}"
 	# GitLab k8s executor packs artifacts as soon as the script exits and does
 	# not wait for process-substitution tee. Close FDs on EXIT so the log is complete.
-	exec > >(tee -a "${log}") 2>&1
-	_ci_log_tee=1
+	_ci_log_start_tee "${log}"
 	echo "==> ${name}  $(date -u +%Y-%m-%dT%H:%M:%SZ)  sha=$(git_sha)"
 }
 
 _ci_log_flush() {
 	if [[ "${_ci_log_tee:-0}" -eq 1 ]]; then
-		exec 1>&- 2>&- || true
-		sleep 0.2 || true
+		# Do not exec 1>&- (closes tee stdin and can block until the subshell drains).
+		# Replacing stdout ends the prior process-substitution pipeline.
+		exec 1>/dev/null 2>&1
 		_ci_log_tee=0
 	fi
 }
@@ -172,7 +191,86 @@ acquire_local_image_lock() {
 	export LOCAL_IMAGE_LOCK_HELD=1
 }
 
-# Serialize concurrent harness smoke runs (shared log archive + work/report dirs).
+# Resolve work/local-image-ref and confirm the image exists in Podman (stdout = image ref).
+harness_smoke_resolve_local_image() {
+	local ref="${REPO_ROOT}/work/local-image-ref"
+	local image
+	[[ -s "${ref}" ]] || die "work/local-image-ref is missing; run 'make image-build-local' first"
+	image="$(tr -d '[:space:]' < "${ref}")"
+	[[ -n "${image}" ]] || die "work/local-image-ref is empty; run 'make image-build-local' first"
+	command -v podman >/dev/null 2>&1 || die "podman is required"
+	podman image exists "${image}" >/dev/null 2>&1 ||
+		die "local image ${image} is missing (stale work/local-image-ref); run 'make image-build-local' first"
+	echo "${image}"
+}
+
+# Hold local-image.lock through podman run -d (container create), then stream logs.
+harness_smoke_run_podman() {
+	require_cmd flock
+	mkdir -p "${REPO_ROOT}/work"
+	local lock="${REPO_ROOT}/work/local-image.lock"
+	local -a podman_opts=()
+	local -a harness_args=()
+	local arg saw_sep=0
+	for arg in "$@"; do
+		if [[ "${arg}" == "--" ]]; then
+			saw_sep=1
+			continue
+		fi
+		if [[ "${saw_sep}" -eq 0 ]]; then
+			podman_opts+=("${arg}")
+		else
+			harness_args+=("${arg}")
+		fi
+	done
+	[[ "${saw_sep}" -eq 1 ]] || die "harness_smoke_run_podman: expected '--' before harness run arguments"
+	local exit_code=0
+	(
+		exec 200>"${lock}"
+		flock -x 200
+		local image cid logs_pid wait_status inspect_ec
+		image="$(harness_smoke_resolve_local_image)"
+		echo "validation passed: local harness image '${image}' present (image lock held through podman create)"
+		cid="$(podman run -d "${podman_opts[@]}" "${image}" run "${harness_args[@]}")"
+		[[ -n "${cid}" ]] || {
+			echo "error: podman run -d did not return a container id" >&2
+			exit 1
+		}
+		flock -u 200
+		echo "smoke: container ${cid:0:12} started; streaming harness logs"
+		podman logs -f "${cid}" &
+		logs_pid=$!
+		local wait_rc=0
+		local container_exit=""
+		container_exit="$(podman wait "${cid}" 2>/dev/null)" || wait_rc=$?
+		wait "${logs_pid}" 2>/dev/null || true
+		container_exit="${container_exit//$'\r'/}"
+		container_exit="${container_exit//$'\n'/}"
+		if inspect_ec="$(podman inspect -f '{{.State.ExitCode}}' "${cid}" 2>/dev/null)"; then
+			:
+		elif [[ -n "${container_exit}" && "${container_exit}" =~ ^[0-9]+$ ]]; then
+			inspect_ec="${container_exit}"
+		else
+			inspect_ec="${wait_rc}"
+		fi
+		exit "${inspect_ec}"
+	)
+	exit_code=$?
+	return "${exit_code}"
+}
+
+export SMOKE_RUN_LOCK_EXIT_BUSY="${SMOKE_RUN_LOCK_EXIT_BUSY:-3}"
+
+# Exit when another local smoke holds work/smoke-run.lock (distinct from lease busy).
+SMOKE_RUN_LOCK_EXIT_BUSY="${SMOKE_RUN_LOCK_EXIT_BUSY:-3}"
+
+smoke_run_lock_busy() {
+	echo "error: local harness smoke is already running (work/smoke-run.lock is held)" >&2
+	echo "error: wait for the active run to finish before starting another; see logs/run-image-tests.log" >&2
+	exit "${SMOKE_RUN_LOCK_EXIT_BUSY}"
+}
+
+# Serialize concurrent harness smoke runs (shared work/report dirs). Never blocks.
 acquire_smoke_run_lock() {
 	if [[ "${SMOKE_RUN_LOCK_HELD:-}" == "1" ]]; then
 		return 0
@@ -180,8 +278,30 @@ acquire_smoke_run_lock() {
 	require_cmd flock
 	mkdir -p "${REPO_ROOT}/work"
 	exec 8>"${REPO_ROOT}/work/smoke-run.lock"
-	flock -x 8
+	if ! flock -x -n 8; then
+		smoke_run_lock_busy
+	fi
 	export SMOKE_RUN_LOCK_HELD=1
+}
+
+# Preflight logging before a smoke run is committed (lock + lease acquired).
+ci_log_init_temp() {
+	local name="$1"
+	local log="${LOG_DIR}/${name}-temp.log"
+	: >"${log}"
+	_ci_log_start_tee "${log}"
+	echo "==> ${name} (preflight)  $(date -u +%Y-%m-%dT%H:%M:%SZ)  sha=$(git_sha)"
+	echo "smoke hygiene: logging to ${log} until smoke run is committed"
+}
+
+# After lock and cluster lease: archive prior smoke log and tee to logs/run-image-tests.log.
+commit_harness_smoke_run_log() {
+	local name="${1:-run-image-tests}"
+	echo "smoke hygiene: smoke run committed; archiving prior ${name}.log if present"
+	archive_run_image_tests_log
+	# Switch tee target: ci_log_init replaces stdout (ends temp tee) without _ci_log_flush.
+	ci_log_init "${name}"
+	echo "smoke hygiene: preflight details are in ${LOG_DIR}/${name}-temp.log"
 }
 
 # Drop the previous local image pointer, its engine image, and shared dist
@@ -218,6 +338,7 @@ archive_run_image_tests_log() {
 	echo "smoke hygiene: archived previous smoke log"
 }
 
+# Remove run-image-tests log files under logs/ (not other CI job logs).
 # Drop harness smoke work/report trees under work/ (kubeconfig, backends, catalog, image ref kept).
 clean_harness_smoke_artifacts() {
 	local work="${REPO_ROOT}/work"

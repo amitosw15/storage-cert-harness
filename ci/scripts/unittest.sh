@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Unit tests only: go test ./... (package tests and golden-file parser tests).
-# No cluster, no e2e, no live smoke. Offline replay-smoke is ci/replay-smoke.sh.
+# No cluster, no e2e, no live smoke. Offline replay-smoke is ci/scripts/run-harness/replay-smoke.sh.
 set -euo pipefail
 # shellcheck source=ci-utils.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ci-utils.sh"

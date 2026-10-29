@@ -151,7 +151,7 @@ replay-smoke:
   when: manual
   allow_failure: true
   script:
-    - ./ci/scripts/replay-smoke.sh
+    - ./ci/scripts/run-harness/replay-smoke.sh
 
 image-build:
   stage: image

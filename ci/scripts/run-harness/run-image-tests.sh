@@ -2,13 +2,12 @@
 # Run the harness smoke plan after validating the local cluster and backend.
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "${repo_root}"
-# shellcheck source=ci-utils.sh
-source "${repo_root}/ci/scripts/ci-utils.sh"
+_run_harness_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../ci-utils.sh
+source "${_run_harness_dir}/../ci-utils.sh"
+repo_root="${REPO_ROOT}"
 acquire_smoke_run_lock
-archive_run_image_tests_log
-ci_log_init "run-image-tests"
+ci_log_init_temp "run-image-tests"
 
 command -v podman >/dev/null 2>&1 || {
 	echo "error: podman is required" >&2
@@ -96,6 +95,8 @@ oc "${oc_args[@]}" whoami --show-server >/dev/null || {
 }
 echo "validation passed: cluster is reachable"
 
+commit_harness_smoke_run_log "run-image-tests"
+
 if ! nodes="$(oc "${oc_args[@]}" get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}')"; then
 	echo "error: unable to read cluster nodes" >&2
 	exit 1
@@ -142,21 +143,12 @@ fi
 mkdir -p work/harness-smoke-work work/harness-smoke-report
 echo "validation passed: harness smoke work directories ready"
 
-image="$(tr -d '[:space:]' < work/local-image-ref)"
-[[ -n "${image}" ]] || {
-	echo "error: work/local-image-ref is empty; run 'make image-build-local' first" >&2
-	exit 1
-}
-podman image exists "${image}" >/dev/null 2>&1 || {
-	echo "error: local image ${image} is missing (stale work/local-image-ref); run 'make image-build-local' first" >&2
-	exit 1
-}
 arch="${GOARCH:-$(uname -m)}"
 case "${arch}" in
 	x86_64) arch=amd64 ;;
 	aarch64) arch=arm64 ;;
 esac
-podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" --network=host \
+harness_smoke_run_podman --rm --userns=keep-id --user "$(id -u):$(id -g)" --network=host \
 	--platform "linux/${arch}" \
 	-v "${repo_root}/work:/work:Z" \
 	-v "${repo_root}/plans:/plans:ro,Z" \
@@ -164,7 +156,7 @@ podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" --network=host \
 	-w /work \
 	-e KUBECONFIG=/work/kubeconfig \
 	-e KUBECTL_INSECURE_SKIP_TLS_VERIFY="${KUBECTL_INSECURE_SKIP_TLS_VERIFY:-false}" \
-	"${image}" run \
+	-- \
 	--catalog /work/catalog.json \
 	--thresholds /work/harness-run-thresholds.json \
 	--plan /plans/harness-smoke-plan.yaml \

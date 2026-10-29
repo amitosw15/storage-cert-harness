@@ -67,11 +67,13 @@ install-tools:
 	./ci/scripts/install-tools.sh
 
 # Intentionally a no-op: plans/example-smoke.yaml is not shipped in this repo.
-# Offline replay smoke runs via ./ci/scripts/ci.sh (which calls replay-smoke.sh
-# directly) or GitHub Actions when vars.CI_RUN_REPLAY_SMOKE=true.
-# the hosted runner and secrets to access the test cluster are not available.
+# Harness run scripts live under ci/scripts/run-harness/ (see Makefile there).
+RUN_HARNESS_MK := ci/scripts/run-harness/Makefile
+
+# Intentionally a no-op at root: plans/example-smoke.yaml is not shipped in this repo.
+# Offline replay: make ci, or make -f $(RUN_HARNESS_MK) replay-smoke.
 replay-smoke:
-	@echo "replay-smoke skipped by design (use ./ci/scripts/replay-smoke.sh or make ci)"
+	@echo "replay-smoke skipped by design (use make ci or: make -f $(RUN_HARNESS_MK) replay-smoke)"
 
 secret-scan:
 	./ci/scripts/secret-scan.sh
@@ -98,12 +100,14 @@ image-build-local:
 
 # Run the live harness smoke plan; override KUBECONFIG to use another kubeconfig.
 run-harness-smoke:
-	./ci/scripts/run-image-tests.sh "$(or $(KUBECONFIG),work/kubeconfig)"
+	$(MAKE) --no-print-directory -f $(RUN_HARNESS_MK) run-harness-smoke \
+		KUBECONFIG="$(or $(KUBECONFIG),work/kubeconfig)"
 
 # Pull and run the published Quay image; override VERSION and KUBECONFIG as needed.
 # Example: make run-quay-image-tests VERSION=1.0.0
 run-quay-image-tests:
-	./ci/scripts/run-quay-image-tests.sh "$(or $(VERSION),latest)" "$(or $(KUBECONFIG),work/kubeconfig)"
+	$(MAKE) --no-print-directory -f $(RUN_HARNESS_MK) run-quay-image-tests \
+		VERSION="$(or $(VERSION),latest)" KUBECONFIG="$(or $(KUBECONFIG),work/kubeconfig)"
 
 # Partner certification against the published image (no local build).
 # Example:

@@ -13,7 +13,7 @@ fi
 
 make -C "${REPO_ROOT}" --no-print-directory lint
 make -C "${REPO_ROOT}" --no-print-directory test
-"${CI_SCRIPTS_DIR}/replay-smoke.sh"
+"${CI_SCRIPTS_DIR}/run-harness/replay-smoke.sh"
 
 if [[ "${with_image}" -eq 1 ]]; then
 	"${CI_SCRIPTS_DIR}/image-build.sh"

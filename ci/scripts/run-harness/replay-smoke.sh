@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Offline CLI smoke: example tool + fake thresholds. No cluster.
 set -euo pipefail
-# shellcheck source=ci-utils.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ci-utils.sh"
+_run_harness_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../ci-utils.sh
+source "${_run_harness_dir}/../ci-utils.sh"
 ci_log_init "replay-smoke"
 
 "${CI_SCRIPTS_DIR}/build.sh"
