@@ -169,6 +169,33 @@ directories. Template tests validate every owned template after rendering;
 renderer and adapter tests cover failure cases and the execution boundary.
 Replay runs do not render manifests or access the cluster.
 
+### Virtbench DataSource selection
+
+Set `datasource: images/my-image` in a TR's plan parameters or variant. A bare
+name uses `openshift-virtualization-os-images`. The ordinary catalog/plan/variant
+parameter resolution applies; there is no separate global flag.
+
+`selected-vm.yaml` changes only DataSource `sourceRef` entries. Without a
+selection, existing image sources remain intact. An explicit selection fails
+if the template has no DataSource reference. Blank disks, cloud-init, unrelated
+VM fields, and custom storage settings are preserved. Default templates omit
+`volumeMode` so CDI can use the StorageProfile; their access modes remain explicit.
+
+Live preflight checks DataSource `Ready=True` and a Bound backing PVC or a
+readyToUse backing snapshot. An unqualified template `sourceRef` is resolved in
+each receiving workload namespace, using the same scenario range as execution.
+A backing source without a namespace inherits the DataSource namespace. For
+snapshot clones, selection happens before source resolution; local DataSources
+must resolve to a common backing source, or the plan must choose an explicit
+`namespace/name`. Preflight reads sources without modifying them, and replay
+performs no source lookup. These behaviors incorporate PR #155 through the
+renderer rather than its placeholder masking and YAML-node edits.
+
+Each ordinary CLI provisioning path writes one private rendered VM file. Drain
+uses that same preparation path. Snapshot conversion produces its final file
+once, and execution validates and reuses it. Failure recovery renders each VM
+with its namespace and placement values before applying it.
+
 ### Migration inventory
 
 The runtime manifest audit covers all registered tools and their provisioning,

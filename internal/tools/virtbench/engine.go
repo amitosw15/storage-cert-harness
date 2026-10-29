@@ -99,6 +99,16 @@ func (p preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, tr
 		}
 	}
 	for _, tr := range trs {
+		if dir == "" {
+			refs, err := datasourcePreflight(ctx, rc, tr)
+			if err != nil {
+				findings = append(findings, core.Finding{Level: "error", Message: tr.ID + " datasource: " + err.Error()})
+			} else {
+				for _, ref := range refs {
+					findings = append(findings, core.Finding{Level: "info", Message: fmt.Sprintf("%s datasource=%s/%s", tr.ID, ref.Namespace, ref.Name)})
+				}
+			}
+		}
 
 		if dir == "" && usesSnapshot(tr) && strings.HasPrefix(p.sc.AutomationTool, "virtbench datasource-clone") {
 			clone, err := snapshotClonePreflight(ctx, rc, tr)
@@ -216,14 +226,13 @@ func (r runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []c
 		if err != nil {
 			return stages.RunHandle{}, fmt.Errorf("prepare snapshot clone: %w", err)
 		}
-		prepared = true
 		args = setArgument(args, "--vm-template", path)
+		prepared = true
 		if rc.RecordStorageSelection != nil {
 			rc.RecordStorageSelection(core.StorageSelection{TR: trs[0].ID, Variant: trs[0].Variant, StorageClass: clone.Selection.StorageClass, SnapshotClass: clone.Selection.SnapshotClass})
 		}
 	}
 	rc.Logger.Info("virtbench: exec", "cmd", binary, "args", args, "dir", root)
-
 	if err := execVirtbench(ctx, rc, manifestRequest{Directory: root, Args: args, TR: trs[0], Prepared: prepared}); err != nil {
 		// drain-nodes exits 1 on a timeout — a gradeable FAIL, not a crash. Keep
 		// going to Collect/Parse so the log is still scored (decisions/0013).

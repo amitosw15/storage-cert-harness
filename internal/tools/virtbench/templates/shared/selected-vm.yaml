@@ -1,0 +1,29 @@
+{{ omit .VM "spec" | toYaml }}
+spec:
+  {{ with omit .VM.spec "dataVolumeTemplates" }}{{ . | toYaml | nindent 2 }}{{ end }}
+  dataVolumeTemplates:
+    {{ range $volume := .VM.spec.dataVolumeTemplates }}
+    - {{ with omit $volume "spec" }}{{ . | toYaml | nindent 6 }}{{ end }}
+      spec:
+        {{ with omit $volume.spec "sourceRef" "storage" "pvc" }}{{ . | toYaml | nindent 8 }}{{ end }}
+        {{ with get $volume.spec "sourceRef" }}
+        sourceRef:
+          {{ if and $.DATASOURCE.Name (eq (get . "kind") "DataSource") }}
+          {{ omit . "name" "namespace" | toYaml | nindent 10 }}
+          name: {{ $.DATASOURCE.Name | quote }}
+          namespace: {{ $.DATASOURCE.Namespace | quote }}
+          {{ else }}
+          {{ . | toYaml | nindent 10 }}
+          {{ end }}
+        {{ end }}
+        {{ range $key := list "storage" "pvc" }}
+        {{ if hasKey $volume.spec $key }}
+        {{ $key }}:
+          {{ if $.DEFAULTS }}
+          {{ omit (get $volume.spec $key) "volumeMode" | toYaml | nindent 10 }}
+          {{ else }}
+          {{ get $volume.spec $key | toYaml | nindent 10 }}
+          {{ end }}
+        {{ end }}
+        {{ end }}
+    {{ end }}
