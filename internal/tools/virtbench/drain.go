@@ -107,7 +107,7 @@ func drainProvision(ctx context.Context, rc *core.RunCtx, _ *core.Bag, tr core.T
 		return err
 	}
 	rc.Logger.Info("virtbench: drain: cloning VMs onto target", "node", target, "args", args)
-	if err := execVirtbench(ctx, rc, resultsRoot, args); err != nil {
+	if err := execVirtbench(ctx, rc, manifestRequest{Directory: resultsRoot, Args: args, TR: tr}); err != nil {
 		return fmt.Errorf("virtbench: drain: clone VMs: %w", err)
 	}
 	return nil

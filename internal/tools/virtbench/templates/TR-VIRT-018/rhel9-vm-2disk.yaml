@@ -1,13 +1,13 @@
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: rhel-9-vm
+  name: {{ .VM_NAME | quote }}
   labels:
     app: kubevirt-perf-test
 spec:
   dataVolumeTemplates:
     - metadata:
-        name: rhel-9-vm-volume
+        name: {{ printf "%s-volume" .VM_NAME | quote }}
       spec:
         sourceRef:
           kind: DataSource
@@ -19,10 +19,10 @@ spec:
           resources:
             requests:
               storage: 30Gi
-          storageClassName: {{STORAGE_CLASS_NAME}}
+          storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
           volumeMode: Block
     - metadata:
-        name: rhel-9-vm-data
+        name: {{ printf "%s-data" .VM_NAME | quote }}
       spec:
         source:
           blank: {}
@@ -32,7 +32,7 @@ spec:
           resources:
             requests:
               storage: 10Gi
-          storageClassName: {{STORAGE_CLASS_NAME}}
+          storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
           volumeMode: Block
   runStrategy: Always
   template:
@@ -79,10 +79,10 @@ spec:
       volumes:
         - name: rootdisk
           dataVolume:
-            name: rhel-9-vm-volume
+            name: {{ printf "%s-volume" .VM_NAME | quote }}
         - name: datadisk
           dataVolume:
-            name: rhel-9-vm-data
+            name: {{ printf "%s-data" .VM_NAME | quote }}
         - name: cloudinitdisk
           cloudInitNoCloud:
             userData: |

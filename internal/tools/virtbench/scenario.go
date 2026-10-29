@@ -16,6 +16,8 @@ import (
 // here; everything that is the same lives in the engine. Adding a scenario is a
 // new row in scenarios below — no engine edits (decisions/0008).
 type Scenario struct {
+	VMRange  func(core.TestRequirement) (int, int, error)
+	Template vmTemplateConfig
 	// AutomationTool is the KB automation_tool string verbatim; it is the registry
 	// key so orchestrator's registry.Get(tr.AutomationTool) resolves this scenario.
 	AutomationTool string
@@ -113,103 +115,124 @@ const (
 )
 
 // scenarios is the registry-of-scenarios. Each becomes one ToolIntegration.
-var scenarios = []Scenario{
-	{
-		AutomationTool: "virtbench datasource-clone",
-		ProvidesTR:     "TR-VIRT-002",
-		ResultFile:     SummaryFileName,
-		NSPrefix:       "virtbench",
-		BuildArgs:      datasourceCloneArgs(false, "virtbench"),
-		Parse:          ParseSummary,
-		// all SLAs (clone_duration / time_to_running / time_to_ping) are measured.
-	},
-	{
-		AutomationTool: "virtbench datasource-clone --boot-storm",
-		ProvidesTR:     "TR-VIRT-001",
-		ResultFile:     BootStormFileName,
-		NSPrefix:       "virtbench",
-		BuildArgs:      datasourceCloneArgs(true, "virtbench"),
-		Parse:          ParseBootStorm,
-	},
-	{
-		AutomationTool: "virtbench disk-ops",
-		ProvidesTR:     "TR-STOR-001",
-		ResultFile:     DiskOpsFileName,
-		NSPrefix:       "disk-ops",
-		BuildArgs:      diskOpsArgs("disk-ops"),
-		Parse:          ParseDiskOps,
-	},
-	{
-		// VDI Ready badge (TR-VIRT-018): clone VMs at scale with 2 disks each.
-		// Same datasource-clone parser as TR-VIRT-002, but its own BuildArgs
-		// (clone_at_scale.go): virtbench's --num-disks flag only labels output,
-		// it never adds a disk, so a real 2-disk template is embedded by
-		// default; a plan may swap in its own vm_template/num_disks, validated
-		// against each other (cloneAtScaleValidate). Only gate: clone_duration.
-		AutomationTool: "virtbench datasource-clone --num-disks 2",
-		ProvidesTR:     "TR-VIRT-018",
-		ResultFile:     SummaryFileName,
-		NSPrefix:       "virtbench",
-		BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
-			return cloneAtScaleArgs("virtbench")(rc, tr, resultsRoot)
+var scenarios []Scenario
+
+func configureScenarios() {
+	scenarios = []Scenario{
+		{
+			AutomationTool: "virtbench datasource-clone",
+			ProvidesTR:     "TR-VIRT-002",
+			VMRange:        cloneVMRange,
+			Template:       vmTemplateConfig{Upstream: "examples/vm-templates/rhel9-vm-datasource.yaml"},
+			ResultFile:     SummaryFileName,
+			NSPrefix:       "virtbench",
+			BuildArgs:      datasourceCloneArgs(false, "virtbench"),
+			Parse:          ParseSummary,
+			// all SLAs (clone_duration / time_to_running / time_to_ping) are measured.
 		},
-		Parse:    ParseSummary,
-		Validate: cloneAtScaleValidate,
-		// TR-018's gate is p99 clone provisioning; compute it from the per-VM
-		// samples (the summary carries only avg/max/min).
-		DetailFile:  DetailCloneFileName,
-		DetailParse: func(data []byte) ([]core.Metric, error) { return ClonePercentiles(data, []string{"p99"}) },
-	},
-	{
-		AutomationTool:   "virtbench vm-ops drain-nodes",
-		ProvidesTR:       "TR-VIRT-008",
-		ResultFile:       DrainFileName,
-		NSPrefix:         drainNSPrefix,
-		BuildArgs:        drainArgs,
-		Parse:            ParseDrain,
-		Preflight:        drainPreflight,
-		Provision:        drainProvision,
-		Teardown:         drainTeardown,
-		TolerateRunError: true, // drain-nodes exits 1 on timeout; grade the FAIL from the log
-	},
-	{
-		AutomationTool: "virtbench fio",
-		ProvidesTR:     "TR-STOR-002",
-		ResultFile:     FIOFileName,
-		NSPrefix:       "fio-latency",
-		BuildArgs:      fioArgs("fio-latency"),
-		Run:            runFIO,
-		Parse:          ParseFIO,
-		Collect:        collectFIOResults,
-		CommandCheck:   []string{"fio", "--help"},
-		Validate:       fioValidate,
-	},
-	{
-		AutomationTool: "virtbench datasource-clone --single-node",
-		ProvidesTR:     "TR-VIRT-013",
-		ResultFile:     SummaryFileName,
-		NSPrefix:       singleNodeNSPrefix,
-		BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
-			return singleNodeCeilingArgs(singleNodeNSPrefix)(rc, tr, resultsRoot)
+		{
+			AutomationTool: "virtbench datasource-clone --boot-storm",
+			ProvidesTR:     "TR-VIRT-001",
+			VMRange:        cloneVMRange,
+			Template:       vmTemplateConfig{Upstream: "examples/vm-templates/rhel9-vm-datasource.yaml"},
+			ResultFile:     BootStormFileName,
+			NSPrefix:       "virtbench",
+			BuildArgs:      datasourceCloneArgs(true, "virtbench"),
+			Parse:          ParseBootStorm,
 		},
-		Parse:            ParseSingleNodeCeiling,
-		Preflight:        singleNodeCeilingPreflight,
-		Validate:         singleNodeCeilingValidate,
-		DeriveMetrics:    singleNodeLunMetric,
-		TolerateRunError: true, // virtbench exits 1 whenever any VM failed — expected here (singlenode.go)
-	},
-	{
-		// HA badge (TR-VIRT-007): create VMs on the target node with node affinity,
-		// then monitor them recovering after a node failure.
-		AutomationTool: "virtbench failure-recovery",
-		ProvidesTR:     "TR-VIRT-007",
-		ResultFile:     FailureRecoveryFileName,
-		NSPrefix:       "failure-recovery",
-		BuildArgs:      failureRecoveryArgs("failure-recovery"),
-		Parse:          ParseFailureRecovery,
-		Validate:       failureRecoveryValidate,
-		ProvisionVMs:   provisionFailureRecoveryVMs,
-	},
+		{
+			AutomationTool: "virtbench disk-ops",
+			ProvidesTR:     "TR-STOR-001",
+			VMRange:        diskOpsVMRange,
+			Template:       vmTemplateConfig{Upstream: "disk-ops-benchmark/vm-template.yaml"},
+			ResultFile:     DiskOpsFileName,
+			NSPrefix:       "disk-ops",
+			BuildArgs:      diskOpsArgs("disk-ops"),
+			Parse:          ParseDiskOps,
+		},
+		{
+			// VDI Ready badge (TR-VIRT-018): clone VMs at scale with 2 disks each.
+			// Same datasource-clone parser as TR-VIRT-002, but its own BuildArgs
+			// (clone_at_scale.go): virtbench's --num-disks flag only labels output,
+			// it never adds a disk, so a real 2-disk template is embedded by
+			// default; a plan may swap in its own vm_template/num_disks, validated
+			// against each other (cloneAtScaleValidate). Only gate: clone_duration.
+			AutomationTool: "virtbench datasource-clone --num-disks 2",
+			ProvidesTR:     "TR-VIRT-018",
+			VMRange:        cloneAtScaleRange,
+			Template:       vmTemplateConfig{Source: twoDiskVMTemplate},
+			ResultFile:     SummaryFileName,
+			NSPrefix:       "virtbench",
+			BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+				return cloneAtScaleArgs("virtbench")(rc, tr, resultsRoot)
+			},
+			Parse:    ParseSummary,
+			Validate: cloneAtScaleValidate,
+			// TR-018's gate is p99 clone provisioning; compute it from the per-VM
+			// samples (the summary carries only avg/max/min).
+			DetailFile:  DetailCloneFileName,
+			DetailParse: func(data []byte) ([]core.Metric, error) { return ClonePercentiles(data, []string{"p99"}) },
+		},
+		{
+			AutomationTool:   "virtbench vm-ops drain-nodes",
+			ProvidesTR:       "TR-VIRT-008",
+			VMRange:          drainVMRange,
+			Template:         vmTemplateConfig{Source: drainVMTemplate},
+			ResultFile:       DrainFileName,
+			NSPrefix:         drainNSPrefix,
+			BuildArgs:        drainArgs,
+			Parse:            ParseDrain,
+			Preflight:        drainPreflight,
+			Provision:        drainProvision,
+			Teardown:         drainTeardown,
+			TolerateRunError: true, // drain-nodes exits 1 on timeout; grade the FAIL from the log
+		},
+		{
+			AutomationTool: "virtbench fio",
+			ProvidesTR:     "TR-STOR-002",
+			VMRange:        fioVMRange,
+			Template:       vmTemplateConfig{Param: "fio_vm_template", Source: fioVMTemplate},
+			ResultFile:     FIOFileName,
+			NSPrefix:       "fio-latency",
+			BuildArgs:      fioArgs("fio-latency"),
+			Run:            runFIO,
+			Parse:          ParseFIO,
+			Collect:        collectFIOResults,
+			CommandCheck:   []string{"fio", "--help"},
+			Validate:       fioValidate,
+		},
+		{
+			AutomationTool: "virtbench datasource-clone --single-node",
+			ProvidesTR:     "TR-VIRT-013",
+			VMRange:        singleNodeVMRange,
+			Template:       vmTemplateConfig{Upstream: "examples/vm-templates/rhel9-vm-datasource.yaml"},
+			ResultFile:     SummaryFileName,
+			NSPrefix:       singleNodeNSPrefix,
+			BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+				return singleNodeCeilingArgs(singleNodeNSPrefix)(rc, tr, resultsRoot)
+			},
+			Parse:            ParseSingleNodeCeiling,
+			Preflight:        singleNodeCeilingPreflight,
+			Validate:         singleNodeCeilingValidate,
+			DeriveMetrics:    singleNodeLunMetric,
+			TolerateRunError: true, // virtbench exits 1 whenever any VM failed — expected here (singlenode.go)
+		},
+		{
+			// HA badge (TR-VIRT-007): create VMs on the target node with node affinity,
+			// then monitor them recovering after a node failure.
+			AutomationTool: "virtbench failure-recovery",
+			ProvidesTR:     "TR-VIRT-007",
+			VMRange:        recoveryVMRange,
+			Template:       vmTemplateConfig{Source: failureRecoveryVMTemplate},
+			ResultFile:     FailureRecoveryFileName,
+			NSPrefix:       "failure-recovery",
+			BuildArgs:      failureRecoveryArgs("failure-recovery"),
+			Parse:          ParseFailureRecovery,
+			Validate:       failureRecoveryValidate,
+			ProvisionVMs:   provisionFailureRecoveryVMs,
+		},
+	}
+
 }
 
 // setupGroup is the shared-setup group key every virtbench scenario belongs to.
@@ -218,6 +241,7 @@ var scenarios = []Scenario{
 const setupGroup = "virtbench"
 
 func init() {
+	configureScenarios()
 	registry.RegisterSetup(sharedSSHSetup)
 	for _, sc := range scenarios {
 		registry.Register(stages.ToolIntegration{
@@ -289,4 +313,57 @@ func vmCount(res core.TestResult, name string) int {
 		}
 	}
 	return 0
+}
+
+func validateVMRange(tr core.TestRequirement, start, end int) (int, int, error) {
+	if start < 1 || end < start {
+		return 0, 0, fmt.Errorf("%s: invalid VM namespace range %d..%d", tr.ID, start, end)
+	}
+	return start, end, nil
+}
+
+// vmTemplateConfig describes the template owned by a workload and its custom override.
+type vmTemplateConfig struct {
+	Param    string
+	Source   string
+	Upstream string
+}
+
+func scenarioFor(tr core.TestRequirement) (Scenario, bool) {
+	for _, sc := range scenarios {
+		if sc.ProvidesTR == tr.ID {
+			return sc, true
+		}
+	}
+	return Scenario{}, false
+}
+
+func cloneVMRange(tr core.TestRequirement) (int, int, error) {
+	start := intParam(tr, "start", 1)
+	end := intParam(tr, "num_vms", intParam(tr, "iteration_clones", 100))
+	return validateVMRange(tr, start, end)
+}
+
+func diskOpsVMRange(tr core.TestRequirement) (int, int, error) {
+	start := intParam(tr, "start", 1)
+	end := intParam(tr, "end", intParam(tr, "count", 100))
+	return validateVMRange(tr, start, end)
+}
+
+func cloneAtScaleRange(tr core.TestRequirement) (int, int, error) {
+	return validateVMRange(tr, intParam(tr, "start", 1), intParam(tr, "iteration_clones", 100))
+}
+
+func drainVMRange(tr core.TestRequirement) (int, int, error) {
+	start := intParam(tr, "start", 1)
+	end := intParam(tr, "end", intParam(tr, "count", drainDefaultCount))
+	return validateVMRange(tr, start, end)
+}
+
+func recoveryVMRange(tr core.TestRequirement) (int, int, error) {
+	return validateVMRange(tr, 1, intParam(tr, "vm_count", 3))
+}
+
+func singleNodeVMRange(tr core.TestRequirement) (int, int, error) {
+	return validateVMRange(tr, intParam(tr, "start", 1), intParam(tr, "attempt_vms", singleNodeDefaultCount))
 }

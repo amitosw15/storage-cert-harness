@@ -25,11 +25,15 @@ func TestCloneAtScaleArgsDefaultsToEmbeddedTemplate(t *testing.T) {
 		t.Fatalf("cloneAtScaleArgs: %v", err)
 	}
 
+	args, err = prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args, TR: tr})
+	if err != nil {
+		t.Fatal(err)
+	}
 	staged, disks := findTemplateAndDisks(t, args)
 	if disks != "2" {
 		t.Errorf("--num-disks = %q, want 2", disks)
 	}
-	if filepath.Dir(staged) != root || filepath.Base(staged) != twoDiskVMTemplateFile {
+	if filepath.Dir(staged) != filepath.Join(root, "rendered") || filepath.Base(staged) != "datasource-clone-vm.yaml" {
 		t.Errorf("staged template = %q, want the embedded default inside %q", staged, root)
 	}
 }
@@ -48,11 +52,15 @@ func TestCloneAtScaleArgsUsesPlanTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cloneAtScaleArgs: %v", err)
 	}
+	args, err = prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args, TR: tr})
+	if err != nil {
+		t.Fatal(err)
+	}
 	staged, disks := findTemplateAndDisks(t, args)
 	if disks != "3" {
 		t.Errorf("--num-disks = %q, want 3", disks)
 	}
-	if filepath.Dir(staged) != root {
+	if filepath.Dir(staged) != filepath.Join(root, "rendered") {
 		t.Errorf("template staged at %q, want inside results root %q", staged, root)
 	}
 	if _, err := os.Stat(staged); err != nil {
@@ -86,22 +94,25 @@ func TestCloneAtScaleArgsStagedTemplateHasTwoDataVolumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cloneAtScaleArgs: %v", err)
 	}
+	args, err = prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args, TR: tr})
+	if err != nil {
+		t.Fatal(err)
+	}
 	staged, _ := findTemplateAndDisks(t, args)
 	data, err := os.ReadFile(staged)
 	if err != nil {
 		t.Fatalf("read staged template: %v", err)
 	}
-	// virtbench substitutes {{STORAGE_CLASS_NAME}} at run time; unresolved, it
-	// isn't valid YAML, so neutralize it before parsing (this test runs before
-	// virtbench ever touches the file).
-	clean := strings.ReplaceAll(string(data), "{{STORAGE_CLASS_NAME}}", "placeholder-sc")
+	if strings.Contains(string(data), "{{") {
+		t.Fatal("unresolved template")
+	}
 
 	var doc struct {
 		Spec struct {
 			DataVolumeTemplates []map[string]any `yaml:"dataVolumeTemplates"`
 		} `yaml:"spec"`
 	}
-	if err := yaml.Unmarshal([]byte(clean), &doc); err != nil {
+	if err := yaml.Unmarshal(data, &doc); err != nil {
 		t.Fatalf("parse staged template: %v", err)
 	}
 	if got := len(doc.Spec.DataVolumeTemplates); got != 2 {

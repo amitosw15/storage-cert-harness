@@ -557,17 +557,19 @@ func TestBuildArgsFIO(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build args with embedded template: %v", err)
 	}
-	staged := filepath.Join(defaultResultsDir, fioVMTemplateFile)
-	data, err := os.ReadFile(staged)
+	if entries, err := os.ReadDir(defaultResultsDir); err != nil || len(entries) != 0 {
+		t.Fatalf("argument builder wrote intermediate manifests: %v %v", entries, err)
+	}
+	got, err = prepareManifest(t.Context(), manifestRequest{Directory: defaultResultsDir, Args: got, TR: defaultTR})
 	if err != nil {
-		t.Fatalf("read staged embedded template: %v", err)
+		t.Fatal(err)
 	}
-	if string(data) != fioVMTemplate {
-		t.Fatal("staged embedded template differs from the compiled template")
+	staged, _ := argument(got, "--vm-template")
+	data, err := os.ReadFile(staged)
+	if err != nil || strings.Contains(string(data), "{{") || !strings.Contains(string(data), "ocs-storagecluster-ceph-rbd") {
+		t.Fatalf("invalid prepared FIO template: %s %v", data, err)
 	}
-	if !strings.Contains(strings.Join(got, " "), "--vm-template "+staged) {
-		t.Fatalf("FIO args do not use staged embedded template: %v", got)
-	}
+
 }
 
 func TestFIOActionArgs(t *testing.T) {
@@ -1110,7 +1112,7 @@ func TestStageTemplateRejectsSymlinkEscape(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if _, err := stageTemplate(resultsDir, template); err == nil {
-		t.Fatal("stageTemplate accepted a symlink escaping the source directory")
+	if _, err := prepareManifest(t.Context(), manifestRequest{Directory: resultsDir, Args: []string{"datasource-clone", "--storage-class", "test", "--vm-template", template}}); err == nil {
+		t.Fatal("prepareManifest accepted a symlink escaping the source directory")
 	}
 }

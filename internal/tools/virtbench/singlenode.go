@@ -11,15 +11,13 @@ package virtbench
 import (
 	"context"
 	"fmt"
-	"io"
-	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
 const (
@@ -41,8 +39,10 @@ func singleNodeCeilingArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRe
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 		}
-		start := intParam(tr, "start", 1)
-		end := intParam(tr, "attempt_vms", singleNodeDefaultCount)
+		start, end, err := singleNodeVMRange(tr)
+		if err != nil {
+			return nil, err
+		}
 
 		args := clusterArgs(tr)
 		args = append(args, "datasource-clone",
@@ -59,11 +59,7 @@ func singleNodeCeilingArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRe
 			args = append(args, "--node-name", node)
 		}
 		if tmpl := strParamOr(tr, "vm_template", ""); tmpl != "" {
-			staged, err := stageTemplate(resultsRoot, tmpl)
-			if err != nil {
-				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
-			}
-			args = append(args, "--vm-template", staged)
+			args = append(args, "--vm-template", tmpl)
 		}
 		if driver := strParamOr(tr, "storage_driver", ""); driver != "" {
 			args = append(args, "--storage-driver", driver)
@@ -106,7 +102,7 @@ func singleNodeCeilingValidate(tr core.TestRequirement) error {
 		}
 		return nil
 	}
-	got, err := templateDiskCount(tmpl)
+	got, err := templateDiskCount(tmpl, tr)
 	if err != nil {
 		return fmt.Errorf("virtbench: %s: cannot count disks in vm_template %q: %w", tr.ID, tmpl, err)
 	}
@@ -116,50 +112,64 @@ func singleNodeCeilingValidate(tr core.TestRequirement) error {
 	return nil
 }
 
-// templateDiskCount returns the number of non-cloud-init volumes in a VM
-// template, matching virtbench's own detect_disk_count_from_template
-// (datasource-clone): it counts spec.template.spec.volumes, excluding
-// cloud-init. The {{STORAGE_CLASS_NAME}} placeholder is neutralized before
-// parsing (virtbench substitutes it at run time; unresolved, it is not valid
-// YAML).
-func templateDiskCount(path string) (int, error) {
-	data, err := os.ReadFile(path) // #nosec G304 -- path is an operator-provided plan param, read-only.
+// templateDiskCount renders a template before counting its non-cloud-init volumes.
+func templateDiskCount(path string, tr core.TestRequirement) (int, error) {
+	data, err := safefs.ReadFile(path)
 	if err != nil {
 		return 0, err
 	}
-	clean := strings.ReplaceAll(string(data), "{{STORAGE_CLASS_NAME}}", "placeholder-sc")
+	values, err := resolvePlanTemplateValues("datasource-clone", nil, tr)
+	if err != nil {
+		return 0, err
+	}
+	clean, err := manifest.Render(vmRenderer, filepath.Base(path), data, values)
+	if err != nil {
+		return 0, err
+	}
 
-	dec := yaml.NewDecoder(strings.NewReader(clean))
-	for {
-		var doc struct {
-			Kind string `yaml:"kind"`
-			Spec struct {
-				Template struct {
-					Spec struct {
-						Volumes []map[string]any `yaml:"volumes"`
-					} `yaml:"spec"`
-				} `yaml:"template"`
-			} `yaml:"spec"`
-		}
-		err := dec.Decode(&doc)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return 0, err
-		}
-		if doc.Kind != "VirtualMachine" {
+	return manifestDiskCount(clean)
+}
+
+func manifestDiskCount(data []byte) (int, error) {
+	documents, err := manifest.Documents(data)
+	if err != nil {
+		return 0, err
+	}
+	for _, object := range documents {
+		if object["kind"] != "VirtualMachine" {
 			continue
 		}
-		n := 0
-		for _, v := range doc.Spec.Template.Spec.Volumes {
-			_, cloudNoCloud := v["cloudInitNoCloud"]
-			_, cloudConfig := v["cloudInitConfigDrive"]
-			if !cloudNoCloud && !cloudConfig {
-				n++
+		for _, field := range []string{"spec", "template", "spec"} {
+			value := object[field]
+			if value == nil {
+				return 0, nil
+			}
+			var ok bool
+			object, ok = value.(map[string]any)
+			if !ok {
+				return 0, fmt.Errorf("VM %s must be a mapping", field)
 			}
 		}
-		return n, nil
+		if object["volumes"] == nil {
+			return 0, nil
+		}
+		volumes, ok := object["volumes"].([]any)
+		if !ok {
+			return 0, fmt.Errorf("VM volumes must be a list")
+		}
+		count := 0
+		for _, item := range volumes {
+			volume, ok := item.(map[string]any)
+			if !ok {
+				return 0, fmt.Errorf("VM volume must be a mapping")
+			}
+			_, noCloud := volume["cloudInitNoCloud"]
+			_, configDrive := volume["cloudInitConfigDrive"]
+			if !noCloud && !configDrive {
+				count++
+			}
+		}
+		return count, nil
 	}
 	return 0, fmt.Errorf("no VirtualMachine document found")
 }

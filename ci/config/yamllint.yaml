@@ -6,6 +6,7 @@ ignore: |
   dist/
   work/
   .git/
+  internal/tools/virtbench/templates/
 
 rules:
   document-start: disable
