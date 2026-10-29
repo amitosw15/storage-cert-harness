@@ -10,16 +10,10 @@ import (
 func init() {
 	provides := []string{"TR-STOR-006", "TR-VIRT-004", "TR-VIRT-019"}
 
-	// TRs with no KB SLA bars grade on native pass/fail alone. TRs with real SLAs
-	// (e.g. TR-VIRT-004's total_migration_duration) fall through to the built-in
-	// grader by having no custom evaluator here.
-	nativeOnly := map[string]bool{"TR-STOR-006": true}
 	evals := map[string]stages.Evaluator{}
 	for _, id := range provides {
-		if nativeOnly[id] {
-			evals[id] = grader.NativeOrGraded("native:jobs_passed",
-				"SLA bars to-be-validated (KB sla: []); native = all kube-burner-ocp jobs passed")
-		}
+		evals[id] = grader.NativeOrGraded("native:jobs_passed",
+			"native execution requires successful process exit and passing job summaries without execution errors")
 	}
 	evals["TR-VIRT-019"] = virtParallelEvaluator{}
 	registry.Register(stages.ToolIntegration{

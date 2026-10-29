@@ -183,7 +183,7 @@ func readLifecycleSamples(data map[string][]byte, job, metric, uuid string) ([]l
 
 type virtParallelEvaluator struct{}
 
-func (virtParallelEvaluator) Evaluate(_ context.Context, tr core.TestRequirement, res core.TestResult) ([]core.Verdict, error) {
+func (virtParallelEvaluator) Evaluate(ctx context.Context, tr core.TestRequirement, res core.TestResult) ([]core.Verdict, error) {
 	var raw struct {
 		Lifecycle *virtParallelEvidence `json:"lifecycle"`
 	}
@@ -232,7 +232,8 @@ func (virtParallelEvaluator) Evaluate(_ context.Context, tr core.TestRequirement
 	if !found {
 		vs = append(vs, core.Verdict{TR: tr.ID, Item: "check:" + virtParallelCheck, Outcome: outcome, Reason: reason, Expected: expected, Actual: actual})
 	}
-	return vs, nil
+	native, err := grader.NativeOrGraded("native:jobs_passed", "native lifecycle execution outcome").Evaluate(ctx, core.TestRequirement{ID: tr.ID}, res)
+	return append(vs, native...), err
 }
 
 func virtParallelTotal(initial, increment, iterations int) (int, error) {

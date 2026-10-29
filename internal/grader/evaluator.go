@@ -7,11 +7,7 @@ import (
 	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/stages"
 )
 
-// NativeOrGraded returns an Evaluator that grades a TR's SLAs/Checks with the
-// standard grader when any are defined, and otherwise emits a single native
-// verdict (using the given item label and reason). This is the common pattern for
-// TRs whose KB SLA bars are still to-be-validated (sla: []). Shared across tool
-// adapters so each one does not reimplement it.
+// NativeOrGraded grades catalog items while preserving native execution failures.
 func NativeOrGraded(item, reason string) stages.Evaluator {
 	return nativeOrGraded{item: item, reason: reason}
 }
@@ -22,17 +18,21 @@ type nativeOrGraded struct {
 }
 
 func (n nativeOrGraded) Evaluate(ctx context.Context, tr core.TestRequirement, res core.TestResult) ([]core.Verdict, error) {
-	if len(tr.SLAs) > 0 || len(tr.Checks) > 0 {
-		return New().GradeTR(ctx, tr, res, nil), nil
-	}
 	out := res.Native
+	reason := n.reason
 	if out == "" {
-		out = core.OutcomeError
+		out = core.OutcomeSkip
+		reason = "no native execution outcome provided"
 	}
-	return []core.Verdict{{
+	native := core.Verdict{
 		TR:      tr.ID,
 		Item:    n.item,
 		Outcome: out,
-		Reason:  n.reason,
-	}}, nil
+		Reason:  reason,
+	}
+	if len(tr.SLAs) > 0 || len(tr.Checks) > 0 {
+		verdicts := New().GradeTR(ctx, tr, res, nil)
+		return append(verdicts, native), nil
+	}
+	return []core.Verdict{native}, nil
 }

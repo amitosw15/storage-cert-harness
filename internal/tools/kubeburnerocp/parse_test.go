@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/core"
+	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/grader"
 	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/registry"
+	"gitlab.cee.redhat.com/eco-special-projects/storage-cert-harness/internal/report"
 )
 
 func readFixtures(t *testing.T, workload string, names ...string) map[string][]byte {
@@ -235,5 +237,66 @@ func TestPVCDensityRequiresVerifiedWait(t *testing.T) {
 	}
 	if res.Checks[pvcBoundCheck] != core.OutcomeFail {
 		t.Fatal("unchecked readiness must not pass")
+	}
+}
+
+func TestVirtMigrationNativeGrading(t *testing.T) {
+	gate := 30.0
+	tr := core.TestRequirement{
+		ID:   "TR-VIRT-004",
+		SLAs: []core.SLA{{Metric: "total_migration_duration", Unit: "s"}},
+		Bars: []core.SLA{{Metric: "total_migration_duration", Operator: "<=", Value: &gate, Unit: "s"}},
+	}
+	integration, ok := registry.ForTRID(tr.ID)
+	if !ok {
+		t.Fatal("missing migration adapter")
+	}
+	for _, tc := range []struct {
+		name      string
+		runErr    string
+		failedJob bool
+		want      core.Outcome
+	}{
+		{"success", "", false, core.OutcomePass},
+		{"process failure", "exit status 2", false, core.OutcomeFail},
+		{"job failure", "", true, core.OutcomeFail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := readFixtures(t, "virt-migration", "jobSummary.json")
+			if tc.failedJob {
+				var summaries []jobSummary
+				var err error
+				if err := json.Unmarshal(data["jobSummary.json"], &summaries); err != nil {
+					t.Fatal(err)
+				}
+				summaries[1].Passed = false
+				data["jobSummary.json"], err = json.Marshal(summaries)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			bag := core.NewBag()
+			bag.Set("kbo_runs", []kboRun{{TRID: tr.ID, Workload: WorkloadVirtMigration, RunErr: tc.runErr}})
+			results, err := (parser{}).Parse(context.Background(), nil, bag, core.LogBundle{Data: map[string][]byte{tr.ID + "/jobSummary.json": data["jobSummary.json"]}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(results) != 1 {
+				t.Fatalf("expected one result, got %d", len(results))
+			}
+			vs := grader.New().GradeTR(context.Background(), tr, results[0], integration.Evaluators)
+			got := make(map[string]core.Outcome)
+			for i := range vs {
+				vs[i].Level = 3
+				got[vs[i].Item] = vs[i].Outcome
+			}
+			if len(vs) != 2 || got["sla:total_migration_duration"] != core.OutcomePass || got["native:jobs_passed"] != tc.want {
+				t.Fatalf("unexpected migration verdicts: %+v", vs)
+			}
+			rep := report.Build(tc.name, "2.0", core.Provenance{}, vs)
+			if rep.Certifiable != (tc.want == core.OutcomePass) {
+				t.Fatalf("unexpected migration certification: %+v", rep)
+			}
+		})
 	}
 }

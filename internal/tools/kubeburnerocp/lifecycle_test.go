@@ -120,7 +120,7 @@ func TestVirtParallelPassingDurationCannotMaskNoMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(vs) != 2 || vs[0].Outcome != core.OutcomePass || vs[1].Outcome != core.OutcomeFail || vs[1].Actual != "0 distinct VM migrations" {
+	if len(vs) != 3 || vs[0].Outcome != core.OutcomePass || vs[1].Outcome != core.OutcomeFail || vs[1].Actual != "0 distinct VM migrations" || vs[2].Item != "native:jobs_passed" || vs[2].Outcome != core.OutcomeFail {
 		t.Fatalf("passing duration hid missing migration: %+v", vs)
 	}
 }
@@ -142,7 +142,7 @@ func TestVirtParallelPlanPopulation(t *testing.T) {
 		{map[string]any{"vms": 2, "max_iterations": 2}, core.OutcomeError},
 	} {
 		vs, err := (virtParallelEvaluator{}).Evaluate(context.Background(), core.TestRequirement{ID: "TR-VIRT-019", Params: tc.params}, res)
-		if err != nil || len(vs) != 1 || vs[0].Outcome != tc.want {
+		if err != nil || len(vs) != 2 || vs[0].Outcome != tc.want || vs[1].Item != "native:jobs_passed" || vs[1].Outcome != core.OutcomePass {
 			t.Fatalf("params %v: %v %+v", tc.params, err, vs)
 		}
 	}
