@@ -12,7 +12,6 @@ package virtbench
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -24,9 +23,6 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
-
-//go:embed templates/rhel9-vm-drain.yaml
-var drainVMTemplate string
 
 // renderDrainVMTemplate injects the drain target node into the embedded
 // template's soft nodeAffinity. virtbench substitutes {{STORAGE_CLASS_NAME}}

@@ -12,7 +12,6 @@
 package virtbench
 
 import (
-	_ "embed"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -28,9 +27,6 @@ const (
 	// TestCloneAtScaleArgsStagedTemplateHasTwoDataVolumes).
 	cloneAtScaleDefaultDisks = 2
 )
-
-//go:embed templates/rhel9-vm-2disk.yaml
-var twoDiskVMTemplate string
 
 // cloneAtScaleArgs is TR-VIRT-018's BuildArgs: the same shape as
 // datasourceCloneArgs (start/end, storage class, namespace-prefix,

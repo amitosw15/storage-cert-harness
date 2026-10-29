@@ -13,7 +13,7 @@ func TestSnapshotJobsMarkerIsYAMLComment(t *testing.T) {
 	if !strings.HasPrefix(snapshotJobsMarker, "# ") {
 		t.Fatalf("snapshot job marker must be a YAML comment, got %q", snapshotJobsMarker)
 	}
-	asset, err := assets.ReadFile("assets/config.yaml")
+	asset, err := templates.ReadFile(snapshotTemplatesDir + "/config.yaml")
 	if err != nil {
 		t.Fatalf("read config asset: %v", err)
 	}
