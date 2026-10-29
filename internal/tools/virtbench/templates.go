@@ -25,3 +25,6 @@ var volumeSnapshotTemplate string
 
 //go:embed templates/shared/snapshot-vm.yaml
 var snapshotVMTemplate string
+
+//go:embed templates/shared/selected-vm.yaml
+var selectedVMTemplate string

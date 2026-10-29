@@ -337,6 +337,15 @@ func TestPreflightUsesEmbeddedFIOP99Template(t *testing.T) {
 	if err := os.WriteFile(binaryPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake virtbench: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "oc"), []byte(`#!/bin/sh
+case "$2" in
+ datasource) echo '{"spec":{"source":{"pvc":{"name":"disk"}}},"status":{"conditions":[{"type":"Ready","status":"True"}]}}' ;;
+ pvc) echo '{"status":{"phase":"Bound"}}' ;;
+ *) exit 1 ;;
+esac
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PATH", dir)
 	findings, err := (preflight{sc: Scenario{Validate: fioValidate}}).Check(
 		context.Background(), &core.RunCtx{}, nil, []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}}},
@@ -344,7 +353,7 @@ func TestPreflightUsesEmbeddedFIOP99Template(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
-	if len(findings) != 3 {
+	if len(findings) != 4 {
 		t.Fatalf("findings = %+v, want binary, storage class, and parameter checks", findings)
 	}
 	for _, f := range findings {

@@ -51,6 +51,12 @@ KB's snapshot-job list is rendered by its native template from explicit JSON
 values. Raw Go-template YAML is excluded from yamllint. See
 [adapter authoring](../docs/adapter-authoring.md#runtime-manifest-rendering).
 
+DataSource selection is a normal plan parameter. Read-only checks resolve source
+readiness and namespace defaults in Virtbench; `selected-vm.yaml` expresses the
+source changes. Snapshot conversion consumes the selected source and hands its
+final artifact directly to execution validation. CLI argument builders perform
+no staging IO.
+
 KB storage setup is harness-owned and uses the shared Go renderer with templates
 under `templates/TR-VIRT-010/setup/`. Runtime YAML decoding uses
 `manifest.Documents`; typed JSON API requests use standard JSON encoding.

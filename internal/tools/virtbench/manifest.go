@@ -120,6 +120,7 @@ func prepareManifest(ctx context.Context, request manifestRequest) ([]string, er
 	}
 	path, custom := argument(args, "--vm-template")
 	var source []byte
+	defaults := !custom
 	if custom {
 		source, err = safefs.ReadFile(path)
 	} else {
@@ -133,7 +134,7 @@ func prepareManifest(ctx context.Context, request manifestRequest) ([]string, er
 				tr.ID = "TR-STOR-001"
 			}
 		}
-		source, err = vmSourceTemplate(ctx, tr)
+		source, defaults, err = vmSourceTemplate(ctx, tr)
 		path = tr.ID + "-vm.yaml"
 	}
 	if err != nil {
@@ -153,7 +154,10 @@ func prepareManifest(ctx context.Context, request manifestRequest) ([]string, er
 		if err != nil {
 			return nil, err
 		}
-
+		rendered, _, err = selectVMSource(rendered, strParamOr(request.TR, "datasource", ""), defaults)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if raw, present := argument(args, "--num-disks"); present && command == "datasource-clone" {
 		wanted, err := strconv.Atoi(raw)
@@ -370,10 +374,10 @@ func removeArgument(args []string, flag string) []string {
 }
 
 // vmSourceTemplate selects raw bytes; custom templates preserve their storage settings.
-func vmSourceTemplate(ctx context.Context, tr core.TestRequirement) ([]byte, error) {
+func vmSourceTemplate(ctx context.Context, tr core.TestRequirement) ([]byte, bool, error) {
 	sc, ok := scenarioFor(tr)
 	if !ok {
-		return nil, fmt.Errorf("no VM template for %s", tr.ID)
+		return nil, false, fmt.Errorf("no VM template for %s", tr.ID)
 	}
 	param := sc.Template.Param
 	if param == "" {
@@ -384,18 +388,18 @@ func vmSourceTemplate(ctx context.Context, tr core.TestRequirement) ([]byte, err
 		var err error
 		path, err = fioTemplate(tr)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	if path != "" {
 		data, err := safefs.ReadFile(path)
-		return data, err
+		return data, false, err
 	}
 	if sc.Template.Source != "" {
-		return []byte(sc.Template.Source), nil
+		return []byte(sc.Template.Source), true, nil
 	}
 	data, err := runtimeTemplate(ctx, sc.Template.Upstream)
-	return data, err
+	return data, true, err
 }
 
 // planTemplateArgs maps ordinary plan parameters to the shared input resolver.

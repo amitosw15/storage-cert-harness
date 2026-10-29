@@ -21,7 +21,6 @@ spec:
             requests:
               storage: 30Gi
           storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
-          volumeMode: Block
     - metadata:
         name: {{ printf "%s-scratch" .VM_NAME | quote }}
       spec:
@@ -32,7 +31,6 @@ spec:
             requests:
               storage: 50Gi
           storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
-          volumeMode: Block
   runStrategy: Always
   template:
     metadata:
