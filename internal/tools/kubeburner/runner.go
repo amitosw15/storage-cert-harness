@@ -62,7 +62,7 @@ func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []cor
 	if err := safefs.MkdirAll(subdir, 0o755); err != nil {
 		return stages.RunHandle{}, err
 	}
-	if _, err := writeConfig(subdir, p); err != nil {
+	if _, err := writeConfig(subdir); err != nil {
 		return stages.RunHandle{}, err
 	}
 	cmd, err := buildRunCmd(ctx, rc, buildEnv(p, sc), resultsDir, tr.ID)
@@ -95,7 +95,8 @@ func buildRunCmd(ctx context.Context, rc *core.RunCtx, env []string, resultsDir,
 		return nil, fmt.Errorf("kube-burner: results dir: %w", err)
 	}
 	cfg := filepath.Join(absResults, subdir, "config.yaml")
-	cmd := exec.CommandContext(ctx, path, "init", "-c", cfg) // #nosec G204 -- path comes from LookPath and args are harness-generated.
+	args := []string{"init", "-c", cfg}
+	cmd := exec.CommandContext(ctx, path, args...) // #nosec G204 -- path comes from LookPath and args are harness-generated.
 	cmd.Dir = filepath.Join(absResults, subdir)
 	cmd.Env = append(os.Environ(), env...)
 	rc.Logger.Info("kube-burner: running host binary", "path", path)

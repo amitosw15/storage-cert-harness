@@ -90,7 +90,7 @@ type provisioner struct{}
 func (provisioner) Provision(ctx context.Context, rc *core.RunCtx, bag *core.Bag, _ []core.TestRequirement) error {
 	if selection, ok := core.GetAs[clustercheck.SnapshotSelection](bag, "snapshot_selection"); ok && rc.Backend != nil && rc.Backend.SnapshotClass != "" {
 		// Pin the resolved class for the whole run through a private profile.
-		created, err := selection.PrepareVMStorage(ctx)
+		created, err := prepareVMStorage(ctx, selection)
 		bag.Set("snapshot_storage_class", created)
 		if err != nil {
 			return fmt.Errorf("prepare snapshot storage: %w", err)
