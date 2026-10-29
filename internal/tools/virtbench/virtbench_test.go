@@ -536,6 +536,15 @@ func TestFIOActionArgs(t *testing.T) {
 			if !slices.Contains(got, "fio") || !hasArgPair(got, "--action", action) || !hasArgPair(got, "--start", "1") {
 				t.Errorf("%s arguments missing command or flag/value pair: %v", action, got)
 			}
+			actionCount := 0
+			for _, arg := range got {
+				if arg == "--action" {
+					actionCount++
+				}
+			}
+			if actionCount != 1 {
+				t.Errorf("%s arguments contain %d --action flags, want exactly one: %v", action, actionCount, got)
+			}
 			if slices.Contains(got, "--cleanup") {
 				t.Errorf("%s arguments must leave cleanup to the harness: %v", action, got)
 			}
