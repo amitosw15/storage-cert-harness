@@ -210,18 +210,21 @@ func (r runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []c
 	if err != nil {
 		return stages.RunHandle{}, err
 	}
+	prepared := false
 	if clone, ok := core.GetAs[*snapshotClone](bag, "snapshot_clone"); ok {
 		path, err := clone.prepare(ctx, root)
 		if err != nil {
 			return stages.RunHandle{}, fmt.Errorf("prepare snapshot clone: %w", err)
 		}
+		prepared = true
 		args = setArgument(args, "--vm-template", path)
 		if rc.RecordStorageSelection != nil {
 			rc.RecordStorageSelection(core.StorageSelection{TR: trs[0].ID, Variant: trs[0].Variant, StorageClass: clone.Selection.StorageClass, SnapshotClass: clone.Selection.SnapshotClass})
 		}
 	}
 	rc.Logger.Info("virtbench: exec", "cmd", binary, "args", args, "dir", root)
-	if err := execVirtbench(ctx, rc, manifestRequest{Directory: root, Args: args, TR: trs[0]}); err != nil {
+
+	if err := execVirtbench(ctx, rc, manifestRequest{Directory: root, Args: args, TR: trs[0], Prepared: prepared}); err != nil {
 		// drain-nodes exits 1 on a timeout — a gradeable FAIL, not a crash. Keep
 		// going to Collect/Parse so the log is still scored (decisions/0013).
 		if !r.sc.TolerateRunError {

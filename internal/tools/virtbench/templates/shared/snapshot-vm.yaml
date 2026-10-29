@@ -1,0 +1,16 @@
+{{ omit .VM "spec" | toYaml }}
+spec:
+  {{ with omit .VM.spec "dataVolumeTemplates" }}{{ . | toYaml | nindent 2 }}{{ end }}
+  dataVolumeTemplates:
+    {{ range $index, $volume := .VM.spec.dataVolumeTemplates }}
+    - {{ with omit $volume "spec" }}{{ . | toYaml | nindent 6 }}{{ end }}
+      spec:
+        {{ $snapshot := index $.SNAPSHOTS (printf "%d" $index) }}
+        {{ if $snapshot.Name }}
+        {{ with omit $volume.spec "source" "sourceRef" }}{{ . | toYaml | nindent 8 }}{{ end }}
+        source:
+          snapshot: {{ $snapshot | toJson }}
+        {{ else }}
+        {{ $volume.spec | toYaml | nindent 8 }}
+        {{ end }}
+    {{ end }}
