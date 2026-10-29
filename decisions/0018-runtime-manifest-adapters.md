@@ -7,8 +7,8 @@
 
 Virtbench inputs were prepared through string replacement, inserted YAML
 fragments, nested map mutation, and upstream placeholder substitution. This
-spread value ownership across the harness and released tools. The proposed source layout
-is `internal/tools/<tool>/templates/<TR-ID>/`, with shared resources under
+spread value ownership across the harness and released tools. The source layout
+is now `internal/tools/<tool>/templates/<TR-ID>/`, with shared resources under
 `templates/shared/`.
 
 ## Decision
@@ -46,5 +46,11 @@ depending on stage interfaces as required by ADR-0003.
 ### Consequences
 
 The renderer uses Go `text/template` and Sprig v3 with one added `toYaml` helper. New dynamic values require an explicit resolver
-entry. Renderer tests cover typed values, control flow, legacy aliases, native passthrough,
-and invalid input. Tool migrations will add coverage at their execution boundaries.
+entry. Tests render every owned VB template and exercise the execution boundary;
+KB's snapshot-job list is rendered by its native template from explicit JSON
+values. Raw Go-template YAML is excluded from yamllint. See
+[adapter authoring](../docs/adapter-authoring.md#runtime-manifest-rendering).
+
+KB storage setup is harness-owned and uses the shared Go renderer with templates
+under `templates/TR-VIRT-010/setup/`. Runtime YAML decoding uses
+`manifest.Documents`; typed JSON API requests use standard JSON encoding.

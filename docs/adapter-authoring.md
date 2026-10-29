@@ -104,37 +104,100 @@ and need no `templates.go`. Keep upstream-owned templates in their released
 runtime; do not copy them into the harness merely to populate a TR directory.
 User-supplied template paths remain external inputs.
 
-## Kube-burner workload templates
+## Runtime manifest rendering
 
-Kube-burner keeps native rendering. `manifest.Native` passes source bytes through
-unchanged, while `snapshotJobInputs` supplies job values as JSON in `SNAPSHOT_JOBS`.
-The config template uses `fromJson` and `range` to construct legacy or batched
-snapshot jobs, including a final partial batch. Raw template YAML is excluded
-from yamllint; tests validate rendered configuration and preserve native sources.
+`internal/manifest.ManifestRenderer` exposes `Render(source []byte, values
+map[string]any) ([]byte, error)`. It has no filesystem, cluster, or CLI responsibilities.
+Kube-burner uses `manifest.Native` to preserve workload template bytes for its own renderer.
+Its harness-owned StorageClass and StorageProfile setup uses `manifest.GoTemplate`
+with sources under `templates/TR-VIRT-010/setup/`; these are applied by the harness
+and are not staged as native kube-burner workload templates.
+Kube-burner-ocp owns its templates inside the released CLI and needs no harness
+rendering call; any future local templates use the same native renderer.
+Kube-burner's snapshot-job list is passed as JSON in `SNAPSHOT_JOBS`; its native
+template uses `fromJson` and `range` to generate the jobs. Go builds input values.
+Virtbench resolves values and loads sources in its tool package, calls the shared
+renderer, validates the VM, writes a private artifact, and constructs the final CLI.
 
-## Kube-burner storage setup
+The harness renderer follows kube-burner's `text/template` Parse → Execute
+approach with `missingkey=error`. Harness-owned VB templates use dotted keys:
 
-Private StorageClass and StorageProfile setup is owned by the harness and uses
-`manifest.GoTemplate`, independently of kube-burner's native workload rendering.
-Templates live under `templates/TR-VIRT-010/setup/`. They preserve provisioning
-fields and claim defaults while replacing metadata and omitting copied status.
-The created StorageClass name is retained on later failure so cleanup can remove
-it without modifying the backend's original resources. Tests cover preservation,
-omitted defaults, and cleanup after partial failure.
+```yaml
+metadata:
+  name: {{ .VM_NAME | quote }}
+spec:
+  storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
+```
 
-## Virtbench command manifests
+Use `quote` for string scalars, `toJson` for inline maps/lists, and `toYaml`
+with `nindent` for nested YAML. Helpers come from Sprig v3 (`TxtFuncMap`),
+as in kube-burner, with one added `toYaml` helper. Go control flow and legacy
+VB aliases use the same engine. Environment variables are not merged into the
+values map; Sprig's explicit `env`/`expandenv` functions remain available.
 
-Clone, disk-ops, and FIO resolve explicit template values before launching
-Virtbench. The shared Go/Sprig renderer validates YAML and the tool validates
-VM identity and disk counts. Argument builders select sources without copying
-them; preparation writes a private rendered file once. Legacy upstream tokens
-use aliases in the same engine. Templates are discovered from the runtime
-checkout or the installed CLI's Python environment.
+VB inputs come from the final CLI arguments, plan parameters, and the defaults in
+`virtbench/templateInputs`. Explicit arguments override plan parameters and defaults. The adapter
+passes resolved execution defaults back to the CLI so VM identity and FIO
+settings agree with the manifest. Guest password defaults remain internal;
+backend credentials are never template inputs. Scenario provisioning supplies
+additional values such as the selected node, namespace, annotations, or
+resolved snapshot sources through the same renderer.
 
-The final clone command omits `--storage-class` after rendering so upstream
-cannot overwrite fixed classes or reject PVC-form storage definitions. FIO
-retains upstream's run-all lifecycle and harness cleanup. Template tests cover
-source preservation, invalid inputs, native defaults, and the process boundary.
+| Templates | Available values |
+| --- | --- |
+| Clone and disk-ops VMs | `VM_NAME`, `STORAGE_CLASS_NAME`, `VM_PASSWORD` |
+| FIO VMs | Above plus `FIO_RUNTIME`, `FIO_BS`, `FIO_RW`, `FIO_IODEPTH`, `FIO_NUMJOBS`, `FIO_SIZE` |
+| Drain VMs | Clone values plus `TARGET_NODE` |
+| Failure-recovery VMs | `VM_NAME`, `STORAGE_CLASS_NAME`, `NAMESPACE`, `NODE_NAME`, `HOSTNAME_LABEL` |
+
+Released/custom VB templates using legacy tokens such as `{{VM_NAME}}` or
+`{{STORAGE_CLASS}}` are supported through named functions in the same template
+engine. Unknown keys/tokens fail; they are never handed to VB for substitution.
+Add future dynamic inputs to the resolver and its tests before using them in a
+template. Keep optional structure (`if`, `range`) in the template instead of
+inserting YAML strings or modifying nested resource maps in Go.
+
+Rendered VM files live under the run directory's `rendered/` directory with
+mode `0600`. Provisioning helpers render their own resources before applying
+them. Source files remain unchanged. All rendered YAML documents are decoded;
+VM templates must contain one VirtualMachine whose name matches `--vm-name`.
+This catches syntax and identity errors, not Kubernetes schema violations.
+Snapshot conversion preserves unrelated custom VM fields and blank disks.
+
+Raw VB and KB templates contain Go directives, so yamllint excludes those source
+directories. Template tests validate every owned template after rendering;
+renderer and adapter tests cover failure cases and the execution boundary.
+Replay runs do not render manifests or access the cluster.
+
+### Migration inventory
+
+The runtime manifest audit covers all registered tools and their provisioning,
+execution, and validation paths. This table maps the former implementations to
+their owners after the migration.
+
+| Former path | Current owner |
+| --- | --- |
+| KB `snapshotJobs`, `legacySnapshotJob`, marker replacement in `writeConfig` | `snapshotJobInputs` builds values; native `config.yaml` builds the YAML |
+| KB `writeConfig`, `buildEnv` | Copy sources unchanged; pass explicit environment values to KB |
+| KB `PrepareVMStorage` resource-map mutation and patch construction | Tool-owned `prepareVMStorage`; `setup/storageclass.yaml` and `setup/storageprofile-patch.yaml` use the shared renderer |
+| KBO workload flags | Upstream owns the workload templates |
+| VB `stageTemplate`, `stageFIOTemplate`, `stageCloneAtScaleTemplate` | Removed; `vmSourceTemplate` selects raw bytes and `prepareManifest` writes the rendered artifact once |
+| VB datasource-clone, disk-ops, FIO substitution | `prepareManifest` resolves all values, renders, validates, and selects the runtime file |
+| VB `renderDrainVMTemplate` string replacement | Shared renderer with explicit drain inputs |
+| VB failure-recovery `strings.NewReplacer` | Shared renderer with VM, namespace, storage, and node inputs |
+| VB `sshPodManifestForNodes` YAML string insertion | Shared `ssh-pod.yaml` with conditional annotations and affinity |
+| VB `ensureNamespace` inline YAML | Shared `namespace.yaml` |
+| VB snapshot object maps and nested VM map mutation | `volume-snapshot.yaml` and `snapshot-vm.yaml`; source maps are read-only |
+| VB `templateDiskCount` placeholder replacement | Render with selected values, then inspect volumes; execution also checks the final count |
+| VB disk-count and snapshot YAML decoding | `manifest.Documents`; tool code only inspects decoded objects |
+| VB `writeSSHPodDeleteOptions` JSON string formatting | Standard JSON encoding of a typed API request |
+| VB source and rendered file writes | One `writeTemplateFile` in `virtbench/manifest.go` |
+| Example adapter | No runtime manifests |
+
+YAML decoding for plan/backend configuration and attestation questions remains
+input parsing. CI scripts that read configuration with `yq` or generate the static
+image matrix are outside the runtime manifest adapter. Kubernetes apply/create
+helpers only transport already-rendered bytes; they contain no rendering logic.
 
 ## Multi-scenario tools = a scenario table
 

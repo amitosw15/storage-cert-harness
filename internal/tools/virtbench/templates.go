@@ -16,3 +16,12 @@ var failureRecoveryVMTemplate string
 
 //go:embed templates/shared/ssh-pod.yaml
 var sshPodManifest string
+
+//go:embed templates/shared/namespace.yaml
+var namespaceTemplate string
+
+//go:embed templates/shared/volume-snapshot.yaml
+var volumeSnapshotTemplate string
+
+//go:embed templates/shared/snapshot-vm.yaml
+var snapshotVMTemplate string

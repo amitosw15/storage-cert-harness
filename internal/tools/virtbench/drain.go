@@ -21,15 +21,7 @@ import (
 	"strings"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
-
-// renderDrainVMTemplate injects the drain target node into the embedded
-// template's soft nodeAffinity. virtbench substitutes {{STORAGE_CLASS_NAME}}
-// itself, but never sees the target node, so the harness fills it in here.
-func renderDrainVMTemplate(target string) string {
-	return strings.ReplaceAll(drainVMTemplate, "{{TARGET_NODE}}", target)
-}
 
 const (
 	drainNSPrefix       = "virtbench-drain"
@@ -95,14 +87,7 @@ func drainProvision(ctx context.Context, rc *core.RunCtx, _ *core.Bag, tr core.T
 	}
 	nsPrefix := strParamOr(tr, "namespace_prefix", drainNSPrefix)
 
-	tmplPath := filepath.Join(resultsRoot, drainTemplateFile)
-	if custom := strParamOr(tr, "vm_template", ""); custom != "" {
-		tmplPath = custom
-	} else if err := safefs.WriteFile(tmplPath, []byte(renderDrainVMTemplate(target)), 0o600); err != nil {
-		return fmt.Errorf("virtbench: drain: write vm template: %w", err)
-	}
-
-	args, err := drainCloneArgs(rc, tr, resultsRoot, tmplPath, nsPrefix)
+	args, err := drainCloneArgs(rc, tr, resultsRoot, strParamOr(tr, "vm_template", ""), nsPrefix)
 	if err != nil {
 		return err
 	}
@@ -168,22 +153,26 @@ func drainCloneArgs(rc *core.RunCtx, tr core.TestRequirement, resultsRoot, templ
 	if sc == "" {
 		return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 	}
-	start := intParam(tr, "start", 1)
-	end := intParam(tr, "end", intParam(tr, "count", drainDefaultCount))
+	start, end, err := drainVMRange(tr)
+	if err != nil {
+		return nil, err
+	}
 
 	args := clusterArgs(tr)
 	args = append(args, "datasource-clone",
 		"--start", strconv.Itoa(start),
 		"--end", strconv.Itoa(end),
-		"--vm-name", defaultVMName,
+		"--vm-name", strParamOr(tr, "vm_name", defaultVMName),
 		"--namespace-prefix", nsPrefix,
 		"--storage-class", sc,
-		"--vm-template", template,
 		"--save-results",
 		"--results-folder", resultsRoot,
 	)
 	if driver := strParamOr(tr, "storage_driver", ""); driver != "" {
 		args = append(args, "--storage-driver", driver)
+	}
+	if template != "" {
+		args = append(args, "--vm-template", template)
 	}
 	return args, nil
 }

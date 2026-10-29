@@ -6,8 +6,8 @@ ignore: |
   dist/
   work/
   .git/
-  internal/tools/kubeburner/templates/
   internal/tools/virtbench/templates/
+  internal/tools/kubeburner/templates/
 
 rules:
   document-start: disable
