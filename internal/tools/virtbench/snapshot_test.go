@@ -192,7 +192,8 @@ func TestSnapshotCloneLocalDataSourceNamespaces(t *testing.T) {
 				t.Fatal(err)
 			}
 			tr := core.TestRequirement{ID: "TR-VIRT-018", Params: map[string]any{"vm_template": path, "namespace_prefix": "local", "iteration_clones": tt.count}}
-			rc := &core.RunCtx{DataSource: tt.selection, Backend: &core.ResolvedBackend{StorageClass: "backend", SnapshotClass: "nondefault"}}
+			tr.Params["datasource"] = tt.selection
+			rc := &core.RunCtx{Backend: &core.ResolvedBackend{StorageClass: "backend", SnapshotClass: "nondefault"}}
 			clone, err := snapshotClonePreflight(context.Background(), rc, tr)
 			if tt.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantError) || !strings.Contains(err.Error(), "--datasource namespace/name") {

@@ -98,7 +98,7 @@ func drainProvision(ctx context.Context, rc *core.RunCtx, _ *core.Bag, tr core.T
 	}
 	nsPrefix := strParamOr(tr, "namespace_prefix", drainNSPrefix)
 
-	tmplPath, err := stageSelectedTemplate(rc, tr, resultsRoot)
+	tmplPath, err := stageSelectedTemplate(tr, resultsRoot)
 	if err != nil {
 		return err
 	}

@@ -399,11 +399,10 @@ type Attestation struct {
 // context.Context (cancellation/deadlines). A live Kubernetes client will be
 // added here once internal/kube is implemented.
 type RunCtx struct {
-	DataSource string // Optional CLI override for Virtbench VM sources.
-	RunID      string
-	PartKind   string // initial | resume | recovery | retry
-	WorkDir    string
-	Logger     *slog.Logger
+	RunID    string
+	PartKind string // initial | resume | recovery | retry
+	WorkDir  string
+	Logger   *slog.Logger
 	// LogOutput receives subprocess stdout/stderr when the CLI is configured to
 	// persist a complete run log. It is deliberately not part of the report.
 	LogOutput io.Writer

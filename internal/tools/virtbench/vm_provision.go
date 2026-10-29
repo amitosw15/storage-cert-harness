@@ -65,7 +65,7 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 	if err != nil {
 		return err
 	}
-	data, _, err = rewriteVMSource(data, selectedDataSource(rc, tr), defaults)
+	data, _, err = rewriteVMSource(data, strParamOr(tr, "datasource", ""), defaults)
 	if err != nil {
 		return err
 	}

@@ -60,8 +60,8 @@ func singleNodeCeilingArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRe
 		if node := strParamOr(tr, "node_name", ""); node != "" {
 			args = append(args, "--node-name", node)
 		}
-		if strParamOr(tr, "vm_template", "") != "" || selectedDataSource(rc, tr) != "" {
-			staged, err := stageSelectedTemplate(rc, tr, resultsRoot)
+		if strParamOr(tr, "vm_template", "") != "" || strParamOr(tr, "datasource", "") != "" {
+			staged, err := stageSelectedTemplate(tr, resultsRoot)
 			if err != nil {
 				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 			}

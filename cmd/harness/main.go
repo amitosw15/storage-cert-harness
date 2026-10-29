@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -181,11 +182,11 @@ func newPreflightCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			trs, err := orchestrator.ResolveExecutions(kb.FromCatalog(cat), cfg)
+			trs, err := resolveCLIExecutions(kb.FromCatalog(cat), cfg, datasource)
 			if err != nil {
 				return err
 			}
-			rc := &core.RunCtx{RunID: "preflight", Logger: logger, Backend: resolved, DataSource: datasource}
+			rc := &core.RunCtx{RunID: "preflight", Logger: logger, Backend: resolved}
 			out := cmd.OutOrStdout()
 			byTool := map[string][]core.TestRequirement{}
 			for _, tr := range trs {
@@ -340,7 +341,12 @@ func newRunCmd() *cobra.Command {
 				trs = kb.FromCatalog(cat)
 			}
 
-			selected := orchestrator.SelectTRs(trs, cfg.Filter)
+			selected, err := resolveCLIExecutions(trs, cfg, datasource)
+			if err != nil {
+				return err
+			}
+			// Parameters and variants are resolved before CLI overrides are applied.
+			cfg.Overrides, cfg.Variants = nil, nil
 			for _, tr := range selected {
 				if datasource != "" && !usesVirtbench(tr) {
 					logger.Info("--datasource affects Virtbench only; retaining adapter image source", "tr", tr.ID)
@@ -371,7 +377,7 @@ func newRunCmd() *cobra.Command {
 			if abs, err := filepath.Abs(workdir); err == nil {
 				workdir = abs
 			}
-			rc := &core.RunCtx{RunID: runID, WorkDir: workdir, Logger: logger, LogOutput: logFile, Backend: resolved, DataSource: datasource}
+			rc := &core.RunCtx{RunID: runID, WorkDir: workdir, Logger: logger, LogOutput: logFile, Backend: resolved}
 
 			// Resolve the prior report and self attestations before running cluster
 			// tests, so the human gate is the first run phase.
@@ -720,4 +726,26 @@ func configureExecution(cmd *cobra.Command, cfg *config.Config, planPath, backen
 func usesVirtbench(tr core.TestRequirement) bool {
 	tool, ok := orchestrator.ResolveTool(tr)
 	return ok && strings.HasPrefix(tool.Name, "virtbench ")
+}
+
+func resolveCLIExecutions(trs []core.TestRequirement, cfg config.Config, datasource string) ([]core.TestRequirement, error) {
+	executions, err := orchestrator.ResolveExecutions(trs, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if datasource == "" {
+		return executions, nil
+	}
+	for i := range executions {
+		if !usesVirtbench(executions[i]) {
+			continue
+		}
+		params := maps.Clone(executions[i].Params)
+		if params == nil {
+			params = map[string]any{}
+		}
+		params["datasource"] = datasource
+		executions[i].Params = params
+	}
+	return executions, nil
 }

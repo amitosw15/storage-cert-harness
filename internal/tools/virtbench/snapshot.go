@@ -52,7 +52,7 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 	if err != nil {
 		return nil, err
 	}
-	data, _, err = rewriteVMSource(data, selectedDataSource(rc, tr), defaults)
+	data, _, err = rewriteVMSource(data, strParamOr(tr, "datasource", ""), defaults)
 	if err != nil {
 		return nil, err
 	}

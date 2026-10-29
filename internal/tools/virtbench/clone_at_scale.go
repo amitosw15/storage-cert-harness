@@ -41,7 +41,7 @@ func cloneAtScaleArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRequire
 		if sc == "" {
 			return nil, fmt.Errorf("virtbench: %s: storage_class required (backend or 'storage_class' param)", tr.ID)
 		}
-		staged, err := stageSelectedTemplate(rc, tr, resultsRoot)
+		staged, err := stageSelectedTemplate(tr, resultsRoot)
 		if err != nil {
 			return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 		}

@@ -866,7 +866,7 @@ func TestStageTemplateRejectsSymlinkEscape(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if _, err := stageSelectedTemplate(nil, core.TestRequirement{Params: map[string]any{"vm_template": template}}, resultsDir); err == nil {
+	if _, err := stageSelectedTemplate(core.TestRequirement{Params: map[string]any{"vm_template": template}}, resultsDir); err == nil {
 		t.Fatal("stageSelectedTemplate accepted a symlink escaping the source directory")
 	}
 }
@@ -889,7 +889,8 @@ func TestStagedDataSourcePreservesSourceAndStorage(t *testing.T) {
 				key = "fio_vm_template"
 			}
 			tr.Params[key] = src
-			path, err := stageSelectedTemplate(&core.RunCtx{DataSource: "other/cli"}, tr, t.TempDir())
+			tr.Params["datasource"] = "other/cli"
+			path, err := stageSelectedTemplate(tr, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -944,7 +945,7 @@ func TestStagingDefaultUpstreamAndMultipleDocuments(t *testing.T) {
 	t.Setenv("VIRTBENCH_REPO", repo)
 	for _, selection := range []string{"", "images/selected"} {
 		tr := core.TestRequirement{ID: "TR-VIRT-002", Params: map[string]any{"datasource": selection}}
-		path, err := stageSelectedTemplate(nil, tr, t.TempDir())
+		path, err := stageSelectedTemplate(tr, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}

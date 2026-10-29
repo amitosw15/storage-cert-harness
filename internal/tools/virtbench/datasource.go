@@ -17,13 +17,6 @@ import (
 
 const imageNamespace = "openshift-virtualization-os-images"
 
-func selectedDataSource(rc *core.RunCtx, tr core.TestRequirement) string {
-	if rc != nil && rc.DataSource != "" {
-		return rc.DataSource
-	}
-	return strParamOr(tr, "datasource", "")
-}
-
 func parseDataSource(value string) (cloneSource, error) {
 	parts := strings.Split(value, "/")
 	ref := cloneSource{Namespace: imageNamespace}
@@ -156,12 +149,12 @@ func yamlSet(n *yaml.Node, key, value string) {
 	n.Content = append(n.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
 }
 
-func datasourcePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRequirement) ([]cloneSource, error) {
+func datasourcePreflight(ctx context.Context, tr core.TestRequirement) ([]cloneSource, error) {
 	data, defaults, err := vmSourceTemplate(tr)
 	if err != nil {
 		return nil, err
 	}
-	_, refs, err := rewriteVMSource(data, selectedDataSource(rc, tr), defaults)
+	_, refs, err := rewriteVMSource(data, strParamOr(tr, "datasource", ""), defaults)
 	if err != nil {
 		return nil, err
 	}

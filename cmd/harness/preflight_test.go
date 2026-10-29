@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/catalog"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/config"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/registry"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
@@ -149,17 +150,17 @@ func writePreflightCatalog(t *testing.T, trs []catalog.TR) string {
 
 type datasourcePreflightStub struct{}
 
-func (datasourcePreflightStub) Check(_ context.Context, rc *core.RunCtx, _ *core.Bag, trs []core.TestRequirement) ([]core.Finding, error) {
+func (datasourcePreflightStub) Check(_ context.Context, _ *core.RunCtx, _ *core.Bag, trs []core.TestRequirement) ([]core.Finding, error) {
 	var findings []core.Finding
 	for _, tr := range trs {
-		findings = append(findings, core.Finding{Level: "info", Message: fmt.Sprintf("cli=%s plan=%v variant=%s", rc.DataSource, tr.Params["datasource"], tr.Variant)})
+		findings = append(findings, core.Finding{Level: "info", Message: fmt.Sprintf("source=%v variant=%s", tr.Params["datasource"], tr.Variant)})
 	}
 	return findings, nil
 }
 
 func TestPreflightDataSourceCLIAndVariantParams(t *testing.T) {
-	registry.Register(stages.ToolIntegration{Name: "test-datasource", Preflight: datasourcePreflightStub{}})
-	catalogPath := writePreflightCatalog(t, []catalog.TR{{ID: "TEST-DS", AutomationTool: "test-datasource"}})
+	registry.Register(stages.ToolIntegration{Name: "virtbench test-datasource", Preflight: datasourcePreflightStub{}})
+	catalogPath := writePreflightCatalog(t, []catalog.TR{{ID: "TEST-DS", AutomationTool: "virtbench test-datasource"}})
 	planPath := filepath.Join(t.TempDir(), "plan.yaml")
 	data := `schema_version: "1"
 name: datasource-variants
@@ -185,7 +186,7 @@ variants:
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"cli=images/cli plan=images/per-test variant=inherited", "cli=images/cli plan=images/per-variant variant=overridden", "--datasource affects Virtbench only"} {
+	for _, want := range []string{"source=images/cli variant=inherited", "source=images/cli variant=overridden"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in %s", want, out.String())
 		}
@@ -208,4 +209,92 @@ func TestDataSourceBoundaryUsesResolvedTool(t *testing.T) {
 			t.Errorf("%+v: got %v, want %v", tt.tr, got, tt.want)
 		}
 	}
+}
+
+func TestResolveCLIDataSourcePreservesParamsAndAdapterBoundary(t *testing.T) {
+	shared := map[string]any{"datasource": "images/catalog", "other": true}
+	trs := []core.TestRequirement{
+		{ID: "TR-STOR-002", AutomationTool: "catalog alias", Params: shared},
+		{ID: "TR-STOR-006", AutomationTool: "kube-burner-ocp", Params: shared},
+	}
+	cfg := config.Config{
+		Overrides: map[string]map[string]any{"TR-STOR-002": {"datasource": "images/plan"}},
+		Variants:  map[string][]config.Variant{"TR-STOR-002": {{Name: "inherited"}, {Name: "overridden", Params: map[string]any{"datasource": "images/variant"}}}},
+	}
+	for _, selection := range []string{"", "images/cli"} {
+		got, err := resolveCLIExecutions(trs, cfg, selection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("executions=%+v", got)
+		}
+		wants := []string{"images/plan", "images/variant", "images/catalog"}
+		if selection != "" {
+			wants[0], wants[1] = selection, selection
+		}
+		for i, tr := range got {
+			if tr.Params["datasource"] != wants[i] || tr.Params["other"] != true {
+				t.Fatalf("execution %d: %+v", i, tr)
+			}
+		}
+	}
+	if shared["datasource"] != "images/catalog" || cfg.Overrides["TR-STOR-002"]["datasource"] != "images/plan" || cfg.Variants["TR-STOR-002"][1].Params["datasource"] != "images/variant" {
+		t.Fatal("input parameters mutated")
+	}
+}
+
+type datasourceRunProbe struct{ executions []core.TestRequirement }
+
+func (p *datasourceRunProbe) Check(_ context.Context, _ *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) ([]core.Finding, error) {
+	p.executions = append(p.executions, trs...)
+	bag.Set("probe_executions", trs)
+	return nil, nil
+}
+
+func TestRunDataSourceOverridesResolvedVariants(t *testing.T) {
+	probe := &datasourceRunProbe{}
+	registry.Register(stages.ToolIntegration{Name: "virtbench datasource-run-probe", Preflight: probe, ResultParser: probe})
+	catalogPath := writePreflightCatalog(t, []catalog.TR{{ID: "TEST-DS-RUN", AutomationTool: "virtbench datasource-run-probe"}})
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.yaml")
+	plan := `schema_version: "1"
+name: datasource-run
+select:
+  ids: [TEST-DS-RUN]
+overrides:
+  TEST-DS-RUN:
+    datasource: images/plan
+variants:
+  TEST-DS-RUN:
+    - name: inherited
+    - name: overridden
+      params:
+        datasource: images/variant
+`
+	if err := os.WriteFile(planPath, []byte(plan), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"run", "--catalog", catalogPath, "--plan", planPath, "--datasource", "images/cli", "--workdir", filepath.Join(dir, "work"), "--output", filepath.Join(dir, "out"), "--no-attestations", "--skip-env"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if len(probe.executions) != 2 {
+		t.Fatalf("variants expanded incorrectly: %+v", probe.executions)
+	}
+	for _, tr := range probe.executions {
+		if tr.Params["datasource"] != "images/cli" {
+			t.Fatalf("CLI override lost: %+v", tr)
+		}
+	}
+}
+
+func (*datasourceRunProbe) Parse(_ context.Context, _ *core.RunCtx, bag *core.Bag, _ core.LogBundle) ([]core.TestResult, error) {
+	trs, _ := core.GetAs[[]core.TestRequirement](bag, "probe_executions")
+	var results []core.TestResult
+	for _, tr := range trs {
+		results = append(results, core.TestResult{TRID: tr.ID, Native: core.OutcomePass})
+	}
+	return results, nil
 }

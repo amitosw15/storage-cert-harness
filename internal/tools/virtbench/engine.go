@@ -109,7 +109,7 @@ func (p preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, tr
 	}
 	for _, tr := range trs {
 		if dir == "" {
-			refs, err := datasourcePreflight(ctx, rc, tr)
+			refs, err := datasourcePreflight(ctx, tr)
 			if err != nil {
 				findings = append(findings, core.Finding{Level: "error", Message: tr.ID + " datasource: " + err.Error()})
 			} else if len(refs) == 0 {
@@ -231,7 +231,7 @@ func (r runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []c
 		}
 	}
 	if !hasTemplate && (strings.Contains(r.sc.AutomationTool, "datasource-clone") || strings.Contains(r.sc.AutomationTool, "disk-ops")) {
-		staged, err := stageSelectedTemplate(rc, trs[0], root)
+		staged, err := stageSelectedTemplate(trs[0], root)
 		if err != nil {
 			return stages.RunHandle{}, err
 		}
@@ -517,8 +517,8 @@ func datasourceCloneArgs(bootStorm bool, nsPrefix string) func(rc *core.RunCtx, 
 			"--save-results",
 			"--results-folder", resultsRoot,
 		)
-		if strParamOr(tr, "vm_template", "") != "" || selectedDataSource(rc, tr) != "" {
-			staged, err := stageSelectedTemplate(rc, tr, resultsRoot)
+		if strParamOr(tr, "vm_template", "") != "" || strParamOr(tr, "datasource", "") != "" {
+			staged, err := stageSelectedTemplate(tr, resultsRoot)
 			if err != nil {
 				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 			}
@@ -569,8 +569,8 @@ func diskOpsArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.Tes
 			"--save-results",
 			"--results-dir", resultsRoot,
 		)
-		if strParamOr(tr, "vm_template", "") != "" || selectedDataSource(rc, tr) != "" {
-			staged, err := stageSelectedTemplate(rc, tr, resultsRoot)
+		if strParamOr(tr, "vm_template", "") != "" || strParamOr(tr, "datasource", "") != "" {
+			staged, err := stageSelectedTemplate(tr, resultsRoot)
 			if err != nil {
 				return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 			}
@@ -623,7 +623,7 @@ func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestReq
 		if bs != "4k" {
 			return nil, fmt.Errorf("virtbench: %s: fio_bs must be 4k for read/write latency", tr.ID)
 		}
-		staged, err := stageSelectedTemplate(rc, tr, resultsRoot)
+		staged, err := stageSelectedTemplate(tr, resultsRoot)
 		if err != nil {
 			return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 		}
@@ -1059,13 +1059,13 @@ func failureRecoveryArgs(nsPrefix string) func(rc *core.RunCtx, bag *core.Bag, t
 	}
 }
 
-func stageSelectedTemplate(rc *core.RunCtx, tr core.TestRequirement, root string) (string, error) {
+func stageSelectedTemplate(tr core.TestRequirement, root string) (string, error) {
 	data, defaults, err := vmSourceTemplate(tr)
 	if err != nil {
 		return "", err
 	}
-	if selectedDataSource(rc, tr) != "" || (defaults && strings.Contains(string(data), "volumeMode:")) {
-		data, _, err = rewriteVMSource(data, selectedDataSource(rc, tr), defaults)
+	if strParamOr(tr, "datasource", "") != "" || (defaults && strings.Contains(string(data), "volumeMode:")) {
+		data, _, err = rewriteVMSource(data, strParamOr(tr, "datasource", ""), defaults)
 	}
 	if err != nil {
 		return "", err

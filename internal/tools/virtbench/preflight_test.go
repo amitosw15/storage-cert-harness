@@ -99,16 +99,6 @@ func TestSingleNodePreflightUnpinnedNodeIsSkipped(t *testing.T) {
 }
 
 func TestDataSourceSelection(t *testing.T) {
-	tr := core.TestRequirement{Params: map[string]any{"datasource": "images/plan"}}
-	if got := selectedDataSource(&core.RunCtx{DataSource: "cli"}, tr); got != "cli" {
-		t.Fatal(got)
-	}
-	if got := selectedDataSource(&core.RunCtx{}, tr); got != "images/plan" {
-		t.Fatal(got)
-	}
-	if got := selectedDataSource(nil, core.TestRequirement{}); got != "" {
-		t.Fatal(got)
-	}
 	for _, tt := range []struct {
 		value, ns, name string
 		bad             bool
@@ -167,8 +157,8 @@ esac
 				t.Fatal(err)
 			}
 			tr := core.TestRequirement{ID: "TR-VIRT-002", Params: map[string]any{"vm_template": path, "namespace_prefix": "my-tests", "start": 2, "iteration_clones": 3}}
-			rc := &core.RunCtx{DataSource: tt.selection}
-			refs, err := datasourcePreflight(context.Background(), rc, tr)
+			tr.Params["datasource"] = tt.selection
+			refs, err := datasourcePreflight(context.Background(), tr)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -186,7 +176,7 @@ esac
 					}
 				}
 			}
-			staged, err := stageSelectedTemplate(rc, tr, t.TempDir())
+			staged, err := stageSelectedTemplate(tr, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -223,7 +213,7 @@ func TestLocalDataSourceUsesScenarioNamespaceRange(t *testing.T) {
 	if len(refs) != 2 || refs[0].Namespace != "custom-7" || refs[1].Namespace != "custom-8" {
 		t.Fatalf("ignored scenario namespace range: %+v", refs)
 	}
-	staged, err := stageSelectedTemplate(&core.RunCtx{DataSource: "images/custom"}, core.TestRequirement{ID: "custom-workload"}, t.TempDir())
+	staged, err := stageSelectedTemplate(core.TestRequirement{ID: "custom-workload", Params: map[string]any{"datasource": "images/custom"}}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
