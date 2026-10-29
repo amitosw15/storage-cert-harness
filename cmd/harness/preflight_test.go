@@ -196,22 +196,7 @@ variants:
 	}
 }
 
-func TestDataSourceBoundaryUsesResolvedTool(t *testing.T) {
-	for _, tt := range []struct {
-		tr   core.TestRequirement
-		want bool
-	}{
-		{core.TestRequirement{ID: "TR-STOR-002", AutomationTool: "catalog alias"}, true},
-		{core.TestRequirement{ID: "TR-STOR-006", AutomationTool: "kube-burner-ocp pvc-density"}, false},
-		{core.TestRequirement{ID: "unknown", AutomationTool: "virtbench nonexistent"}, false},
-	} {
-		if got := usesVirtbench(tt.tr); got != tt.want {
-			t.Errorf("%+v: got %v, want %v", tt.tr, got, tt.want)
-		}
-	}
-}
-
-func TestResolveCLIDataSourcePreservesParamsAndAdapterBoundary(t *testing.T) {
+func TestResolveCLIDataSourcePreservesParamsWithoutAdapterDispatch(t *testing.T) {
 	shared := map[string]any{"datasource": "images/catalog", "other": true}
 	trs := []core.TestRequirement{
 		{ID: "TR-STOR-002", AutomationTool: "catalog alias", Params: shared},
@@ -231,7 +216,7 @@ func TestResolveCLIDataSourcePreservesParamsAndAdapterBoundary(t *testing.T) {
 		}
 		wants := []string{"images/plan", "images/variant", "images/catalog"}
 		if selection != "" {
-			wants[0], wants[1] = selection, selection
+			wants[0], wants[1], wants[2] = selection, selection, selection
 		}
 		for i, tr := range got {
 			if tr.Params["datasource"] != wants[i] || tr.Params["other"] != true {

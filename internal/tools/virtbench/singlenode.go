@@ -211,3 +211,7 @@ func singleNodeLunMetric(tr core.TestRequirement, res core.TestResult) []core.Me
 	vms := vmCount(res, "max_vms_per_node")
 	return []core.Metric{{Name: "max_luns_per_node", Value: float64(vms * disks), Unit: "count"}}
 }
+
+func singleNodeVMRange(tr core.TestRequirement) (int, int, error) {
+	return validateVMRange(tr, intParam(tr, "start", 1), intParam(tr, "attempt_vms", singleNodeDefaultCount))
+}

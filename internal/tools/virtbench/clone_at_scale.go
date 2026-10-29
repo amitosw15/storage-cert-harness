@@ -46,7 +46,7 @@ func cloneAtScaleArgs(nsPrefix string) func(rc *core.RunCtx, tr core.TestRequire
 			return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 		}
 		disks := intParam(tr, "num_disks", cloneAtScaleDefaultDisks)
-		start, end, err := scaleVMRange(tr)
+		start, end, err := cloneAtScaleRange(tr)
 		if err != nil {
 			return nil, err
 		}
@@ -92,4 +92,8 @@ func cloneAtScaleValidate(tr core.TestRequirement) error {
 		return fmt.Errorf("virtbench: %s: num_disks=%d but vm_template %q defines %d disk(s); they must match", tr.ID, disks, tmpl, got)
 	}
 	return nil
+}
+
+func cloneAtScaleRange(tr core.TestRequirement) (int, int, error) {
+	return validateVMRange(tr, intParam(tr, "start", 1), intParam(tr, "iteration_clones", 100))
 }

@@ -1091,3 +1091,15 @@ func stageSelectedTemplate(tr core.TestRequirement, root string) (string, error)
 	}
 	return filepath.Abs(path)
 }
+
+func cloneVMRange(tr core.TestRequirement) (int, int, error) {
+	start := intParam(tr, "start", 1)
+	end := intParam(tr, "num_vms", intParam(tr, "iteration_clones", 100))
+	return validateVMRange(tr, start, end)
+}
+
+func diskOpsVMRange(tr core.TestRequirement) (int, int, error) {
+	start := intParam(tr, "start", 1)
+	end := intParam(tr, "end", intParam(tr, "count", 100))
+	return validateVMRange(tr, start, end)
+}

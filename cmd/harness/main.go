@@ -16,7 +16,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
-	"strings"
 	"syscall"
 	"time"
 
@@ -190,9 +189,6 @@ func newPreflightCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			byTool := map[string][]core.TestRequirement{}
 			for _, tr := range trs {
-				if datasource != "" && !usesVirtbench(tr) {
-					fmt.Fprintf(out, "%s: --datasource affects Virtbench only; retaining adapter image source\n", tr.ID)
-				}
 				key := tr.AutomationTool
 				if tr.Variant != "" {
 					key = core.ExecutionLabel(key+":"+tr.ID, tr.Variant)
@@ -347,11 +343,6 @@ func newRunCmd() *cobra.Command {
 			}
 			// Parameters and variants are resolved before CLI overrides are applied.
 			cfg.Overrides, cfg.Variants = nil, nil
-			for _, tr := range selected {
-				if datasource != "" && !usesVirtbench(tr) {
-					logger.Info("--datasource affects Virtbench only; retaining adapter image source", "tr", tr.ID)
-				}
-			}
 			if len(selected) == 0 {
 				return fmt.Errorf("no test requirements selected")
 			}
@@ -723,11 +714,6 @@ func configureExecution(cmd *cobra.Command, cfg *config.Config, planPath, backen
 	return resolved, nil
 }
 
-func usesVirtbench(tr core.TestRequirement) bool {
-	tool, ok := orchestrator.ResolveTool(tr)
-	return ok && strings.HasPrefix(tool.Name, "virtbench ")
-}
-
 func resolveCLIExecutions(trs []core.TestRequirement, cfg config.Config, datasource string) ([]core.TestRequirement, error) {
 	executions, err := orchestrator.ResolveExecutions(trs, cfg)
 	if err != nil {
@@ -737,9 +723,6 @@ func resolveCLIExecutions(trs []core.TestRequirement, cfg config.Config, datasou
 		return executions, nil
 	}
 	for i := range executions {
-		if !usesVirtbench(executions[i]) {
-			continue
-		}
 		params := maps.Clone(executions[i].Params)
 		if params == nil {
 			params = map[string]any{}

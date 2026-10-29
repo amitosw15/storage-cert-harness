@@ -129,8 +129,8 @@ overrides:
     datasource: openshift-virtualization-os-images/rhel9-nas
 ```
 
-This option affects Virtbench only. Other adapters retain their existing image
-sources, and the CLI reports this boundary when they are selected. In particular,
+The CLI passes this option through test parameters; adapters decide whether to
+use it. Virtbench currently consumes it. In particular,
 kube-burner VM snapshots and kube-burner-ocp lifecycle workloads still use their
 existing `vm_image` sources.
 

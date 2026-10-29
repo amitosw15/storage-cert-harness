@@ -248,3 +248,9 @@ func uncordonNode(ctx context.Context, kubeconfig, node string) error {
 	}
 	return nil
 }
+
+func drainVMRange(tr core.TestRequirement) (int, int, error) {
+	start := intParam(tr, "start", 1)
+	end := intParam(tr, "end", intParam(tr, "count", drainDefaultCount))
+	return validateVMRange(tr, start, end)
+}

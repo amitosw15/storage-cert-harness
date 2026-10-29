@@ -194,3 +194,7 @@ func waitForVMRunning(ctx context.Context, kubeconfig, ns, vmName string, timeou
 func ensureNamespace(ctx context.Context, kubeconfig, ns string) error {
 	return kubectlApply(ctx, kubeconfig, "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: "+ns+"\n")
 }
+
+func recoveryVMRange(tr core.TestRequirement) (int, int, error) {
+	return validateVMRange(tr, 1, intParam(tr, "vm_count", 3))
+}
