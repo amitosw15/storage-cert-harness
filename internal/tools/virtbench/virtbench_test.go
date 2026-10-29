@@ -495,7 +495,7 @@ func TestBuildArgsFIO(t *testing.T) {
 	resultsDir := t.TempDir()
 	tr := core.TestRequirement{ID: "TR-STOR-002", Params: map[string]any{
 		"storage_class":   "ocs-storagecluster-ceph-rbd",
-		"fio_vm_template": "assets/fio-vm-template.yaml",
+		"fio_vm_template": "templates/TR-STOR-002/fio-vm-template.yaml",
 		"num_vms":         1,
 		"fio_bs":          "4k",
 	}}
@@ -521,7 +521,7 @@ func TestBuildArgsFIO(t *testing.T) {
 	}
 	fleet := core.TestRequirement{ID: "TR-STOR-002", Params: map[string]any{
 		"storage_class":   "ocs-storagecluster-ceph-rbd",
-		"fio_vm_template": "assets/fio-vm-template.yaml",
+		"fio_vm_template": "templates/TR-STOR-002/fio-vm-template.yaml",
 		"num_vms":         40,
 		"fio_bs":          "4k",
 		"profile":         "load-80",
