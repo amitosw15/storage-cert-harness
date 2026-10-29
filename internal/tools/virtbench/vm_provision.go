@@ -3,7 +3,6 @@ package virtbench
 import (
 	"context"
 	crand "crypto/rand"
-	_ "embed"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -12,9 +11,6 @@ import (
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
-
-//go:embed templates/rhel9-vm-failure-recovery.yaml
-var failureRecoveryVMTemplate string
 
 // provisionFailureRecoveryVMs creates vm_count VMs (one per namespace) on the
 // target node using a required nodeSelector. The custom virtbench FAR mode
