@@ -1,9 +1,7 @@
 package kubeburner
 
 import (
-	"embed"
 	"fmt"
-	"io/fs"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,37 +9,31 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
-//go:embed assets
-var assets embed.FS
-
 const snapshotJobsMarker = "# SNAPSHOT_JOBS"
 
-// writeConfig writes assets and renders snapshot jobs.
+// writeConfig stages templates in kube-burner's runtime layout and renders snapshot jobs.
 func writeConfig(dir string, params Params) (string, error) {
-	root := "assets"
-	err := fs.WalkDir(assets, root, func(p string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(root, p)
+	if err := safefs.MkdirAll(filepath.Join(dir, "templates"), 0o755); err != nil {
+		return "", fmt.Errorf("kube-burner: create template directory: %w", err)
+	}
+	entries, err := templates.ReadDir(snapshotTemplatesDir)
+	if err != nil {
+		return "", fmt.Errorf("kube-burner: read templates: %w", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		b, err := templates.ReadFile(snapshotTemplatesDir + "/" + name)
 		if err != nil {
-			return err
+			return "", fmt.Errorf("kube-burner: read template %s: %w", name, err)
 		}
-		dst := filepath.Join(dir, rel)
-		if d.IsDir() {
-			return safefs.MkdirAll(dst, 0o755)
-		}
-		b, err := assets.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		if rel == "config.yaml" {
+		dst := filepath.Join(dir, "templates", name)
+		if name == "config.yaml" {
+			dst = filepath.Join(dir, name)
 			b = []byte(strings.Replace(string(b), snapshotJobsMarker, snapshotJobs(params), 1))
 		}
-		return safefs.WriteFile(dst, b, 0o600)
-	})
-	if err != nil {
-		return "", fmt.Errorf("kube-burner: write config assets: %w", err)
+		if err := safefs.WriteFile(dst, b, 0o600); err != nil {
+			return "", fmt.Errorf("kube-burner: write template %s: %w", name, err)
+		}
 	}
 	return "config.yaml", nil
 }

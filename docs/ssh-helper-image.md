@@ -2,7 +2,7 @@
 
 Virtbench scenarios use a shared cluster pod `default/ssh-test-pod` for VM ping
 and in-VM SSH (`sshpass` / `ssh`). The harness creates it from an embedded
-manifest in Go and ships a matching example under the Virtbench runtime tree.
+YAML manifest and ships a matching example under the Virtbench runtime tree.
 
 The helper **image** is built and published from the
 [`storage-cert-harness-images`](../../storage-cert-harness-images/) GitLab project
@@ -38,10 +38,10 @@ Edit **both** of these to the same `@sha256:…` reference:
 
 | Location | What to change |
 | --- | --- |
-| `internal/tools/virtbench/setup.go` | `sshHelperImage` constant (update the comment with the Quay semver for humans). |
+| `internal/tools/virtbench/templates/shared/ssh-pod.yaml` | `containers[].image` on `ssh-client`. |
 | `container-patches/virtbench/examples/utilities/ssh-pod.yaml` | `containers[].image` on `ssh-client`. |
 
-The Go manifest and the YAML example must stay aligned: same image, security
+The embedded manifest and the runtime example must stay aligned: same image, security
 context, and volume mounts. Command logging (`ssh` / `sshpass` / `ping` → pod
 logs) is implemented in the **ssh-helper image** (`/opt/sshhelper/bin` in
 `storage-cert-harness-images/images/ssh-helper/`), not in the pod spec. The
