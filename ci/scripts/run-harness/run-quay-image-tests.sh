@@ -80,7 +80,17 @@ backend_name="$(yq e -r '.backends[] | select(.name == strenv(YQ_BACKEND)) | .na
 
 export SMOKE_CLUSTER_LEASE_KUBECONFIG="$(realpath "${KUBECONFIG}")"
 quay_plan="work/container-smoke.yaml"
-[[ -s "${quay_plan}" ]] || quay_plan="plans/harness-smoke-plan.yaml"
+if [[ ! -s "${quay_plan}" ]]; then
+	[[ -s plans/harness-smoke-plan.yaml ]] || {
+		echo "error: smoke plan missing: ${quay_plan} (run: make prepare-smoke-env)" >&2
+		exit 1
+	}
+	cp -f plans/harness-smoke-plan.yaml "${quay_plan}"
+fi
+[[ -s work/harness-run-thresholds.json ]] || {
+	echo "error: smoke thresholds missing: work/harness-run-thresholds.json (run: make prepare-smoke-env)" >&2
+	exit 1
+}
 smoke_cluster_lease_acquire "container-smoke" "${quay_plan}"
 smoke_cluster_lease_install_traps "_ci_log_flush"
 smoke_cluster_lease_start_renewal_loop
@@ -110,7 +120,7 @@ podman_args=(
 	"${image}"
 	run
 	--catalog /work/catalog.json
-	--thresholds /work/thresholds.json
+	--thresholds /work/harness-run-thresholds.json
 	--plan /work/container-smoke.yaml
 	--backends /work/backends.local.yaml
 	--backend "${backend}"

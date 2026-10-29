@@ -351,13 +351,12 @@ CI writes `dist/harness-image.tar` for scan jobs.
 
 ### Local image build lock
 
-`clean.sh`, `image-build.sh`, `image-build-local.sh`, `clean-image-cache.sh`,
+`build.sh`, `clean.sh`, `image-build.sh`, `image-build-local.sh`, `clean-image-cache.sh`,
 `image-contents-check.sh`, `image-scan-trivy.sh`, `image-scan-dive.sh`, and
 `image-push.sh` acquire an exclusive `flock` on `work/local-image.lock`. The
-lock serializes access to `work/local-image-ref`, image tarballs/tags, and the
+lock serializes access to `bin/harness`, `work/local-image-ref`, image tarballs/tags, and the
 shared `dist/*-version.txt` metadata so `make clean`, scan, push, or validation
-cannot overlap an image build or cache prune. `make build` (`build.sh`) does
-**not** take this lock; only image-related scripts do. `make image-build-local`
+cannot overlap an image build or cache prune. `make image-build-local`
 rebuilds the binary under the same image lock for the full rebuild.
 `make image-build-fresh` prunes cache and rebuilds in the same locked
 `image-build.sh` process (`IMAGE_BUILD_FRESH=1`). `image-build.sh` and
@@ -370,15 +369,56 @@ named image is not present in Podman.
 
 ### Smoke run lock
 
-`run-harness/run-image-tests.sh` acquires a separate exclusive `flock` on
-`work/smoke-run.lock` so two local smoke runs cannot overlap (log archive,
-`work/harness-smoke-work`, and `work/harness-smoke-report`). Smoke does not
-hold the image lock; `make build` and a long smoke run may proceed in parallel.
+`run-harness/run-image-tests.sh` acquires a separate non-blocking `flock` on
+`work/smoke-run.lock` so two local smoke runs cannot overlap (`work/harness-smoke-work`
+and `work/harness-smoke-report`). If the lock is held, the script exits immediately
+with code **3** and a message that local smoke is already running (it does not wait).
+Preflight output (including failed lock or cluster lease acquisition) goes to
+`logs/run-image-tests-temp.log`; the prior `logs/run-image-tests.log` is archived
+and a new run log is opened only after both the local lock and cluster lease are
+acquired. Smoke holds `local-image.lock` only briefly immediately before `podman run`:
+resolve `work/local-image-ref`, confirm the image exists, start the container, then
+release the lock while the harness runs inside Podman (avoids a TOCTOU race with
+`make image-build-local` during long preflight).
 
 Both locks are released automatically when the owning process exits, including
 when a command fails. The image lock is not a transaction: a failed build can
 leave partial engine layers, so rerun the relevant build before validation after
 an error. Lock files may remain on disk and are reused by subsequent runs.
+
+### Cluster smoke lease (shared lab / edge-112)
+
+`run-harness/run-image-tests.sh` and `run-harness/live-cluster-smoke.sh` acquire a Kubernetes
+**Coordination Lease** (`storage-cert-ci/storage-cert-harness-smoke`) via
+`ci/scripts/run-harness/smoke-cluster-lease.sh`: holder identity is the CI run id or
+`local-<user>-<epoch>` for developer runs; annotations record run id, host,
+plan, git SHA, and related metadata (see design doc §2). A background loop renews
+the lease every 5 minutes; `trap` on `EXIT` / `INT` / `TERM` stops renewal and
+deletes the lease when this run holds it. If another run holds the lease, the
+script exits with code **2** (cluster busy). Set
+`HARNESS_SMOKE_SKIP_CLUSTER_LEASE=true` to skip when the namespace is unavailable.
+Lease objects are rendered from
+`ci/config/smoke/cluster-smoke-lease.yaml.template` (placeholders replaced at
+acquire time). Verify behavior with
+`./ci/scripts/run-harness/test-smoke-cluster-lease.sh` (uses a dedicated
+`*-selftest` lease name; requires lease RBAC in `storage-cert-ci`).
+
+### Smoke configuration staging (`work/`)
+
+Tracked smoke inputs live under **`ci/config/smoke/`** (do not edit without
+maintainer review). Before a run, stage them into gitignored `work/`:
+
+| Make target | Purpose |
+| --- | --- |
+| `prepare-smoke-env` | Copy bundle + repo `catalog.json` into `work/` |
+| `clean-smoke-env` | Remove harness smoke artifacts, smoke logs, staged copies |
+| `smoke-env` | `clean-smoke-env` then `prepare-smoke-env` |
+| `smoke-ci` | `smoke-env` then `run-harness-smoke` (CI / first-time flow) |
+
+You must supply **`work/kubeconfig`** (or `KUBECONFIG=`) with access to the lab
+cluster. `run-image-tests.sh` expects staged `work/backends.local.yaml`,
+`work/harness-run-thresholds.json`, and `work/catalog.json`. See
+[`ci/scripts/run-harness/README.md`](../ci/scripts/run-harness/README.md).
 
 ### Partner certification runs (published image)
 
@@ -412,10 +452,11 @@ Outputs:
 result hygiene). Partner runs do **not** take `work/smoke-run.lock`; only one
 harness execution per cluster is documented as partner responsibility.
 
-Contributor smoke against a **local** image still uses `make run-harness-smoke`
-(`run-harness/run-image-tests.sh`, `work/local-image-ref`). Pulling the registry image for
-lab checks uses `make run-quay-image-tests` (`run-harness/run-quay-image-tests.sh`), which
-also archives `logs/run-quay-image-tests.log` before each run.
+Contributor smoke against a **local** image uses `make smoke-ci` or
+`make prepare-smoke-env` then `make run-harness-smoke` (`run-image-tests.sh`,
+`work/local-image-ref`). Pulling the registry image for lab checks uses
+`make run-quay-image-tests` (`ci/scripts/run-harness/run-quay-image-tests.sh`),
+which archives `logs/run-quay-image-tests.log` before each run.
 
 ## Job images (no Docker Hub)
 
@@ -433,7 +474,7 @@ generated projection is retained for repository compatibility.
 | image-scan-trivy | Trivy release binary (`TRIVY_VERSION`) + `dist/harness-image.tar` |
 | image-scan-dive | Dive release binary (`DIVE_VERSION`) + `dist/harness-image.tar` |
 
-`GO_IMAGE` (`docker.io/library/golang:1.26.9`, Go **1.26.9+**) is not used by the harness
+`GO_IMAGE` (UBI Go toolset **1.26.10** in `ci/config/images.env`, Go **1.26.10+**) is not used by the harness
 `Containerfile`. `BUILD_IMAGE` is **not** the UBI python builder base; it names
 the published **harness-builder** image that already contains the cert tools.
 `YAML_LINT_IMAGE` and `MD_LINT_IMAGE` use the UBI **minor stream** (`:9.8` /
@@ -457,7 +498,7 @@ Tags come from `TRIVY_VERSION` / `DIVE_VERSION` in `ci/config/images.env`
 
 ## Local tools
 
-Install once (idempotent). Requires Go 1.26.9+, git, python3, pip, and npm
+Install once (idempotent). Requires Go 1.26.10+, git, python3, pip, and npm
 already on `PATH`. Tool versions are pinned in `ci/config/images.env`.
 
 ```sh
@@ -469,7 +510,7 @@ make install-tools
 Put `$(go env GOPATH)/bin` **before** `/usr/local/bin` on `PATH`. Pins match
 `ci/config/images.env`: golangci-lint is a GitHub release binary installed
 into `~/.local/bin` (local) or `$(go env GOPATH)/bin` (CI). That build needs
-Go 1.26.9+ because `go.mod` is 1.26.9.
+Go 1.26.10+ because `go.mod` is 1.26.10.
 
 | Tool | Scripts | Installed by |
 | ------ | --------- | -------------- |
@@ -549,8 +590,8 @@ uploads `logs/*.log` when a job fails (not the README).
 | `run-partner-preflight.sh` | Partner preflight via published image (`make partner-preflight`) |
 | `run-partner-cert.sh` | Partner Level 3 load-80 or no-load-80 run (`make partner-cert-*`) |
 | `run-partner-package-results.sh` | `PARTNER_PACKAGE_MODE=level3\|smoke\|all`; default tarballs `certification-results-level3.tar.gz` or `-smoke.tar.gz` |
-| `run-harness/run-image-tests.sh` | Live smoke with **local** image ref (`make run-harness-smoke`); holds `work/smoke-run.lock` |
-| `run-harness/run-quay-image-tests.sh` | Pull and smoke **published** image against `work/` (`make run-quay-image-tests`) |
+| `run-image-tests.sh` | Live smoke with **local** image ref (`make run-harness-smoke`); holds `work/smoke-run.lock` |
+| `run-quay-image-tests.sh` | Pull and smoke **published** image against `work/` (`make run-quay-image-tests`) |
 
 The **release artifact** is that image ([ADR-0011](../decisions/0011-harness-ships-as-container-image.md)),
 not the `bin/harness` binary. Registry:
@@ -635,8 +676,9 @@ output.
 
 Workflow [ci-live-smoke.yml](../.github/workflows/ci-live-smoke.yml) is **off**
 until repository variable `CI_LIVE_SMOKE_ENABLED` is set to `true` and the
-`live-smoke` environment has cluster secrets. Until then, use local
-`make run-harness-smoke`.
+`live-smoke` environment has cluster secrets. Until then, use local `make smoke-ci` (or `make prepare-smoke-env` then
+`make run-harness-smoke` after `make image-build-local` and placing
+`work/kubeconfig`).
 
 Today's other jobs use hosted GitHub runners (no cluster). The **live-smoke** job
 (planned; see design doc below) runs against a real OpenShift cluster using the
@@ -648,11 +690,11 @@ full graded reports that contain real SLA bars.
 Design: [storage-cert-harness-ci-smoke-test.md](design/storage-cert-harness-ci-smoke-test.md)
 (in this repository).
 
-**What live smoke affects.** When implemented, the live-smoke workflow runs on PR
-open (and on demand). A **failed** smoke run is a **merge gate**: branch
-protection should require a passing live-smoke check before merging to `main`.
+**What live smoke affects.** When enabled, smoke runs only **on demand** or on the
+**daily schedule** (open same-repo PR activity in the last 24 hours). A **failed**
+smoke run is a **merge gate** when branch protection requires the check.
 Investigate failures and re-run smoke after fixes. Lint, unit test, build, image
-scan, and publish jobs are unchanged; only merge is blocked on smoke failure.
+scan, and publish jobs are unchanged.
 
 #### Skip live smoke (`[skip live-smoke]`)
 
@@ -668,7 +710,7 @@ or description** (or merge commit message on squash):
 |------|--------|
 | Case sensitivity | The token is **case-sensitive**. `[Skip live-smoke]` does **not** skip. |
 | Squash merges | GitHub uses the PR title and description for the squash commit message — put `[skip live-smoke]` in the PR title or description when you need a skipped smoke on merge. |
-| Without token | Live smoke runs on PR open when path filters match (see design doc). |
+| Without token | On-demand and scheduled smoke may run when triggered; skip token prevents scheduling for that PR |
 | Failed smoke job | **Blocks PR merge** until a passing re-run; skip token does not override a failed run |
 | Cluster lease | Skipped runs must not acquire the cluster lease. |
 | CI behavior (when implemented) | Log that smoke was skipped; GitHub check conclusion **Skipped** (not Success); workflow summary includes SHA, actor, token, and `live_smoke_skipped=true` for audit and follow-up (nightly or manual smoke). |
@@ -688,12 +730,26 @@ smoke or receive the upstream kubeconfig.
 |----------|------------|--------------------------------------------------|
 | Pull request **from a fork** into upstream | Not run (live-smoke workflow has no `pull_request` trigger) | Not passed to fork PR workflows ([GitHub fork PR secret rules](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions#accessing-your-secrets-in-forked-pull-requests)) |
 | Push to **fork** `main` | Not run — job requires `github.repository == 'openshift-storage-cert/storage-cert-harness'` | Upstream secrets are **not** available on the fork; only secrets the fork owner configures locally |
-| Push to **upstream** `main` | Runs when path filters match (unless `[skip live-smoke]`) | Only via GitHub **environment** `live-smoke` on the canonical repo |
+| Push to **upstream** `main` | Not run (no push trigger) | Only via GitHub **environment** `live-smoke` on the canonical repo |
+
+#### When live smoke runs (GitHub)
+
+| Trigger | Behavior |
+| --- | --- |
+| **Manual** | **Actions → CI Live Smoke → Run workflow** with `pr_number` (environment-gated) |
+| **PR comment** | `/run-live-smoke` from `MEMBER` / `OWNER` / `COLLABORATOR` / `MAINTAINER` on a same-repo PR |
+| **Schedule** | Daily **05:00 UTC**; runs only if an open same-repo PR to `main` was **updated** in the last **24 hours** and is not `[skip live-smoke]` |
+| **Not used** | `pull_request`, `push`, or default `CI` workflow — **no automatic smoke** |
+
+Same guards on every run: canonical repo, same-repo head, skip token, fork rejection,
+cluster lease (see design doc). Path-filter rules describe when smoke is **expected**
+before merge, not a separate auto-trigger.
 
 **Required when implementing live smoke:**
 
-1. Dedicated workflow with `on.push.branches: [main]` and `workflow_dispatch` only
-   — never `pull_request` or `pull_request_target` for cluster access.
+1. Dedicated workflow with **`schedule`**, **`workflow_dispatch`**, and
+   **`issue_comment`** only — **never** `pull_request`, `push`, or
+   `pull_request_target` for cluster access.
 2. Store kubeconfig, thresholds, and CI backends as **environment secrets** on
    `live-smoke`, deployment branch `main` on upstream — not shared via broad
    `secrets: inherit` on the default CI workflow.

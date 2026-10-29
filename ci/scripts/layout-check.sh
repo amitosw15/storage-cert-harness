@@ -23,20 +23,21 @@ for f in ci-utils.sh build.sh ci.sh image-build.sh image-push.sh \
 done
 
 echo "==> layout-check: ci/scripts/run-harness/"
-for f in Makefile run-image-tests.sh run-quay-image-tests.sh live-cluster-smoke.sh \
-	smoke-cluster-lease.sh replay-smoke.sh; do
+for f in Makefile README.md run-image-tests.sh run-quay-image-tests.sh live-cluster-smoke.sh \
+	smoke-cluster-lease.sh replay-smoke.sh prepare-smoke-env.sh clean-smoke-env.sh; do
 	[[ -f "${REPO_ROOT}/ci/scripts/run-harness/${f}" ]] || fail "missing ci/scripts/run-harness/${f}"
 done
-
-
-echo "==> layout-check: ci/config/smoke/"
-[[ -f "${REPO_ROOT}/ci/config/smoke/cluster-smoke-lease.yaml.template" ]] || \
-	fail "missing ci/config/smoke/cluster-smoke-lease.yaml.template"
 
 echo "==> layout-check: ci/config/"
 for f in golangci.yml yamllint.yaml markdownlint-cli2.jsonc trivyignore \
 	images.env images.yml secret-scan-allowlist.txt; do
 	[[ -f "${REPO_ROOT}/ci/config/${f}" ]] || fail "missing ci/config/${f}"
+done
+
+echo "==> layout-check: ci/config/smoke/"
+for f in README.md backends.local.yaml thresholds-smoke.json thresholds.json \
+	cluster-smoke-lease.yaml.template; do
+	[[ -f "${REPO_ROOT}/ci/config/smoke/${f}" ]] || fail "missing ci/config/smoke/${f}"
 done
 
 echo "==> layout-check: version files"

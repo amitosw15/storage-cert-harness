@@ -2,12 +2,13 @@
 /secrets/plain/
 
 # Real storage backend configs may carry inline credentials (dev only) or point
-# at local secret files — keep them out of git (decisions/0005). Only the fake
-# backends.example.yaml is tracked.
+# at local secret files — keep them out of git (decisions/0005). The curated
+# smoke-lab fixture is the only tracked backends.local.yaml.
 backends.yaml
 backends.local.yaml
 *.backends.yaml
 !backends.example.yaml
+!ci/config/smoke/backends.local.yaml
 
 # Build artifacts
 /bin/

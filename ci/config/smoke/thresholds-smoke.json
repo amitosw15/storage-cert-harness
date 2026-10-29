@@ -1,0 +1,277 @@
+{
+  "provenance": {
+    "generated_date": "2026-09-09",
+    "kb_commit_date": "2026-09-09",
+    "kb_git_commit": "66a4b8f0eccb1cb2184d99ba5f788aff59800b9a"
+  },
+  "schema_version": "2.0",
+  "test_requirements": [
+    {
+      "id": "TR-STOR-002",
+      "sla": [
+        {
+          "condition": "load-80, 4K random read",
+          "metric": "read_latency",
+          "operator": "<=",
+          "percentile": "p99",
+          "unit": "ms",
+          "value": 3,
+          "when": {
+            "profile": "load-80"
+          }
+        },
+        {
+          "condition": "load-80, 4K random write",
+          "metric": "write_latency",
+          "operator": "<=",
+          "percentile": "p99",
+          "unit": "ms",
+          "value": 3,
+          "when": {
+            "profile": "load-80"
+          }
+        }
+      ],
+      "sla_status": "defined"
+    },
+    {
+      "id": "TR-STOR-006",
+      "sla": [
+        {
+          "condition": "PVC bind p99 at 1000 concurrent PVCs (provisional; derived from TR-STOR-001 <15s mass-bind, ~2x allowance at 1000-scale — calibrate at cert time)",
+          "metric": "pvc_bind_latency",
+          "operator": "<=",
+          "percentile": "p99",
+          "unit": "s",
+          "value": 30,
+          "when": {
+            "iterations": 1000
+          }
+        },
+        {
+          "condition": "smoke: PVC bind p99 at reduced iteration count",
+          "metric": "pvc_bind_latency",
+          "operator": "<=",
+          "percentile": "p99",
+          "unit": "s",
+          "value": 60,
+          "when": {
+            "iterations": 3
+          }
+        }
+      ],
+      "sla_status": "defined"
+    },
+    {
+      "id": "TR-VIRT-001",
+      "sla": [
+        {
+          "condition": "100 concurrent VMs Running, synchronized power-on storm",
+          "metric": "vm_boot_time",
+          "operator": "<",
+          "unit": "min",
+          "value": 10,
+          "when": {
+            "num_vms": 100
+          }
+        },
+        {
+          "condition": "smoke: boot storm at reduced VM count",
+          "metric": "vm_boot_time",
+          "operator": "<",
+          "unit": "min",
+          "value": 15,
+          "when": {
+            "num_vms": 3
+          }
+        }
+      ],
+      "sla_status": "defined"
+    },
+    {
+      "id": "TR-VIRT-004",
+      "sla": [
+        {
+          "condition": "20 parallel live migrations complete",
+          "metric": "total_migration_duration",
+          "operator": "<=",
+          "unit": "min",
+          "value": 10,
+          "when": {
+            "concurrency": 20
+          }
+        },
+        {
+          "condition": "50 parallel live migrations complete",
+          "metric": "total_migration_duration",
+          "operator": "<=",
+          "unit": "min",
+          "value": 30,
+          "when": {
+            "concurrency": 50
+          }
+        },
+        {
+          "condition": "smoke: single live migration completes",
+          "metric": "total_migration_duration",
+          "operator": "<=",
+          "unit": "min",
+          "value": 15,
+          "when": {
+            "concurrency": 1
+          }
+        }
+      ],
+      "sla_status": "defined"
+    },
+    {
+      "id": "TR-VIRT-007",
+      "sla": [
+        {
+          "condition": "after unplanned node failure: volume re-attach + VM restart on a surviving node",
+          "metric": "vm_ha_restart_time",
+          "operator": "<=",
+          "unit": "s",
+          "value": 600
+        }
+      ],
+      "sla_status": "defined"
+    },
+    {
+      "id": "TR-VIRT-008",
+      "sla": [
+        {
+          "condition": "50 idle VMs (1 disk each) evacuated off a drained node — binary completion, generous bar",
+          "metric": "evacuation_time",
+          "operator": "<=",
+          "unit": "min",
+          "value": 10,
+          "when": {
+            "num_vms": 50
+          }
+        }
+      ],
+      "sla_status": "defined"
+    },
+    {
+      "id": "TR-VIRT-010",
+      "sla": [
+        {
+          "condition": "per-snapshot time-to-readyToUse",
+          "metric": "snapshot_ready_time",
+          "operator": "<=",
+          "percentile": "p99",
+          "unit": "s",
+          "value": 25
+        }
+      ],
+      "sla_status": "defined"
+    },
+    {
+      "id": "TR-VIRT-013",
+      "sla": [
+        {
+          "condition": "floor; publish the actual sustained max (reference >=50 VMs/node)",
+          "metric": "max_vms_per_node",
+          "operator": ">=",
+          "unit": "count",
+          "value": 50,
+          "when": {
+            "attempt_vms": 100
+          }
+        },
+        {
+          "condition": "smoke: sustained max VMs on one node at reduced attempt scale",
+          "metric": "max_vms_per_node",
+          "operator": ">=",
+          "unit": "count",
+          "value": 3,
+          "when": {
+            "attempt_vms": 3
+          }
+        }
+      ],
+      "sla_status": "defined"
+    },
+    {
+      "id": "TR-VIRT-018",
+      "sla": [
+        {
+          "condition": "N=100 concurrent VDI clones; average per-VM clone provisioning time",
+          "metric": "clone_duration",
+          "operator": "<",
+          "percentile": "p99",
+          "unit": "s",
+          "value": 15,
+          "when": {
+            "iteration_clones": 100
+          }
+        },
+        {
+          "condition": "smoke: clone provisioning at reduced scale",
+          "metric": "clone_duration",
+          "operator": "<",
+          "percentile": "p99",
+          "unit": "s",
+          "value": 120,
+          "when": {
+            "iteration_clones": 3
+          }
+        }
+      ],
+      "sla_status": "defined"
+    },
+    {
+      "id": "TR-VIRT-019",
+      "sla": [
+        {
+          "condition": "full create/resize/restart/snapshot/migrate/delete cycle for 20 VMs in parallel (provisional; binary soak — calibrate at cert time)",
+          "metric": "lifecycle_completion_time",
+          "operator": "<=",
+          "unit": "min",
+          "value": 30,
+          "when": {
+            "vms": 20
+          }
+        },
+        {
+          "condition": "smoke: parallel lifecycle at reduced VM count",
+          "metric": "lifecycle_completion_time",
+          "operator": "<=",
+          "unit": "min",
+          "value": 25,
+          "when": {
+            "vms": 2
+          }
+        }
+      ],
+      "sla_status": "defined"
+    },
+    {
+      "id": "TR-VIRT-027",
+      "sla": [
+        {
+          "condition": "concurrent live snapshots on a single volume, all readyToUse",
+          "metric": "snapshots_per_volume",
+          "operator": ">=",
+          "unit": "count",
+          "value": 250,
+          "when": {
+            "snapshot_count": 250
+          }
+        },
+        {
+          "condition": "smoke: snapshot depth at reduced count",
+          "metric": "snapshots_per_volume",
+          "operator": ">=",
+          "unit": "count",
+          "value": 3,
+          "when": {
+            "snapshot_count": 3
+          }
+        }
+      ],
+      "sla_status": "defined"
+    }
+  ]
+}

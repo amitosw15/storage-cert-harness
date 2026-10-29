@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed (2026-10-12); updated 2026-10-14 (PR smoke, edge-112, lease)
+In progress (2026-10-12 proposed; 2026-10-14 PR smoke, edge-112, lease; **2026-10-21**
+implementation on `smoke-plan-single` — local smoke path largely wired; cluster
+lease and CI live smoke still pending). See [§13 Implementation progress](#13-implementation-progress).
 
 ## Summary
 
@@ -18,14 +20,20 @@ there is **no queue** — a second run fails fast if the lease is held.
 
 **Team trigger model (decided):**
 
-- Smoke runs on **pull request opened** to `main` (same-repo branches only) **once
-  per PR** when path filters match — **not** on every commit, **not** on push to
-  `main` by default.
-- Further runs are **on demand** (PR comment, GitHub Actions UI, or
-  `gh pr comment` — §1.4).
+- **No automatic smoke** on PR open, push to `main`, or the default `CI` workflow.
+- Smoke runs only when explicitly requested:
+  - **On demand:** PR comment `/run-live-smoke` (trusted association), or
+    `workflow_dispatch` with PR number (Actions UI / allowed environment actors).
+  - **Scheduled:** once daily (`05:00 UTC`); runs only if at least one **open**
+    same-repo PR to `main` was **updated** in the **last 24 hours** and does not
+    contain `[skip live-smoke]`.
+- When a run is scheduled, the **same guards** apply as on-demand: canonical repo,
+  same-repo head, skip token, fork rejection, cluster lease, environment secrets
+  (path-filter rules in §1 remain policy for when smoke is *required* before merge,
+  not a separate automatic trigger).
 - Contributors **must** run the smoke plan at least once on a **personal /
-  dedicated non-CI lab** before opening a PR when their diff triggers CI smoke
-  (documented in `README.md` and `docs/contributing.md`).
+  dedicated non-CI lab** before opening a PR when their diff would require smoke
+  at merge time (documented in `README.md` and `docs/contributing.md`).
 - **Failed PR smoke is a merge gate:** the live-smoke check must **pass** before
   the PR can merge. Investigate failures (logs, `report.json`, artifacts), fix or
   re-run on demand (§1.4) — do not merge with a failed smoke run. `[skip
@@ -42,11 +50,11 @@ overrides. Image build/publish on `main` stays on the existing `ci-images` /
 ```mermaid
 flowchart LR
   subgraph trigger [Trigger]
-    PR[PR opened to main]
-    PF[Path filter]
     OD[On demand comment or UI]
-    PR --> PF
+    SCH[Daily schedule if PR activity 24h]
+    PF[Same guards when run starts]
     OD --> PF
+    SCH --> PF
   end
   subgraph ci [CI executor]
     IB[Image from PR build artifact]
@@ -60,13 +68,16 @@ flowchart LR
     CLN[Cleanup and release lease]
     LE --> PRE --> RUN --> CLN
   end
-  PF -->|once per PR| LS
+  PF -->|explicit or scheduled| LS
   OD -->|re-run| LS
   LS --> LE
 ```
 
-**Building blocks:** `plans/harness-smoke-plan.yaml`, `ci/scripts/run-image-tests.sh`,
-`ci/scripts/live-cluster-smoke.sh` (to add), offline `replay-smoke.sh` (not a
+**Building blocks:** smoke plan and thresholds (today:
+`plans/harness-smoke-plan.yaml`, `thresholds-smoke.json`; target bundle:
+`ci/config/smoke/` — §6.5), `ci/scripts/run-harness/run-image-tests.sh`,
+`ci/scripts/stage-smoke-config.sh` (to add — §6.6),
+`ci/scripts/run-harness/live-cluster-smoke.sh` (scaffold), offline `run-harness/replay-smoke.sh` (not a
 substitute for live smoke).
 
 ## Goals and non-goals
@@ -74,7 +85,7 @@ substitute for live smoke).
 | Goals                                                                                        | Non-goals                                                      |
 | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | Catch regressions across **all** catalog automations (smoke scale) on a real OCP+CNV cluster | Full Level-3 certification scale or HA/fencing (`TR-VIRT-007`) |
-| Run on PR open (once) and contributor on-demand when harness/image paths change              | Running on every PR commit or on `vendor`/`go.mod`-only diffs  |
+| Run on contributor on-demand and optional daily schedule when open PRs had activity in 24h | Running on every PR commit, on PR open, or on push to `main` |
 | Exclusive, safe use of a shared or dedicated CI cluster                                      | Storing real threshold bars or kubeconfig in git               |
 | Deterministic preflight, minimal plan params, cleanup on all exit paths                      | Publishing graded reports with partner SLA secrets             |
 
@@ -108,7 +119,7 @@ maintainer — fork pushes to `main` are already impossible on protected branche
 #### Acceptance criteria
 
 - PR title/body containing `[skip live-smoke]` does not start cluster work.
-- PR opened without the token still runs live smoke once when path filters match.
+- On-demand and scheduled workflows respect the skip token; no workflow runs smoke on PR open.
 - Token is case-sensitive and documented in `docs/ci.md` and PR template.
 - Skipped runs do not hold the cluster lease.
 - Audit: workflow run records `live_smoke_skipped=true` in the summary for later
@@ -153,8 +164,8 @@ the ops runbook instead.
 | ECOPROJECT-5462 AC                         | This design                                                                                               |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
 | Hosted runner used only for cluster smoke  | Satisfied by dedicating a runner label / GitLab tag to the live-smoke job only                            |
-| PR targeting `main` runs smoke             | **Adopted** — once on `opened`, path filters; **required** merge gate on failure                           |
-| Push to `main` does not run smoke          | **Adopted** — automatic smoke is PR-based, not post-merge push                                            |
+| PR targeting `main` can run smoke on demand / schedule | **Adopted** — no PR-open auto-run; **required** merge gate on failure when check runs |
+| Push to `main` does not run smoke          | **Adopted** — no push trigger; optional daily schedule only with 24h PR activity       |
 | PR to non-`main` branch does not run smoke | Satisfied                                                                                                 |
 | Fork PRs cannot read cluster secrets       | Satisfied via protected environments / `main`-only workflows / no `pull_request` trigger for live smoke   |
 | Named owners, rotation, escalation         | Section 3 and **Operations**                                                                              |
@@ -167,9 +178,10 @@ the ops runbook instead.
 
 | Event | Run live smoke automatically? | Notes |
 | --- | --- | --- |
-| `pull_request` → `main`, type **`opened`** | **Yes, once per PR** if path filter matches and same-repo | Does **not** re-run on `synchronize` (new commits) |
-| `pull_request` → `main`, contributor **on demand** | Yes | Comment or UI action — [§1.4](#14-contributor-on-demand-smoke-on-a-pr) |
-| Push to `main` | **No** (default) | Lint/build/publish only; optional nightly smoke is [§11](#11-remaining-open-items) |
+| `pull_request` → `main` (any type) | **No** | No automatic smoke on open or new commits |
+| Contributor **on demand** (`/run-live-smoke`, `workflow_dispatch`) | Yes when allowed | [§1.4](#14-contributor-on-demand-smoke-on-a-pr) |
+| **`schedule`** (daily) | **Conditional** | Only if an open same-repo PR to `main` was updated in the last 24h and not skipped |
+| Push to `main` | **No** | Lint/build/publish only |
 | `workflow_dispatch` | On demand | `pr_number` only (SHA resolved on `ubuntu-latest` before self-hosted checkout) |
 | Fork PR → upstream | **No** | No upstream kubeconfig |
 
@@ -194,25 +206,27 @@ fork workflows. Required behavior:
 | PR from a **fork** into upstream `main` | **Not triggered** (no `pull_request` trigger on live-smoke workflow) | **Not available** — GitHub does not pass upstream secrets to `pull_request` workflows for fork PRs |
 | Push to **fork** `main` (copy of the repo) | **Not triggered** — job `if` requires canonical repository (below) | **Not available** — only secrets defined on the fork exist; upstream kubeconfig is never injected |
 | Push to **upstream** `main` | No automatic smoke | N/A for default pipeline |
-| Same-repo PR `opened` / on-demand | Yes when allowed | `environment: live-smoke` on upstream |
+| Same-repo PR on demand | Yes when allowed | `environment: live-smoke` on upstream |
+| Daily schedule | Yes only if open same-repo PR updated in last 24h (and not skipped) | Environment-gated |
 | `workflow_dispatch` on upstream | Contributors with env access | Environment-gated |
 
 **Implementation guards (GitHub):**
 
 1. **Separate workflow** `ci-live-smoke.yml` with:
-   - `pull_request`: `types: [opened]` and `branches: [main]` for the **one-time**
-     automatic run;
-   - `issue_comment` (and/or `workflow_dispatch`) for **on-demand** re-runs — [§1.4](#14-contributor-on-demand-smoke-on-a-pr);
-   - **no** `push` to `main` for smoke (unless nightly is added later).
+   - **`workflow_dispatch`** (PR number input) and **`issue_comment`** `/run-live-smoke`
+     for on-demand runs — [§1.4](#14-contributor-on-demand-smoke-on-a-pr);
+   - **`schedule`** (daily): smoke only when an open same-repo PR to `main` was
+     updated in the last 24 hours and is not `[skip live-smoke]`;
+   - **no** `pull_request`, **no** `push` to `main` for smoke.
    **Never** `pull_request_target` with secrets to execute fork-supplied code.
 2. **Repository and same-repo guard:**
 
    ```yaml
    if: >-
      github.repository == 'openshift-storage-cert/storage-cert-harness' &&
-     github.event.pull_request.head.repo.full_name == github.repository &&
-     !contains(github.event.pull_request.title, '[skip live-smoke]') &&
-     !contains(github.event.pull_request.body, '[skip live-smoke]')
+     # same-repo PR resolved via Pulls API in resolve-* jobs; reject fork heads
+     !contains(pr.title, '[skip live-smoke]') &&
+     !contains(pr.body, '[skip live-smoke]')
    ```
 
    Adjust the string if the canonical GitHub org/repo name changes; document the
@@ -297,15 +311,15 @@ Skipped runs **never** acquire the cluster lease.
 
 ### 1.4 Contributor on-demand smoke on a PR
 
-After the **one-time** `opened` run, any **same-repo** contributor with permission
-to run workflows (or comment on the PR) may request another smoke:
+There is **no** automatic smoke when a PR is opened. Contributors (or maintainers)
+request smoke explicitly:
 
 | Mechanism | Suggested implementation | Who |
 | --- | --- | --- |
 | **PR comment** | `/run-live-smoke` on `issue_comment` where `issue.pull_request` is set; bot/workflow validates same-repo + not `[skip live-smoke]` + lease free | Contributors with `write` or `maintain` on repo (tune in workflow) |
 | **GitHub CLI** | `gh pr comment <PR> --repo openshift-storage-cert/storage-cert-harness --body '/run-live-smoke'` | Same as PR comment (triggers `issue_comment` workflow) |
 | **GitHub UI** | `workflow_dispatch` with input `pr_number` (no free-form `git_ref`) | Same; link run in PR summary |
-| **Actions button** | Re-run the **PR-open** workflow from Checks | Resolver re-fetches the PR head via API so reruns use the **current** head SHA |
+| **Daily schedule** | `05:00 UTC` cron when an open same-repo PR had activity in the last 24h | Same guards; `max-parallel: 1` on cluster |
 
 **Guards (all on-demand paths):**
 
@@ -327,7 +341,7 @@ not sensitive).
 
 | | CI shared lab (edge-112) | Contributor lab |
 | --- | --- | --- |
-| Purpose | Once-on-PR-open + on-demand re-runs | Pre-PR validation required by policy |
+| Purpose | On-demand + optional daily schedule (24h PR activity) | Pre-PR validation required by policy |
 | Access | `live-smoke` environment secrets | Contributor `KUBECONFIG` + `work/backends.local.yaml` |
 | Entry point | GHA / GitLab | `make build` + `make image-build-local` + `make run-harness-smoke` |
 
@@ -412,7 +426,7 @@ overrides:
 | 4 | Confirm node drain / migration TRs do not violate lab policy (non-destructive only — no `TR-VIRT-007`) |
 | 5 | Sign off in this doc (date, owner) under **edge-112 sign-off** below |
 
-**edge-112 sign-off:** _Pending — fill after successful full-plan run._
+**edge-112 sign-off:** *Pending — fill after successful full-plan run.*
 
 ### Dedicated vs shared
 
@@ -607,7 +621,7 @@ Upload **sanitized** artifacts: `report.md`, junit if present, redacted `report.
 When Layer C fails, the GitHub Actions job exits non-zero so the PR check is
 **failed** and branch protection **blocks merge** until a subsequent run passes.
 
-                                                                                  ---
+---
 
 ## 5. Smoke plan scope (full catalog, no HA, 20-minute cap per TR)
 
@@ -626,12 +640,12 @@ meet the 20-minute bar.
 
 | TR          | Title (short)                  | Tool family                | In CI smoke                          |
 | ----------- | ------------------------------ | -------------------------- | ------------------------------------ |
-| TR-STOR-002 | FIO storage IO (smoke profile) | virtbench fio              | Yes                                  |
+| TR-STOR-002 | FIO storage IO (smoke profile) | virtbench fio              | Yes ( **temporarily out** of plan — [ECOPROJECT-5566](https://redhat.atlassian.net/browse/ECOPROJECT-5566)) |
 | TR-STOR-006 | PVC provisioning density       | kube-burner-ocp            | Yes                                  |
 | TR-VIRT-001 | Cold VM boot storm             | virtbench                  | Yes                                  |
 | TR-VIRT-004 | Parallel live migration        | kube-burner-ocp            | Yes (single variant; see section 6)  |
 | TR-VIRT-007 | VM HA after node failure       | virtbench failure-recovery | **No**                               |
-| TR-VIRT-008 | Node drain                     | virtbench drain            | Yes                                  |
+| TR-VIRT-008 | Node drain                     | virtbench drain            | **No** (destructive / cordon — excluded from `harness-smoke-plan.yaml`) |
 | TR-VIRT-010 | VM snapshot at scale           | kube-burner                | Yes                                  |
 | TR-VIRT-013 | Per-node scale ceiling         | virtbench single-node      | Yes                                  |
 | TR-VIRT-018 | Clone at scale                 | virtbench clone            | Yes                                  |
@@ -660,8 +674,9 @@ references a TR on the documented exclusion list.
 
 ### 6.1 Plan file and overrides
 
-**Source of truth:** `plans/harness-smoke-plan.yaml` — committed in the repo, not
-generated in CI.
+**Source of truth (today):** `plans/harness-smoke-plan.yaml` — committed in the repo,
+not generated in CI. **Target (§6.5):** canonical copies under `ci/config/smoke/`
+staged into `work/` before each local or CI smoke run.
 
 | Plan field | CI value | Notes |
 | --- | --- | --- |
@@ -722,8 +737,8 @@ only after re-benchmark on edge-112 and update §6.3 timing table.
 | TR-VIRT-027 | `snapshot_count`     | `3`                                                   | vs catalog default 250                                     |
 | TR-VIRT-027 | `replicas`           | `1`                                                   |                                                            |
 
-Keep `thresholds.json` in CI for grading hooks; many checks will **skip** SLA
-bars at this scale (`report-only`) — that is expected.
+Local and CI smoke runs use **`thresholds-smoke.json`** (smoke SLA bars). Certification
+`thresholds.json` remains for full cert runs only.
 
 ### 6.3 Execution time measurement (edge-112 and CI)
 
@@ -746,9 +761,86 @@ from `select.ids` (document in table below).
 | TR          | Status   | edge-112 duration (s) | Notes                              |
 | ----------- | -------- | --------------------- | ---------------------------------- |
 | TR-VIRT-007 | Excluded | —                     | HA / node failure — never in smoke |
-| _(others)_  | TBD      | TBD                   | Fill after edge-112 benchmark      |
+| *(others)*  | TBD      | TBD                   | Fill after edge-112 benchmark      |
 
-**Full suite (edge-112):** _TBD_ seconds — update after sign-off §2.
+**Full suite (edge-112):** *TBD* seconds — update after sign-off §2.
+
+### 6.5 Local smoke configuration bundle (`ci/config/smoke/`)
+
+Smoke needs three **versioned, non-secret** inputs plus cluster-specific secrets
+that stay out of git. To avoid scattering paths (`plans/…`, repo-root
+`thresholds-smoke.json`, ad hoc `work/backends.local.yaml`), the repo will keep a
+**single ordered bundle** under `ci/config/smoke/` (alongside existing
+`ci/config/images.env`, `golangci.yml`, etc.).
+
+| File in bundle | Purpose | Secret? |
+| --- | --- | --- |
+| `harness-smoke-plan.yaml` | TR selection + smoke overrides (`backend`, `select.ids`, `overrides`) | No |
+| `backends.yaml` | **Template** backends file: defines the plan’s `backend:` name (e.g. `oc-edge-112`), `storage_class`, `snapshot_class`, vendor params **without** credentials | No (no `inline` secrets) |
+| `thresholds-smoke.json` | SLA bars for smoke grading | No |
+
+**Migration:** Today the plan lives in `plans/harness-smoke-plan.yaml` and
+thresholds in repo-root `thresholds-smoke.json`. When `ci/config/smoke/` lands,
+those paths become the **canonical** smoke bundle (either move files or symlink
+from the old paths for one release — prefer **one** canonical tree). The plan
+`backend:` field must match a `backends[].name` entry in the staged backends file.
+
+**Not in the bundle (remain under `work/`, gitignored):**
+
+| Path | Purpose |
+| --- | --- |
+| `work/kubeconfig` | Cluster API access |
+| `work/backends.local.yaml` | Operator copy of `ci/config/smoke/backends.yaml` with real `secrets:` / site-specific `storage_class` (or generated by staging — see §6.6) |
+| `work/local-image-ref` | Built harness image tag |
+| `work/harness-smoke-work/`, `work/harness-smoke-report/` | Run artifacts |
+
+Optional later: `ci/config/smoke/README` listing env vars (`BACKEND`, `KUBECONFIG`,
+`HARNESS_SMOKE_KEEP_WORK`).
+
+### 6.6 Automatic staging to `work/` (`stage-smoke-config.sh`)
+
+**Goal:** One helper invoked at the start of `run-image-tests.sh` (and eventually
+`live-cluster-smoke.sh`) so contributors do not manually copy plan, thresholds,
+or backends.
+
+**Proposed script:** `ci/scripts/stage-smoke-config.sh`
+
+1. Source `ci-utils.sh`; resolve `REPO_ROOT`.
+2. Require `ci/config/smoke/harness-smoke-plan.yaml`,
+   `ci/config/smoke/thresholds-smoke.json`, and `ci/config/smoke/backends.yaml`.
+3. Copy in **fixed order** (deterministic, logged):
+
+   | Source (bundle) | Destination under `work/` |
+   | --- | --- |
+   | `ci/config/smoke/thresholds-smoke.json` | `work/harness-run-thresholds.json` |
+   | `ci/config/smoke/harness-smoke-plan.yaml` | `work/smoke/harness-smoke-plan.yaml` |
+   | `ci/config/smoke/backends.yaml` | `work/backends.local.yaml` **only if** missing or `HARNESS_SMOKE_REFRESH_BACKENDS=true` |
+
+4. Never overwrite `work/kubeconfig` or `work/local-image-ref`.
+5. Print which paths were staged (for log forensics).
+
+**`run-image-tests.sh` changes (target):**
+
+- Call `stage-smoke-config.sh` after `acquire_smoke_run_lock` / log archive, before validation.
+- Read plan from `work/smoke/harness-smoke-plan.yaml` (or `HARNESS_SMOKE_PLAN` override).
+- Mount staged plan and `work/harness-run-thresholds.json` into the harness container (same as today’s thresholds copy, but sourced from the bundle).
+
+**`make run-harness-smoke`:** unchanged entry; inherits staging via `run-image-tests.sh`.
+
+**Personal lab / different backend:**
+
+- Edit `ci/config/smoke/backends.yaml` **locally** (uncommitted) or maintain a
+  gitignored `work/backends.local.yaml` and set `HARNESS_SMOKE_REFRESH_BACKENDS=false`.
+- Set plan `backend:` and matching `backends[].name`; optional `BACKEND=` env override.
+- Optional `HARNESS_SMOKE_PLAN=/path/to/plan.yaml` to experiment without editing the bundle.
+
+**CI:** `live-cluster-smoke.sh` materializes secrets from the environment, then
+calls the same staging helper so CI and laptop use identical bundle layout; only
+kubeconfig and secret-backed backend fields differ.
+
+**Status:** Staging script and `ci/config/smoke/` directory are **not implemented**
+yet; `run-image-tests.sh` still reads `plans/harness-smoke-plan.yaml` and copies
+repo-root `thresholds-smoke.json` directly (see §13).
 
 ---
 
@@ -829,7 +921,7 @@ On GitLab/GHA **timeout** or **cancel**:
 
 ### New script
 
-`ci/scripts/live-cluster-smoke.sh`:
+`ci/scripts/run-harness/live-cluster-smoke.sh`:
 
 1. Source `ci-utils.sh`; `ci_log_init live-cluster-smoke`
 2. Materialize secrets to `work/` (thresholds, backends, kubeconfig)
@@ -847,16 +939,18 @@ Implementation: [`.github/workflows/ci-live-smoke.yml`](../../.github/workflows/
 Each trigger uses **`ubuntu-latest` resolve + bundle jobs** (no `live-smoke`
 environment) to validate same-repo PR metadata, check out the PR head SHA, and
 upload a short-lived workflow artifact. **Self-hosted** jobs check out **`main`**
-only (trusted [`ci/scripts/live-cluster-smoke.sh`](../../ci/scripts/live-cluster-smoke.sh)),
+only (trusted [`ci/scripts/run-harness/live-cluster-smoke.sh`](../../ci/scripts/run-harness/live-cluster-smoke.sh)),
 download the PR tree to `pr-src/`, and run the script with **`bash`** (not PR
-executables). The PR-open resolver loads the current head via the **Pulls API**
-so Actions UI reruns do not stick on the original `opened` event SHA.
-`workflow_dispatch` accepts **`pr_number` only** (not arbitrary `git_ref`).
+executables). Resolvers load the current PR head via the **Pulls API** (on-demand
+and scheduled paths). `workflow_dispatch` accepts **`pr_number` only** (not
+arbitrary `git_ref`).
 
-Wire smoke as a **separate** workflow with a **required** PR status check. PR
-`opened` runs **once**; `issue_comment` `/run-live-smoke` handles re-runs after
-fixes. Failed runs block merge. No `push` to `main` trigger for smoke in the
-default design.
+Wire smoke as a **separate** workflow with a **required** PR status check when
+operators enable it. Triggers: **`workflow_dispatch`**, **`issue_comment`**
+`/run-live-smoke`, and **daily schedule** (only if open same-repo PRs were updated
+in the last 24 hours). **No** `pull_request` or `push` triggers. Failed runs
+block merge when branch protection requires the check. Resolvers load the current
+PR head via the Pulls API.
 
 ### GitLab
 
@@ -883,28 +977,32 @@ Log retention: keep smoke logs 14–30 days; no full cluster dumps.
 
 | # | Item | Status |
 | --- | --- | --- |
-| 1 | **edge-112 sign-off** — full non-HA smoke plan on lab cluster (§2) | Pending |
-| 2 | **Implement** `live-cluster-smoke.sh` (lease, annotations, janitor, timing artifact) | Scaffold on `main`; full run pending |
-| 3 | **Implement** `ci-live-smoke.yml` (PR `opened` once, comment/UI on-demand) | Pending |
-| 4 | **ECOPROJECT-5536** — skip token on PR; workflow summary `live_smoke_skipped` | Docs done |
-| 5 | **ECOPROJECT-5535** — job `timeout-minutes` on all GHA jobs | Pending |
-| 6 | **Update ECOPROJECT-5406** — PR smoke, not post-merge-only | Pending |
-| 7 | **Nightly smoke** on `main` (optional backlog when PR skipped / lab was down) | Optional |
-| 8 | **Branch protection** — add required `live-smoke` check on PRs to `main` | Pending (with workflow implementation) |
+| 1 | **edge-112 sign-off** — smoke plan on lab cluster; §6.3/6.4 timings | Pending (8-TR plan passes locally without TR-STOR-002) |
+| 2 | **`live-cluster-smoke.sh`** — lease, secrets, podman run, janitor, timing artifact | Scaffold exits 0; TODO ECOPROJECT-5488 |
+| 3 | **Enable CI live smoke** — `CI_LIVE_SMOKE_ENABLED`, runner, `live-smoke` env secrets | Workflow scaffolded; disabled |
+| 4 | **Cluster lease** (§2) — Coordination Lease, fail-fast, release on trap | Not started (local `smoke-run.lock` only) |
+| 5 | **`ci/config/smoke/` + `stage-smoke-config.sh`** (§6.5–6.6) | Designed; not implemented |
+| 6 | **TR-STOR-002** back in `select.ids` after virtbench gather fix | Out — [ECOPROJECT-5566](https://redhat.atlassian.net/browse/ECOPROJECT-5566) |
+| 7 | **ECOPROJECT-5536** — skip token; check conclusion **Skipped** + summary audit | Docs done; verify in workflow |
+| 8 | **ECOPROJECT-5535** — `timeout-minutes` on GHA jobs (smoke ~240m) | Pending |
+| 9 | **Branch protection** — required `live-smoke` check on PRs to `main` | Pending |
+| 10 | **Contributor runbook** — backend/plan/thresholds, personal lab vs edge-112 | Partial (`README.md`); extend per §6.6 |
+| 11 | **Update ECOPROJECT-5406** — PR smoke model | Pending |
+| 12 | **Daily scheduled smoke** (24h open-PR activity gate) | Implemented in `ci-live-smoke.yml` schedule |
 
-**Closed team decisions (for reference):** PR `opened` once (not per commit);
-not on push to `main`; **failed PR smoke blocks merge**; no lease queue; exclude
-`vendor`/`go.mod` from path triggers; contributor on-demand via §1.4; `[skip
-live-smoke]` only when lab unavailable.
+**Closed team decisions (for reference):** **no** automatic smoke on PR open or
+push to `main`; on-demand + daily schedule (24h PR activity) only; **failed PR
+smoke blocks merge** when the check ran; no lease queue; `[skip live-smoke]` only
+when lab unavailable.
 
 ---
 
 ## 12. Verification checklist (for story closure)
 
 - [ ] edge-112: full non-HA smoke plan passes with §6 overrides; timings recorded in §6.3/6.4.
-- [ ] PR **opened** to `main` (same-repo, path match) runs smoke **once**; second commit on PR does **not** auto-run.
-- [ ] `/run-live-smoke` comment or `workflow_dispatch` re-runs smoke on same-repo PR.
-- [ ] PR with **only** `vendor`/`go.mod` change does **not** auto-run smoke.
+- [ ] No smoke on PR **open** or **push** to `main`; `/run-live-smoke`, `workflow_dispatch`, or daily schedule (24h PR activity) start runs.
+- [ ] `/run-live-smoke` comment or `workflow_dispatch` runs smoke on same-repo PR at current head.
+- [ ] Daily schedule skips when no open same-repo PR was updated in the last 24 hours.
 - [ ] Failed PR smoke blocks merge; passing on-demand re-run unblocks.
 - [ ] `[skip live-smoke]` in PR title/body skips smoke scheduling only (lab down); not used to bypass failures.
 - [ ] Second concurrent smoke **fails fast** (no queue); Lease shows holder annotations (plan, SHA, PR, API host).
@@ -915,6 +1013,42 @@ live-smoke]` only when lab unavailable.
 - [ ] **Fork** PR: no smoke, no kubeconfig.
 - [ ] Push to `main` does **not** auto-trigger smoke (default design).
 - [ ] Local `run-harness-smoke` parity with CI plan/overrides.
+- [ ] `ci/config/smoke/` staged to `work/` on every local smoke run (§6.6).
+- [ ] TR-STOR-002 included when ECOPROJECT-5566 is resolved.
+
+---
+
+## 13. Implementation progress
+
+Tracking branch work through **`smoke-plan-single`** (local image smoke); design
+targets in §1–§12 unchanged unless noted here.
+
+### Done (merged or on branch)
+
+| Area | Delivered |
+| --- | --- |
+| **Smoke plan** | Expanded `harness-smoke-plan.yaml`: 8 TRs (excludes TR-VIRT-007/008); TR-STOR-002 **commented out** until FIO gather reliable |
+| **Smoke thresholds** | `thresholds-smoke.json`; `run-image-tests.sh` copies → `work/harness-run-thresholds.json` |
+| **TR-STOR-002 FIO runner** | `engine.go`: deploy → `waitForFIOVMs` → `gather-results` with `fio_collect_*` (no harness guest SSH) |
+| **Local smoke hygiene** | `acquire_smoke_run_lock` (`work/smoke-run.lock`); archive prior `run-image-tests.log`; `clean_harness_smoke_artifacts` before run; `HARNESS_SMOKE_KEEP_WORK` |
+| **Build vs smoke lock** | `build.sh` no longer takes image lock; image lock separate from smoke (`docs/ci.md`) |
+| **Cert thresholds** | `when` scoping on selected VIRT bars in `thresholds.json` (full cert vs smoke bundle split) |
+| **CI workflow scaffold** | `ci-live-smoke.yml` (gated); `live-cluster-smoke.sh` stub on `main` |
+| **Docs / process** | Skip live-smoke token in `docs/ci.md` / contributing; reproduction notes in repo `Docs/Smoke/` (outside harness git) |
+
+### In progress / blocked
+
+| Area | State |
+| --- | --- |
+| **Full catalog smoke (10 TRs)** | Blocked on TR-STOR-002; TR-VIRT-008 intentionally excluded from plan |
+| **edge-112 CI sign-off** | Waiting on lease + `live-cluster-smoke.sh` + enablement |
+| **Per-TR timing table** | §6.4 still TBD |
+
+### Not started (see §11)
+
+Cluster Coordination Lease; full `live-cluster-smoke.sh`; `ci/config/smoke/` bundle
+and `stage-smoke-config.sh`; branch protection; `smoke-timing.json` artifact;
+optional nightly smoke.
 
 ---
 
@@ -922,8 +1056,12 @@ live-smoke]` only when lab unavailable.
 
 - Runbook: [plan-based-test-suite-runbook.md](plan-based-test-suite-runbook.md)
 - CI overview: `storage-cert-harness/docs/ci.md` (Dedicated CI cluster section)
-- Scripts: `ci/scripts/run-image-tests.sh`, `run-quay-image-tests.sh`
-- Plans: `storage-cert-harness/plans/harness-smoke-plan.yaml` (target: 10 TRs),
-`storage-cert-harness/plans/level3-internal-minimal.yaml` (override reference)
+- Scripts: `ci/scripts/run-harness/` (`run-image-tests.sh`, `run-quay-image-tests.sh`,
+  `live-cluster-smoke.sh`, `smoke-cluster-lease.sh`, `replay-smoke.sh`),
+  `ci/scripts/stage-smoke-config.sh` (planned §6.6)
+- Smoke bundle (target): `ci/config/smoke/` — §6.5; today:
+  `plans/harness-smoke-plan.yaml`, `thresholds-smoke.json`
+- Plans: `storage-cert-harness/plans/level3-internal-minimal.yaml` (override reference)
+- FIO gather issue: [ECOPROJECT-5566](https://redhat.atlassian.net/browse/ECOPROJECT-5566)
 - Catalog: `storage-cert-harness/catalog.json`
 - Jira: [ECOPROJECT-5406](https://redhat.atlassian.net/browse/ECOPROJECT-5406), [ECOPROJECT-5462](https://redhat.atlassian.net/browse/ECOPROJECT-5462)

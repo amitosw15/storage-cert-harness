@@ -1,0 +1,14 @@
+schema_version: "1"
+
+backends:
+  - name: tlvbm
+    storage_class: rhos-san-iscsi
+    snapshot_class: csi-trident-volumesnapshotclass
+  - name: oc-edge-112
+    vendor: trident
+    storage_class: rhos-san-iscsi
+    snapshot_class: csi-trident-volumesnapshotclass
+  - name: ecosys2
+    vendor: infinidat
+    storage_class: infinidat-block-rwx-v3
+    snapshot_class: infinidat-snapshot-class
