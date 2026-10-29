@@ -112,6 +112,16 @@ The config template uses `fromJson` and `range` to construct legacy or batched
 snapshot jobs, including a final partial batch. Raw template YAML is excluded
 from yamllint; tests validate rendered configuration and preserve native sources.
 
+## Kube-burner storage setup
+
+Private StorageClass and StorageProfile setup is owned by the harness and uses
+`manifest.GoTemplate`, independently of kube-burner's native workload rendering.
+Templates live under `templates/TR-VIRT-010/setup/`. They preserve provisioning
+fields and claim defaults while replacing metadata and omitting copied status.
+The created StorageClass name is retained on later failure so cleanup can remove
+it without modifying the backend's original resources. Tests cover preservation,
+omitted defaults, and cleanup after partial failure.
+
 ## Multi-scenario tools = a scenario table
 
 Some tools expose several subcommands, each mapping to a different TR and (often)
