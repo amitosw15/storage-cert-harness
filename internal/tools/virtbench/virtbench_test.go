@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/plan"
 )
@@ -867,4 +869,123 @@ func TestStageTemplateRejectsSymlinkEscape(t *testing.T) {
 	if _, err := stageSelectedTemplate(nil, core.TestRequirement{Params: map[string]any{"vm_template": template}}, resultsDir); err == nil {
 		t.Fatal("stageSelectedTemplate accepted a symlink escaping the source directory")
 	}
+}
+
+func TestStagedDataSourcePreservesSourceAndStorage(t *testing.T) {
+	for _, id := range []string{"TR-STOR-002", "TR-VIRT-018", "TR-VIRT-008", "TR-VIRT-007"} {
+		t.Run(id, func(t *testing.T) {
+			tr := core.TestRequirement{ID: id, Params: map[string]any{"datasource": "images/selected", "target_node": "worker"}}
+			data, _, err := vmSourceTemplate(tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			custom := strings.Replace(string(data), "storageClassName:", "volumeMode: Filesystem\n          storageClassName:", 1)
+			src := filepath.Join(t.TempDir(), "custom.yaml")
+			if err := os.WriteFile(src, []byte(custom), 0600); err != nil {
+				t.Fatal(err)
+			}
+			key := "vm_template"
+			if id == "TR-STOR-002" {
+				key = "fio_vm_template"
+			}
+			tr.Params[key] = src
+			path, err := stageSelectedTemplate(&core.RunCtx{DataSource: "other/cli"}, tr, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"name: cli", "namespace: other", "volumeMode: Filesystem", "{{STORAGE_CLASS_NAME}}"} {
+				if !strings.Contains(string(out), want) {
+					t.Fatalf("missing %s in %s", want, out)
+				}
+			}
+			if strings.Contains(custom, "blank:") && !strings.Contains(string(out), "blank:") {
+				t.Fatal("blank disk lost")
+			}
+			if before, after := cloudInitData(t, []byte(custom)), cloudInitData(t, out); before != after {
+				t.Fatal("cloud-init content changed")
+			}
+			original, _ := os.ReadFile(src)
+			if string(original) != custom {
+				t.Fatal("original mutated")
+			}
+		})
+	}
+}
+
+func TestDefaultStorageProfileAndNoDataSourceError(t *testing.T) {
+	data := strings.Replace(twoDiskVMTemplate, "storageClassName:", "accessModes: [ReadWriteMany]\n          volumeMode: Block\n          storageClassName:", 1)
+	out, _, err := rewriteVMSource([]byte(data), "fedora-nas", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "volumeMode:") || !strings.Contains(string(out), "ReadWriteMany") {
+		t.Fatalf("storage defaults: %s", out)
+	}
+	if _, _, err := rewriteVMSource([]byte("kind: VirtualMachine\nspec: {}\n"), "fedora-nas", false); err == nil || !strings.Contains(err.Error(), "no DataSource") {
+		t.Fatal(err)
+	}
+}
+
+func TestStagingDefaultUpstreamAndMultipleDocuments(t *testing.T) {
+	repo := t.TempDir()
+	dir := filepath.Join(repo, "examples/vm-templates")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	original := strings.Replace(twoDiskVMTemplate, "storageClassName:", "volumeMode: Block\n          storageClassName:", 1) + "\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: preserved\ndata:\n  text: |\n    keep cloud-init-like content\n"
+	source := filepath.Join(dir, "rhel9-vm-datasource.yaml")
+	if err := os.WriteFile(source, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VIRTBENCH_REPO", repo)
+	for _, selection := range []string{"", "images/selected"} {
+		tr := core.TestRequirement{ID: "TR-VIRT-002", Params: map[string]any{"datasource": selection}}
+		path, err := stageSelectedTemplate(nil, tr, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(out), "volumeMode:") || !strings.Contains(string(out), "kind: ConfigMap") || !strings.Contains(string(out), "keep cloud-init-like content") {
+			t.Fatalf("staged content: %s", out)
+		}
+		if selection == "" && !strings.Contains(string(out), "name: rhel9") {
+			t.Fatal("default source changed")
+		}
+		if selection != "" && !strings.Contains(string(out), "name: selected") {
+			t.Fatal("override not applied")
+		}
+	}
+	after, _ := os.ReadFile(source)
+	if string(after) != original {
+		t.Fatal("upstream source template mutated")
+	}
+}
+
+func cloudInitData(t *testing.T, data []byte) string {
+	t.Helper()
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(templateToken.ReplaceAllString(string(data), "placeholder")), &doc); err != nil {
+		t.Fatal(err)
+	}
+	var result string
+	var walk func(*yaml.Node)
+	walk = func(n *yaml.Node) {
+		if cloud := yamlField(n, "cloudInitNoCloud"); cloud != nil {
+			if user := yamlField(cloud, "userData"); user != nil {
+				result = user.Value
+			}
+		}
+		for _, child := range n.Content {
+			walk(child)
+		}
+	}
+	walk(&doc)
+	return result
 }

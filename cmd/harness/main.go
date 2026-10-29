@@ -189,7 +189,7 @@ func newPreflightCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			byTool := map[string][]core.TestRequirement{}
 			for _, tr := range trs {
-				if datasource != "" && !strings.HasPrefix(tr.AutomationTool, "virtbench ") {
+				if datasource != "" && !usesVirtbench(tr) {
 					fmt.Fprintf(out, "%s: --datasource affects Virtbench only; retaining adapter image source\n", tr.ID)
 				}
 				key := tr.AutomationTool
@@ -342,7 +342,7 @@ func newRunCmd() *cobra.Command {
 
 			selected := orchestrator.SelectTRs(trs, cfg.Filter)
 			for _, tr := range selected {
-				if datasource != "" && !strings.HasPrefix(tr.AutomationTool, "virtbench ") {
+				if datasource != "" && !usesVirtbench(tr) {
 					logger.Info("--datasource affects Virtbench only; retaining adapter image source", "tr", tr.ID)
 				}
 			}
@@ -715,4 +715,9 @@ func configureExecution(cmd *cobra.Command, cfg *config.Config, planPath, backen
 	}
 	logger.Info("using backend", "name", resolved.Name, "vendor", resolved.Vendor, "storage_class", resolved.StorageClass)
 	return resolved, nil
+}
+
+func usesVirtbench(tr core.TestRequirement) bool {
+	tool, ok := orchestrator.ResolveTool(tr)
+	return ok && strings.HasPrefix(tool.Name, "virtbench ")
 }

@@ -224,3 +224,16 @@ func TestSnapshotCloneLocalDataSourceNamespaces(t *testing.T) {
 		})
 	}
 }
+
+func TestSnapshotCloneDataSourceOverrideBeforeResolution(t *testing.T) {
+	dir := cloneSnapshotCLI(t)
+	tr := core.TestRequirement{ID: "TR-VIRT-018", Params: map[string]any{"datasource": "images/selected", "use_snapshot": true}}
+	rc := &core.RunCtx{Backend: &core.ResolvedBackend{StorageClass: "target", SnapshotClass: "nondefault"}}
+	if _, err := snapshotClonePreflight(context.Background(), rc, tr); err != nil {
+		t.Fatal(err)
+	}
+	commands, _ := os.ReadFile(filepath.Join(dir, "commands"))
+	if !strings.Contains(string(commands), "get datasource selected -n images") {
+		t.Fatalf("override missing: %s", commands)
+	}
+}

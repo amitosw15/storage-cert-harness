@@ -98,10 +98,63 @@ such as replay mode or a missing CLI needed to query the cluster. Independent
 checks continue after failures. Any failed check makes the command exit non-zero;
 skips alone do not. Invalid input files also exit non-zero before checks run.
 
-For Virtbench VM workloads, `run` and `preflight` accept `--datasource name` or
-`--datasource namespace/name`. This overrides the plan's `datasource` parameter;
-other adapters keep their existing image sources. See
-[DataSource selection and NAS smoke procedure](docs/virtbench-datasource.md).
+### Virtbench DataSource selection
+
+`harness run` and `harness preflight` accept `--datasource name` or
+`--datasource namespace/name`. An unqualified name uses
+`openshift-virtualization-os-images`. Selection precedence is CLI flag, resolved
+per-test or variant `datasource` parameter, then the original template source.
+The image namespace default applies only to explicit selections. Without an
+override, an omitted or empty template `sourceRef.namespace` follows CDI's
+default: the receiving DataVolume's namespace. Preflight checks each VM's actual
+namespace, as selected by the workload's namespace prefix and VM range.
+For example:
+
+```sh
+harness preflight --catalog catalog.json --plan plans/virtbench-fio-live-smoke.yaml \
+  --backends backends.local.yaml --backend tlvbm-nas --datasource fedora-nas
+harness run --catalog catalog.json --thresholds thresholds.json \
+  --plan plans/virtbench-fio-live-smoke.yaml --backends backends.local.yaml \
+  --backend tlvbm-nas --datasource fedora-nas --concurrency 1 \
+  --workdir out/nas-fio/work --output out/nas-fio/report --no-attestations
+```
+
+A plan can set the same selection:
+
+```yaml
+overrides:
+  TR-STOR-002:
+    datasource: fedora-nas
+  TR-VIRT-002:
+    datasource: openshift-virtualization-os-images/rhel9-nas
+```
+
+This option affects Virtbench only. Other adapters retain their existing image
+sources, and the CLI reports this boundary when they are selected. In particular,
+kube-burner VM snapshots and kube-burner-ocp lifecycle workloads still use their
+existing `vm_image` sources.
+
+Live preflight validates the chosen source, checks the DataSource Ready
+condition, and checks that its referenced PVC is Bound or its VolumeSnapshot is
+readyToUse. It reports the source and target storage class. The override is
+applied before `use_snapshot` source resolution. Source DataSources, PVCs and
+snapshots remain read-only. Replay (`results_dir`) does not contact the cluster.
+Snapshot cloning stages one shared source template. If namespace-local
+DataSources resolve to different backing sources across VMs, preflight asks for
+an explicit shared `sourceRef.namespace` or `--datasource namespace/name`.
+
+Templates are staged in each execution's work directory. Only DataSource
+`sourceRef` entries in DataVolume templates receive the override; blank disks,
+VM names, cloud-init and storage-class placeholders are preserved. An explicit
+selection fails if the template contains no DataSource reference. Custom
+`vm_template` and `fio_vm_template` files retain their storage properties.
+Harness defaults and staged upstream defaults omit `volumeMode`, allowing CDI
+to use StorageProfile defaults; required access modes, including RWX, remain.
+
+Upstream default templates are located through `VIRTBENCH_REPO`, the packaged
+`/opt/virtbench-runtime`, or the current directory. A missing upstream default
+requires setting `VIRTBENCH_REPO` or supplying `vm_template`. FIO and the
+harness-owned two-disk, drain and failure-recovery templates are embedded.
 
 ### Run artifacts
 

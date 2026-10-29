@@ -119,37 +119,31 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 	return c, nil
 }
 
-func snapshotTemplate(tr core.TestRequirement) ([]byte, error) {
-	if path := strParamOr(tr, "vm_template", ""); path != "" {
-		return safefs.ReadFile(path)
+func vmSourceTemplate(tr core.TestRequirement) ([]byte, bool, error) {
+	config := templateConfig(tr)
+	if path := strParamOr(tr, config.Param, ""); path != "" {
+		data, err := safefs.ReadFile(path)
+		return data, false, err
 	}
-	if tr.ID == "TR-VIRT-018" {
-		return []byte(twoDiskVMTemplate), nil
+	if config.Render != nil {
+		return []byte(config.Render(tr)), true, nil
 	}
-	template := "examples/vm-templates/rhel9-vm-datasource.yaml"
-	if tr.ID == "TR-STOR-001" {
-		template = "disk-ops-benchmark/vm-template.yaml"
+	if config.Upstream == "" {
+		return nil, true, fmt.Errorf("no default VM template configured for %s; set %s", tr.ID, config.Param)
 	}
 	for _, root := range []string{os.Getenv("VIRTBENCH_REPO"), "/opt/virtbench-runtime", "."} {
 		if root == "" {
 			continue
 		}
-		if data, err := safefs.ReadFile(filepath.Join(root, template)); err == nil {
-			return data, nil
+		if data, err := safefs.ReadFile(filepath.Join(root, config.Upstream)); err == nil {
+			return data, true, nil
 		}
 	}
-	return nil, fmt.Errorf("cannot locate virtbench default VM template %s; set vm_template or VIRTBENCH_REPO", template)
+	return nil, true, fmt.Errorf("cannot locate virtbench default VM template %s; set %s or VIRTBENCH_REPO", config.Upstream, config.Param)
 }
 
 func (c *snapshotClone) get(ctx context.Context, obj any, kind string, source cloneSource) error {
-	if source.Name == "" || source.Namespace == "" {
-		return fmt.Errorf("snapshot clone: %s source requires name and namespace", kind)
-	}
-	out, err := clustercheck.SnapshotCommand(ctx, c.Selection.Kubeconfig, nil, "get", kind, source.Name, "-n", source.Namespace, "-o", "json")
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(out, obj)
+	return getCloneObject(ctx, c.Selection.Kubeconfig, obj, kind, source)
 }
 
 func (c *snapshotClone) resolveSource(ctx context.Context, v map[string]any) (map[string]cloneSource, error) {
@@ -165,19 +159,9 @@ func (c *snapshotClone) resolveSource(ctx context.Context, v map[string]any) (ma
 		}
 		var resolved map[string]cloneSource
 		for _, local := range refs {
-			var ds struct {
-				Spec struct {
-					Source map[string]cloneSource `json:"source"`
-				} `json:"spec"`
-			}
-			if err := c.get(ctx, &ds, "datasource", local); err != nil {
+			ds, err := loadDataSource(ctx, c.Selection.Kubeconfig, local)
+			if err != nil {
 				return nil, err
-			}
-			for kind, source := range ds.Spec.Source {
-				if source.Namespace == "" {
-					source.Namespace = local.Namespace
-					ds.Spec.Source[kind] = source
-				}
 			}
 			if resolved != nil && !maps.Equal(resolved, ds.Spec.Source) {
 				return nil, fmt.Errorf("use_snapshot: namespace-local DataSource %q resolves to different sources across VM namespaces; use sourceRef.namespace or --datasource namespace/name to select a shared source", name)

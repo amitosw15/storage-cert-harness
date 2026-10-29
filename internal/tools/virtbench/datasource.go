@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -14,7 +13,6 @@ import (
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
 const imageNamespace = "openshift-virtualization-os-images"
@@ -158,75 +156,6 @@ func yamlSet(n *yaml.Node, key, value string) {
 	n.Content = append(n.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
 }
 
-func vmSourceTemplate(tr core.TestRequirement) ([]byte, bool, error) {
-	key := "vm_template"
-	if tr.ID == "TR-STOR-002" {
-		key = "fio_vm_template"
-	}
-	if path := strParamOr(tr, key, ""); path != "" {
-		data, err := safefs.ReadFile(path)
-		return data, false, err
-	}
-	switch tr.ID {
-	case "TR-STOR-002":
-		return []byte(fioVMTemplate), true, nil
-	case "TR-VIRT-018":
-		return []byte(twoDiskVMTemplate), true, nil
-	case "TR-VIRT-008":
-		return []byte(renderDrainVMTemplate(strParamOr(tr, "target_node", ""))), true, nil
-	case "TR-VIRT-007":
-		return []byte(failureRecoveryVMTemplate), true, nil
-	default:
-		data, err := snapshotTemplate(tr)
-		return data, true, err
-	}
-}
-
-func stageSelectedTemplate(rc *core.RunCtx, tr core.TestRequirement, root string) (string, error) {
-	data, defaults, err := vmSourceTemplate(tr)
-	if err != nil {
-		return "", err
-	}
-	if selectedDataSource(rc, tr) != "" || (defaults && strings.Contains(string(data), "volumeMode:")) {
-		data, _, err = rewriteVMSource(data, selectedDataSource(rc, tr), defaults)
-	}
-	if err != nil {
-		return "", err
-	}
-	name := "selected-vm-template.yaml"
-	if tr.ID == "TR-STOR-002" {
-		name = fioVMTemplateFile
-	}
-	if tr.ID == "TR-VIRT-018" {
-		name = twoDiskVMTemplateFile
-	}
-	if tr.ID == "TR-VIRT-008" {
-		name = drainTemplateFile
-	}
-	path := filepath.Join(root, name)
-	key := "vm_template"
-	if tr.ID == "TR-STOR-002" {
-		key = "fio_vm_template"
-	}
-	if source := strParamOr(tr, key, ""); source != "" {
-		original, err := filepath.Abs(source)
-		if err != nil {
-			return "", err
-		}
-		staged, err := filepath.Abs(path)
-		if err != nil {
-			return "", err
-		}
-		if original == staged {
-			return "", fmt.Errorf("VM template is inside the staging destination; choose a separate workdir to preserve %s", source)
-		}
-	}
-	if err := safefs.WriteFile(path, data, 0o600); err != nil {
-		return "", err
-	}
-	return filepath.Abs(path)
-}
-
 func datasourcePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRequirement) ([]cloneSource, error) {
 	data, defaults, err := vmSourceTemplate(tr)
 	if err != nil {
@@ -271,44 +200,25 @@ func resolveLocalDataSources(tr core.TestRequirement, refs []cloneSource) ([]clo
 }
 
 func vmTargetNamespaces(tr core.TestRequirement) ([]string, error) {
-	for _, sc := range scenarios {
-		if sc.ProvidesTR != tr.ID || sc.VMRange == nil {
-			continue
-		}
-		start, end, err := sc.VMRange(tr)
-		if err != nil {
-			return nil, err
-		}
-		prefix := strParamOr(tr, "namespace_prefix", sc.NSPrefix)
-		var namespaces []string
-		for i := start; i <= end; i++ {
-			namespaces = append(namespaces, fmt.Sprintf("%s-%d", prefix, i))
-		}
-		return namespaces, nil
+	sc, ok := scenarioFor(tr)
+	if !ok || sc.VMRange == nil {
+		return nil, fmt.Errorf("cannot resolve local DataSource namespace for %s; specify sourceRef.namespace or --datasource namespace/name", tr.ID)
 	}
-	return nil, fmt.Errorf("cannot resolve local DataSource namespace for %s; specify sourceRef.namespace or --datasource namespace/name", tr.ID)
+	start, end, err := sc.VMRange(tr)
+	if err != nil {
+		return nil, err
+	}
+	prefix := strParamOr(tr, "namespace_prefix", sc.NSPrefix)
+	var namespaces []string
+	for i := start; i <= end; i++ {
+		namespaces = append(namespaces, fmt.Sprintf("%s-%d", prefix, i))
+	}
+	return namespaces, nil
 }
 
 func checkDataSource(ctx context.Context, kubeconfig string, ref cloneSource) error {
-	get := func(kind string, source cloneSource, obj any) error {
-		out, err := clustercheck.SnapshotCommand(ctx, kubeconfig, nil, "get", kind, source.Name, "-n", source.Namespace, "-o", "json")
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(out, obj)
-	}
-	var ds struct {
-		Spec struct {
-			Source map[string]cloneSource `json:"source"`
-		} `json:"spec"`
-		Status struct {
-			Conditions []struct {
-				Type   string `json:"type"`
-				Status string `json:"status"`
-			} `json:"conditions"`
-		} `json:"status"`
-	}
-	if err := get("datasource", ref, &ds); err != nil {
+	ds, err := loadDataSource(ctx, kubeconfig, ref)
+	if err != nil {
 		return err
 	}
 	ready := false
@@ -321,9 +231,6 @@ func checkDataSource(ctx context.Context, kubeconfig string, ref cloneSource) er
 		return fmt.Errorf("DataSource %s/%s is not Ready", ref.Namespace, ref.Name)
 	}
 	for kind, source := range ds.Spec.Source {
-		if source.Namespace == "" {
-			source.Namespace = ref.Namespace
-		}
 		if source.Name == "" {
 			continue
 		}
@@ -334,7 +241,7 @@ func checkDataSource(ctx context.Context, kubeconfig string, ref cloneSource) er
 					Phase string `json:"phase"`
 				} `json:"status"`
 			}
-			if err := get("pvc", source, &pvc); err != nil {
+			if err := getCloneObject(ctx, kubeconfig, &pvc, "pvc", source); err != nil {
 				return err
 			}
 			if pvc.Status.Phase != "Bound" {
@@ -346,7 +253,7 @@ func checkDataSource(ctx context.Context, kubeconfig string, ref cloneSource) er
 					Ready bool `json:"readyToUse"`
 				} `json:"status"`
 			}
-			if err := get("volumesnapshot", source, &snap); err != nil {
+			if err := getCloneObject(ctx, kubeconfig, &snap, "volumesnapshot", source); err != nil {
 				return err
 			}
 			if !snap.Status.Ready {
@@ -369,4 +276,41 @@ func validDNSName(value string, max int, dots bool) bool {
 		pattern = `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	}
 	return regexp.MustCompile(pattern).MatchString(value)
+}
+
+type dataSource struct {
+	Spec struct {
+		Source map[string]cloneSource `json:"source"`
+	} `json:"spec"`
+	Status struct {
+		Conditions []struct {
+			Type   string `json:"type"`
+			Status string `json:"status"`
+		} `json:"conditions"`
+	} `json:"status"`
+}
+
+func getCloneObject(ctx context.Context, kubeconfig string, obj any, kind string, source cloneSource) error {
+	if source.Name == "" || source.Namespace == "" {
+		return fmt.Errorf("%s source requires name and namespace", kind)
+	}
+	out, err := clustercheck.SnapshotCommand(ctx, kubeconfig, nil, "get", kind, source.Name, "-n", source.Namespace, "-o", "json")
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(out, obj)
+}
+
+func loadDataSource(ctx context.Context, kubeconfig string, ref cloneSource) (dataSource, error) {
+	var ds dataSource
+	if err := getCloneObject(ctx, kubeconfig, &ds, "datasource", ref); err != nil {
+		return ds, err
+	}
+	for kind, source := range ds.Spec.Source {
+		if source.Namespace == "" {
+			source.Namespace = ref.Namespace
+			ds.Spec.Source[kind] = source
+		}
+	}
+	return ds, nil
 }

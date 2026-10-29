@@ -1058,3 +1058,36 @@ func failureRecoveryArgs(nsPrefix string) func(rc *core.RunCtx, bag *core.Bag, t
 		return args, nil
 	}
 }
+
+func stageSelectedTemplate(rc *core.RunCtx, tr core.TestRequirement, root string) (string, error) {
+	data, defaults, err := vmSourceTemplate(tr)
+	if err != nil {
+		return "", err
+	}
+	if selectedDataSource(rc, tr) != "" || (defaults && strings.Contains(string(data), "volumeMode:")) {
+		data, _, err = rewriteVMSource(data, selectedDataSource(rc, tr), defaults)
+	}
+	if err != nil {
+		return "", err
+	}
+	config := templateConfig(tr)
+	path := filepath.Join(root, config.File)
+	key := config.Param
+	if source := strParamOr(tr, key, ""); source != "" {
+		original, err := filepath.Abs(source)
+		if err != nil {
+			return "", err
+		}
+		staged, err := filepath.Abs(path)
+		if err != nil {
+			return "", err
+		}
+		if original == staged {
+			return "", fmt.Errorf("VM template is inside the staging destination; choose a separate workdir to preserve %s", source)
+		}
+	}
+	if err := safefs.WriteFile(path, data, 0o600); err != nil {
+		return "", err
+	}
+	return filepath.Abs(path)
+}
