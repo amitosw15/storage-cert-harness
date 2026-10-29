@@ -11,6 +11,7 @@ import (
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
@@ -45,7 +46,7 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 	if err != nil {
 		return nil, err
 	}
-	data, err := snapshotTemplate(tr)
+	data, err := snapshotTemplate(ctx, tr)
 	if err != nil {
 		return nil, err
 	}
@@ -117,14 +118,14 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 	return c, nil
 }
 
-func snapshotTemplate(tr core.TestRequirement) ([]byte, error) {
+func snapshotTemplate(ctx context.Context, tr core.TestRequirement) ([]byte, error) {
 	if path := strParamOr(tr, "vm_template", ""); path != "" {
 		return safefs.ReadFile(path)
 	}
 	if tr.ID == "TR-VIRT-018" {
 		return []byte(twoDiskVMTemplate), nil
 	}
-	return runtimeTemplate("examples/vm-templates/rhel9-vm-datasource.yaml")
+	return runtimeTemplate(ctx, "examples/vm-templates/rhel9-vm-datasource.yaml")
 }
 
 func (c *snapshotClone) get(ctx context.Context, obj any, kind string, source cloneSource) error {
@@ -181,7 +182,7 @@ func (c *snapshotClone) prepare(ctx context.Context, root string) (string, error
 		if !ok {
 			continue
 		}
-		data, err := vmRenderer.Render("volume-snapshot.yaml", []byte(volumeSnapshotTemplate), map[string]any{
+		data, err := manifest.Render(vmRenderer, "volume-snapshot.yaml", []byte(volumeSnapshotTemplate), map[string]any{
 			"NAMESPACE": source.Namespace, "PVC_NAME": source.Name, "SNAPSHOT_CLASS": c.Selection.SnapshotClass,
 		})
 		if err != nil {
@@ -203,7 +204,7 @@ func (c *snapshotClone) prepare(ctx context.Context, root string) (string, error
 		}
 		c.Snapshots[strconv.Itoa(i)] = made.Metadata
 	}
-	data, err := vmRenderer.Render("snapshot-vm.yaml", []byte(snapshotVMTemplate), map[string]any{"VM": c.Template, "SNAPSHOTS": c.Snapshots})
+	data, err := manifest.Render(vmRenderer, "snapshot-vm.yaml", []byte(snapshotVMTemplate), map[string]any{"VM": c.Template, "SNAPSHOTS": c.Snapshots})
 	if err != nil {
 		return "", err
 	}

@@ -106,14 +106,15 @@ User-supplied template paths remain external inputs.
 
 ## Runtime manifest rendering
 
-`internal/manifest.Adapter` prepares inputs at the tool execution boundary.
-Kube-burner and kube-burner-ocp use `manifest.Native`: their own renderers keep
-ownership of environment variables, iteration values, and object templates.
+`internal/manifest.ManifestRenderer` exposes `Render(source []byte, values
+map[string]any) ([]byte, error)`. It has no filesystem, cluster, or CLI responsibilities.
+Kube-burner uses `manifest.Native` to preserve template bytes for its own renderer.
+Kube-burner-ocp owns its templates inside the released CLI and needs no harness
+rendering call; any future local templates use the same native renderer.
 Kube-burner's snapshot-job list is passed as JSON in `SNAPSHOT_JOBS`; its native
-template uses `fromJson` and `range` to generate the jobs. Go builds input values,
-not YAML fragments.
-Virtbench's adapter resolves a values map, reads the source template, renders
-and validates it, then passes a separate file to the released CLI.
+template uses `fromJson` and `range` to generate the jobs. Go builds input values.
+Virtbench resolves values and loads sources in its tool package, calls the shared
+renderer, validates the VM, writes a private artifact, and constructs the final CLI.
 
 The harness renderer follows kube-burner's `text/template` Parse → Execute
 approach with `missingkey=error`. Harness-owned VB templates use dotted keys:
@@ -126,10 +127,10 @@ spec:
 ```
 
 Use `quote` for string scalars, `toJson` for inline maps/lists, and `toYaml`
-with `nindent` for nested YAML. `fromJson`, `indent`, `omit`, and Go's built-in template
-functions/control flow are also available. This is a small explicit helper
-set, not the full Sprig function library used by kube-burner. The renderer
-does not read environment variables implicitly.
+with `nindent` for nested YAML. Helpers come from Sprig v3 (`TxtFuncMap`),
+as in kube-burner, with one added `toYaml` helper. Go control flow and legacy
+VB aliases use the same engine. Environment variables are not merged into the
+values map; Sprig's explicit `env`/`expandenv` functions remain available.
 
 VB inputs come from the final CLI arguments plus the defaults in
 `virtbench/templateInputs`. Explicit arguments override defaults. The adapter
@@ -175,9 +176,9 @@ their owners after the migration.
 | --- | --- |
 | KB `snapshotJobs`, `legacySnapshotJob`, marker replacement in `writeConfig` | `snapshotJobInputs` builds values; native `config.yaml` builds the YAML |
 | KB `writeConfig`, `buildEnv` | Copy sources unchanged; pass explicit environment values to KB |
-| KBO workload flags | Native adapter; upstream owns the workload templates |
+| KBO workload flags | Upstream owns the workload templates |
 | VB `stageTemplate`, `stageFIOTemplate`, `stageCloneAtScaleTemplate` | One `stageTemplate` in `virtbench/manifest.go` |
-| VB datasource-clone, disk-ops, FIO substitution | `manifestAdapter.Prepare` resolves all values, renders, validates, and selects the runtime file |
+| VB datasource-clone, disk-ops, FIO substitution | `prepareManifest` resolves all values, renders, validates, and selects the runtime file |
 | VB `renderDrainVMTemplate` string replacement | Shared renderer with explicit drain inputs |
 | VB failure-recovery `strings.NewReplacer` | Shared renderer with VM, namespace, storage, and node inputs |
 | VB `sshPodManifestForNodes` YAML string insertion | Shared `ssh-pod.yaml` with conditional annotations and affinity |

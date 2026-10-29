@@ -4,26 +4,29 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
-var manifests manifest.Adapter = manifestAdapter{}
+type manifestRequest struct {
+	Directory string
+	Args      []string
+}
 
 // Legacy aliases allow released upstream templates to use the same Go template engine.
-var vmRenderer = manifest.GoTemplate{Aliases: map[string]string{
+var vmRenderer manifest.ManifestRenderer = manifest.GoTemplate{Aliases: map[string]string{
 	"VM_NAME": "VM_NAME", "STORAGE_CLASS": "STORAGE_CLASS_NAME", "STORAGE_CLASS_NAME": "STORAGE_CLASS_NAME",
 	"VM_PASSWORD": "VM_PASSWORD", "FIO_RUNTIME": "FIO_RUNTIME", "FIO_BS": "FIO_BS", "FIO_RW": "FIO_RW",
 	"FIO_IODEPTH": "FIO_IODEPTH", "FIO_NUMJOBS": "FIO_NUMJOBS", "FIO_SIZE": "FIO_SIZE",
 	"TARGET_NODE": "TARGET_NODE", "NODE_NAME": "NODE_NAME", "HOSTNAME_LABEL": "HOSTNAME_LABEL", "NAMESPACE": "NAMESPACE",
 }}
-
-type manifestAdapter struct{}
 
 type templateInput struct {
 	key      string
@@ -81,7 +84,7 @@ func resolveTemplateValues(command string, args []string) (map[string]any, error
 	return values, nil
 }
 
-func (manifestAdapter) Prepare(ctx context.Context, request manifest.Request) ([]string, error) {
+func prepareManifest(ctx context.Context, request manifestRequest) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -126,7 +129,7 @@ func (manifestAdapter) Prepare(ctx context.Context, request manifest.Request) ([
 			source = []byte(fioVMTemplate)
 		}
 		if source == nil {
-			source, err = runtimeTemplate(path)
+			source, err = runtimeTemplate(ctx, path)
 		}
 	}
 	if err != nil {
@@ -153,6 +156,9 @@ func (manifestAdapter) Prepare(ctx context.Context, request manifest.Request) ([
 	destination, err := writeTemplateFile(dir, command+"-vm.yaml", rendered)
 	if err != nil {
 		return nil, err
+	}
+	if command == "datasource-clone" {
+		args = removeArgument(args, "--storage-class")
 	}
 	return setArgument(args, "--vm-template", destination), nil
 }
@@ -186,7 +192,7 @@ func writeTemplateFile(directory, name string, data []byte) (string, error) {
 }
 
 func renderVMTemplate(name string, source []byte, values map[string]any) ([]byte, error) {
-	rendered, err := vmRenderer.Render(name, source, values)
+	rendered, err := manifest.Render(vmRenderer, name, source, values)
 	if err != nil {
 		return nil, err
 	}
@@ -220,8 +226,8 @@ func renderVMTemplate(name string, source []byte, values map[string]any) ([]byte
 	return rendered, nil
 }
 
-func runtimeTemplate(relative string) ([]byte, error) {
-	for _, root := range []string{os.Getenv("VIRTBENCH_REPO"), "/opt/virtbench-runtime", "."} {
+func runtimeTemplate(ctx context.Context, relative string) ([]byte, error) {
+	for _, root := range []string{os.Getenv("VIRTBENCH_REPO"), "/opt/virtbench-runtime", ".", ".."} {
 		if root == "" {
 			continue
 		}
@@ -229,7 +235,58 @@ func runtimeTemplate(relative string) ([]byte, error) {
 			return data, nil
 		}
 	}
-	return nil, fmt.Errorf("cannot locate released template %s; set vm_template or VIRTBENCH_REPO", relative)
+	root, err := installedRuntimeRoot(ctx)
+	if err == nil {
+		if data, readErr := safefs.ReadFile(filepath.Join(root, relative)); readErr == nil {
+			return data, nil
+		} else {
+			err = readErr
+		}
+	}
+	return nil, fmt.Errorf("cannot locate released template %s; set vm_template or VIRTBENCH_REPO: %w", relative, err)
+}
+
+// installedRuntimeRoot uses the same Python environment and discovery code as the CLI.
+func installedRuntimeRoot(ctx context.Context) (string, error) {
+	launcher, err := exec.LookPath(binary)
+	if err != nil {
+		return "", err
+	}
+	launcher, err = filepath.EvalSymlinks(launcher)
+	if err != nil {
+		return "", err
+	}
+	data, err := safefs.ReadFile(launcher)
+	if err != nil {
+		return "", err
+	}
+	line, _, _ := strings.Cut(string(data), "\n")
+	interpreter := strings.Fields(strings.TrimPrefix(line, "#!"))
+	if len(interpreter) == 0 || !strings.HasPrefix(line, "#!") {
+		return "", fmt.Errorf("virtbench launcher has no Python shebang")
+	}
+	if filepath.Base(interpreter[0]) == "env" {
+		interpreter = interpreter[1:]
+		if len(interpreter) > 0 && interpreter[0] == "-S" {
+			interpreter = interpreter[1:]
+		}
+	}
+	if len(interpreter) == 0 || !strings.HasPrefix(filepath.Base(interpreter[0]), "python") {
+		return "", fmt.Errorf("virtbench launcher does not identify its Python interpreter")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	args := append(interpreter[1:], "-c", "from virtbench.common import find_repo_root; print(find_repo_root())")
+	cmd := exec.CommandContext(ctx, interpreter[0], args...) // #nosec G204 -- interpreter belongs to the selected Virtbench CLI.
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("discover installed Virtbench runtime: %w", err)
+	}
+	root := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(root) {
+		return "", fmt.Errorf("virtbench returned a non-absolute runtime directory")
+	}
+	return root, nil
 }
 
 func virtbenchCommand(args []string) string {
@@ -272,4 +329,16 @@ func setArgument(args []string, flag, value string) []string {
 		}
 	}
 	return append(args, flag, value)
+}
+
+func removeArgument(args []string, flag string) []string {
+	result := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == flag {
+			i++
+		} else if !strings.HasPrefix(args[i], flag+"=") {
+			result = append(result, args[i])
+		}
+	}
+	return result
 }

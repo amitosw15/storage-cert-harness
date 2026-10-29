@@ -2,12 +2,12 @@ package manifest
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 	"text/template"
 
+	"github.com/Masterminds/sprig/v3"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,31 +16,12 @@ type GoTemplate struct {
 	Aliases map[string]string
 }
 
-func (r GoTemplate) Render(name string, source []byte, values map[string]any) ([]byte, error) {
-	functions := template.FuncMap{
-		"quote": func(value string) (string, error) {
-			data, err := json.Marshal(value)
-			return string(data), err
-		},
-		"toYaml": func(value any) (string, error) {
-			data, err := yaml.Marshal(value)
-			return strings.TrimSuffix(string(data), "\n"), err
-		},
-		"toJson": func(value any) (string, error) {
-			data, err := json.Marshal(value)
-			return string(data), err
-		},
-		"fromJson": func(value string) (any, error) {
-			var result any
-			err := json.Unmarshal([]byte(value), &result)
-			return result, err
-		},
-		"indent": indent,
-		"nindent": func(width int, value string) (string, error) {
-			text, err := indent(width, value)
-			return "\n" + text, err
-		},
-		"omit": omit,
+func (r GoTemplate) Render(source []byte, values map[string]any) ([]byte, error) {
+	const name = "manifest"
+	functions := sprig.TxtFuncMap()
+	functions["toYaml"] = func(value any) (string, error) {
+		data, err := yaml.Marshal(value)
+		return strings.TrimSuffix(string(data), "\n"), err
 	}
 	for alias, key := range r.Aliases {
 		if _, exists := functions[alias]; exists {
@@ -92,23 +73,4 @@ func Documents(data []byte) ([]map[string]any, error) {
 		return nil, fmt.Errorf("manifest contains no documents")
 	}
 	return documents, nil
-}
-
-func indent(width int, value string) (string, error) {
-	if width < 0 || width > 256 {
-		return "", fmt.Errorf("indent width must be between 0 and 256")
-	}
-	padding := strings.Repeat(" ", width)
-	return padding + strings.ReplaceAll(value, "\n", "\n"+padding), nil
-}
-
-func omit(object map[string]any, keys ...string) map[string]any {
-	result := make(map[string]any, len(object))
-	for key, value := range object {
-		result[key] = value
-	}
-	for _, key := range keys {
-		delete(result, key)
-	}
-	return result
 }

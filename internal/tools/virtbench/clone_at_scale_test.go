@@ -9,7 +9,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 )
 
 // TestCloneAtScaleArgsDefaultsToEmbeddedTemplate confirms the fix's default
@@ -87,7 +86,7 @@ func TestCloneAtScaleArgsStagedTemplateHasTwoDataVolumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cloneAtScaleArgs: %v", err)
 	}
-	args, err = manifests.Prepare(t.Context(), manifest.Request{Directory: root, Args: args})
+	args, err = prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -39,7 +39,6 @@ import (
 	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
@@ -909,7 +908,7 @@ func (w logWriter) Write(p []byte) (int, error) {
 
 // execVirtbench runs the virtbench CLI in dir, forwarding output to the logger.
 func execVirtbench(ctx context.Context, rc *core.RunCtx, dir string, args []string) error {
-	args, err := manifests.Prepare(ctx, manifest.Request{Directory: dir, Args: args})
+	args, err := prepareManifest(ctx, manifestRequest{Directory: dir, Args: args})
 	if err != nil {
 		return err
 	}

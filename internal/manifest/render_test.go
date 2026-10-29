@@ -1,8 +1,6 @@
 package manifest
 
 import (
-	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,7 +18,7 @@ items:
 {{ end }}nested: {{ omit .nested "remove" | toYaml | nindent 2 }}
 json: {{ .nested | toJson }}
 `
-	data, err := (GoTemplate{}).Render("typed", []byte(source), values)
+	data, err := (GoTemplate{}).Render([]byte(source), values)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +49,7 @@ func TestRenderRejectsInvalidInput(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			renderer := GoTemplate{Aliases: map[string]string{"LEGACY": "missing"}}
-			_, err := renderer.Render(tt.name, []byte(tt.source), map[string]any{"value": "{{later}}"})
+			_, err := renderer.Render([]byte(tt.source), map[string]any{"value": "{{later}}"})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
@@ -61,25 +59,37 @@ func TestRenderRejectsInvalidInput(t *testing.T) {
 
 func TestLegacyAliasesUseExplicitValues(t *testing.T) {
 	renderer := GoTemplate{Aliases: map[string]string{"NAME": "name", "CLASS": "storage"}}
-	data, err := renderer.Render("legacy", []byte("name: {{ NAME }}\nclass: {{ CLASS }}"), map[string]any{"name": "vm", "storage": "fast"})
+	data, err := renderer.Render([]byte("name: {{ NAME }}\nclass: {{ CLASS }}"), map[string]any{"name": "vm", "storage": "fast"})
 	if err != nil || string(data) != "name: vm\nclass: fast" {
 		t.Fatalf("data=%s error=%v", data, err)
 	}
 }
 
 func TestNativePassesThroughWithoutSharingSlice(t *testing.T) {
-	args := []string{"init", "-c", "config-{{.Iteration}}.yaml"}
-	got, err := (Native{}).Prepare(t.Context(), Request{Args: args})
-	if err != nil || !reflect.DeepEqual(got, args) {
-		t.Fatalf("args=%v error=%v", got, err)
+	source := []byte("name: {{ .Iteration }}")
+	got, err := (Native{}).Render(source, map[string]any{"Iteration": 3})
+	if err != nil || string(got) != string(source) {
+		t.Fatalf("data=%s error=%v", got, err)
 	}
-	got[0] = "changed"
-	if args[0] != "init" {
-		t.Fatal("native adapter mutated caller arguments")
+	got[0] = 'X'
+	if source[0] != 'n' {
+		t.Fatal("native renderer shares caller bytes")
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := (Native{}).Prepare(ctx, Request{Args: args}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("error = %v", err)
+}
+
+func TestSprigFunctionsAreAvailable(t *testing.T) {
+	data, err := (GoTemplate{}).Render([]byte(`name: {{ "" | default "fallback" | upper | quote }}
+count: {{ add 2 3 }}
+values: {{ dict "enabled" true "items" (list "a" "b") | toYaml | nindent 2 }}
+`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs, err := Documents(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if docs[0]["name"] != "FALLBACK" || docs[0]["count"] != 5 {
+		t.Fatalf("unexpected Sprig output: %s", data)
 	}
 }

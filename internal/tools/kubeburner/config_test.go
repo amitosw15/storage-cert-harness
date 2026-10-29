@@ -22,7 +22,7 @@ func renderConfig(t *testing.T, p Params) string {
 		key, value, _ := strings.Cut(entry, "=")
 		values[key] = value
 	}
-	data, err := (manifest.GoTemplate{}).Render("config.yaml", asset, values)
+	data, err := manifest.Render(manifest.GoTemplate{}, "config.yaml", asset, values)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestNativeObjectTemplatesRender(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := (manifest.GoTemplate{}).Render(name, source, values); err != nil {
+		if _, err := manifest.Render(manifest.GoTemplate{}, name, source, values); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}

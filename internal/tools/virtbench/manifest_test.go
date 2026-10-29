@@ -29,7 +29,7 @@ func TestManifestAdapterRendersFIOWithMatchingCLIValues(t *testing.T) {
 				args = append(args, "--vm-name=chosen", "--fio-runtime=75", "--fio-iodepth", "8", "--fio-numjobs", "2", "--fio-size", "2G")
 			}
 			before := append([]string(nil), args...)
-			got, err := manifests.Prepare(t.Context(), manifest.Request{Directory: root, Args: args})
+			got, err := prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -86,7 +86,7 @@ func TestManifestAdapterLoadsReleasedLegacyTemplates(t *testing.T) {
 			if err := os.WriteFile(path, source, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			args, err := manifests.Prepare(t.Context(), manifest.Request{Directory: t.TempDir(), Args: []string{command, "--storage-class", "fast", "--vm-name", "chosen"}})
+			args, err := prepareManifest(t.Context(), manifestRequest{Directory: t.TempDir(), Args: []string{command, "--storage-class", "fast", "--vm-name", "chosen"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,13 +105,13 @@ func TestManifestAdapterLoadsReleasedLegacyTemplates(t *testing.T) {
 
 func TestManifestAdapterSkipsNonProvisioningActions(t *testing.T) {
 	for _, args := range [][]string{{"failure-recovery"}, {"drain-nodes"}, {"fio", "--action", "cleanup"}, {"fio", "--action", "gather-results"}} {
-		if _, err := manifests.Prepare(t.Context(), manifest.Request{Directory: t.TempDir(), Args: args}); err != nil {
+		if _, err := prepareManifest(t.Context(), manifestRequest{Directory: t.TempDir(), Args: args}); err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := manifests.Prepare(ctx, manifest.Request{}); !errors.Is(err, context.Canceled) {
+	if _, err := prepareManifest(ctx, manifestRequest{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("error=%v", err)
 	}
 }
@@ -200,7 +200,7 @@ func TestAllOwnedTemplatesRender(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := vmRenderer.Render(path, source, values); err != nil {
+			if _, err := manifest.Render(vmRenderer, path, source, values); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -261,7 +261,7 @@ spec:
 		t.Fatal("preflight did not validate or mutated plan inputs")
 	}
 	for _, sc := range []string{"backend", "plan"} {
-		_, err := manifests.Prepare(t.Context(), manifest.Request{Directory: root, Args: []string{
+		_, err := prepareManifest(t.Context(), manifestRequest{Directory: root, Args: []string{
 			"datasource-clone", "--storage-class", sc, "--num-disks", "2", "--vm-template", path,
 		}})
 		if sc == "backend" && err != nil {
@@ -269,6 +269,84 @@ spec:
 		}
 		if sc == "plan" && (err == nil || !strings.Contains(err.Error(), "defines 1 disks")) {
 			t.Fatalf("expected rendered disk-count mismatch, got %v", err)
+		}
+	}
+}
+
+func TestCloneRenderingPreservesStorageWithoutUpstreamRewrite(t *testing.T) {
+	for _, flag := range [][]string{{"--storage-class", "selected"}, {"--storage-class=selected"}} {
+		root := t.TempDir()
+		source := filepath.Join(root, "mixed.yaml")
+		input := `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata: {name: rhel-9-vm}
+spec:
+  dataVolumeTemplates:
+    - metadata: {name: root}
+      spec:
+        pvc: {storageClassName: '{{ .STORAGE_CLASS_NAME }}', volumeMode: Block}
+    - metadata: {name: fixed}
+      spec:
+        storage: {storageClassName: archive}
+`
+		if err := os.WriteFile(source, []byte(input), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		args := append([]string{"datasource-clone", "--vm-template", source}, flag...)
+		got, err := prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := argument(got, "--storage-class"); exists {
+			t.Fatal("upstream would rewrite the rendered storage classes")
+		}
+		path, _ := argument(got, "--vm-template")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		docs, err := manifest.Documents(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		volumes := docs[0]["spec"].(map[string]any)["dataVolumeTemplates"].([]any)
+		pvc := volumes[0].(map[string]any)["spec"].(map[string]any)["pvc"].(map[string]any)
+		storage := volumes[1].(map[string]any)["spec"].(map[string]any)["storage"].(map[string]any)
+		if pvc["storageClassName"] != "selected" || pvc["volumeMode"] != "Block" || storage["storageClassName"] != "archive" {
+			t.Fatalf("storage settings changed: %s", data)
+		}
+		original, err := os.ReadFile(source)
+		if err != nil || string(original) != input {
+			t.Fatalf("source changed: %v", err)
+		}
+	}
+}
+
+func TestRuntimeTemplateUsesInstalledPythonEnvironment(t *testing.T) {
+	root := t.TempDir()
+	runtime := filepath.Join(root, "editable-checkout")
+	relative := "examples/vm-templates/rhel9-vm-datasource.yaml"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(runtime, relative)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtime, relative), []byte("from-installed-runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	python := filepath.Join(root, "python3")
+	script := "#!/bin/sh\n[ \"$1\" = -c ] || exit 1\n[ \"$2\" = 'from virtbench.common import find_repo_root; print(find_repo_root())' ] || exit 2\nprintf '%s\\n' '" + runtime + "'\n"
+	if err := os.WriteFile(python, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root)
+	t.Setenv("VIRTBENCH_REPO", "")
+	t.Chdir(t.TempDir())
+	for _, shebang := range []string{python, "/usr/bin/env python3", "/usr/bin/env -S python3"} {
+		if err := os.WriteFile(filepath.Join(root, binary), []byte("#!"+shebang+"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		data, err := runtimeTemplate(t.Context(), relative)
+		if err != nil || string(data) != "from-installed-runtime" {
+			t.Fatalf("shebang=%s data=%s error=%v", shebang, data, err)
 		}
 	}
 }

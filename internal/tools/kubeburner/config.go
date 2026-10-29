@@ -6,8 +6,11 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
+
+var renderer manifest.ManifestRenderer = manifest.Native{}
 
 // writeConfig stages unchanged sources for kube-burner's native renderer.
 func writeConfig(dir string) (string, error) {
@@ -23,6 +26,10 @@ func writeConfig(dir string) (string, error) {
 		b, err := templates.ReadFile(snapshotTemplatesDir + "/" + name)
 		if err != nil {
 			return "", fmt.Errorf("kube-burner: read template %s: %w", name, err)
+		}
+		b, err = manifest.Render(renderer, name, b, nil)
+		if err != nil {
+			return "", err
 		}
 		dst := filepath.Join(dir, "templates", name)
 		if name == "config.yaml" {

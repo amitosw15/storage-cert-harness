@@ -14,7 +14,6 @@ import (
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
@@ -96,10 +95,7 @@ func buildRunCmd(ctx context.Context, rc *core.RunCtx, env []string, resultsDir,
 		return nil, fmt.Errorf("kube-burner: results dir: %w", err)
 	}
 	cfg := filepath.Join(absResults, subdir, "config.yaml")
-	args, err := (manifest.Native{}).Prepare(ctx, manifest.Request{Directory: filepath.Join(absResults, subdir), Args: []string{"init", "-c", cfg}})
-	if err != nil {
-		return nil, err
-	}
+	args := []string{"init", "-c", cfg}
 	cmd := exec.CommandContext(ctx, path, args...) // #nosec G204 -- path comes from LookPath and args are harness-generated.
 	cmd.Dir = filepath.Join(absResults, subdir)
 	cmd.Env = append(os.Environ(), env...)

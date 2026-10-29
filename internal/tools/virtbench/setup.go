@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
@@ -252,7 +253,7 @@ func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[stri
 		values = append(values, node)
 	}
 	slices.Sort(values)
-	rendered, err := vmRenderer.Render("ssh-pod.yaml", []byte(sshPodManifest), map[string]any{
+	rendered, err := manifest.Render(vmRenderer, "ssh-pod.yaml", []byte(sshPodManifest), map[string]any{
 		"NAME": sshPodName, "NAMESPACE": sshPodNS, "ANNOTATIONS": annotations, "AVOID_NODES": values,
 	})
 	return string(rendered), err

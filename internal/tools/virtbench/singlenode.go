@@ -20,6 +20,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
@@ -131,7 +132,7 @@ func templateDiskCount(path string, tr core.TestRequirement) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	clean, err := vmRenderer.Render(filepath.Base(path), data, values)
+	clean, err := manifest.Render(vmRenderer, filepath.Base(path), data, values)
 	if err != nil {
 		return 0, err
 	}

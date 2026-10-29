@@ -13,8 +13,10 @@ is now `internal/tools/<tool>/templates/<TR-ID>/`, with shared resources under
 
 ## Decision
 
-Use a manifest adapter at tool execution. Kube-burner and kube-burner-ocp retain
-native rendering through a no-op adapter. Virtbench receives fully rendered VM
+Use a `ManifestRenderer` interface with `Render(source, values)`. Keep file IO,
+cluster lookups, value resolution, and CLI construction in the tool integration. Kube-burner and kube-burner-ocp retain
+native rendering; local KB templates pass through a no-op renderer and KBO
+uses its released CLI's bundled templates. Virtbench receives fully rendered VM
 manifests from the harness. Follow kube-burner's Go `text/template` Parse/Execute
 model with strict missing keys and explicit values. Keep structural choices in
 templates and resolve cluster-dependent values in the tool adapter.
@@ -43,8 +45,7 @@ depending on stage interfaces as required by ADR-0003.
 
 ### Consequences
 
-The renderer has one strict contract and a small explicit helper set rather
-than importing all of Sprig. New dynamic values require an explicit resolver
+The renderer uses Go `text/template` and Sprig v3 with one added `toYaml` helper. New dynamic values require an explicit resolver
 entry. Tests render every owned VB template and exercise the execution boundary;
 KB's snapshot-job list is rendered by its native template from explicit JSON
 values. Raw Go-template YAML is excluded from yamllint. See

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 )
 
 // provisionFailureRecoveryVMs creates vm_count VMs (one per namespace) on the
@@ -178,7 +179,7 @@ func waitForVMRunning(ctx context.Context, kubeconfig, ns, vmName string, timeou
 
 // ensureNamespace creates a namespace if it does not already exist.
 func ensureNamespace(ctx context.Context, kubeconfig, ns string) error {
-	rendered, err := vmRenderer.Render("namespace.yaml", []byte(namespaceTemplate), map[string]any{"NAMESPACE": ns})
+	rendered, err := manifest.Render(vmRenderer, "namespace.yaml", []byte(namespaceTemplate), map[string]any{"NAMESPACE": ns})
 	if err != nil {
 		return err
 	}
