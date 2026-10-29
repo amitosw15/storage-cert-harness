@@ -5,6 +5,8 @@ set -euo pipefail
 _run_harness_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../ci-utils.sh
 source "${_run_harness_dir}/../ci-utils.sh"
+# shellcheck source=smoke-cluster-lease.sh
+source "${_run_harness_dir}/smoke-cluster-lease.sh"
 repo_root="${REPO_ROOT}"
 acquire_smoke_run_lock
 ci_log_init_temp "run-image-tests"
@@ -26,7 +28,7 @@ echo "validation passed: kubeconfig is readable (${KUBECONFIG})"
 }
 echo "validation passed: local image reference is available"
 [[ -s work/backends.local.yaml ]] || {
-	echo "error: backend configuration is missing or empty: work/backends.local.yaml" >&2
+	echo "error: backend configuration is missing: work/backends.local.yaml (run: make prepare-smoke-env)" >&2
 	exit 1
 }
 echo "validation passed: backend configuration is available"
@@ -45,14 +47,23 @@ yq_bin="${YQ:-$(command -v yq || true)}"
 }
 echo "validation passed: yq is available"
 
-thresholds_file="thresholds-smoke.json"
-[[ -s "${thresholds_file}" ]] || {
-	echo "error: smoke thresholds bundle missing: ${thresholds_file}" >&2
+command -v jq >/dev/null 2>&1 || {
+	echo "error: jq is required for cluster smoke lease updates" >&2
 	exit 1
 }
+echo "validation passed: jq is available"
+
 harness_thresholds="work/harness-run-thresholds.json"
-cp -f "${thresholds_file}" "${harness_thresholds}"
-echo "validation passed: using ${thresholds_file} -> ${harness_thresholds}"
+[[ -s "${harness_thresholds}" ]] || {
+	echo "error: smoke thresholds missing: ${harness_thresholds} (run: make prepare-smoke-env)" >&2
+	exit 1
+}
+echo "validation passed: using staged smoke thresholds (${harness_thresholds})"
+[[ -s work/catalog.json ]] || {
+	echo "error: work/catalog.json is missing (run: make prepare-smoke-env)" >&2
+	exit 1
+}
+echo "validation passed: catalog is available (work/catalog.json)"
 
 backend="${BACKEND:-$(${yq_bin} e -r '.backend // ""' "${plan}")}"
 [[ -n "${backend}" ]] || {
@@ -95,7 +106,13 @@ oc "${oc_args[@]}" whoami --show-server >/dev/null || {
 }
 echo "validation passed: cluster is reachable"
 
+export SMOKE_CLUSTER_LEASE_KUBECONFIG="$(realpath "${KUBECONFIG}")"
+smoke_cluster_lease_acquire "harness-smoke" "${plan}"
+# Trap before log commit so lease is released on any later failure (commit, preflight, harness).
+smoke_cluster_lease_install_traps "_ci_log_flush"
+
 commit_harness_smoke_run_log "run-image-tests"
+smoke_cluster_lease_start_renewal_loop
 
 if ! nodes="$(oc "${oc_args[@]}" get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}')"; then
 	echo "error: unable to read cluster nodes" >&2
@@ -148,6 +165,18 @@ case "${arch}" in
 	x86_64) arch=amd64 ;;
 	aarch64) arch=arm64 ;;
 esac
+# Harness args as array so CR/backend paths cannot split the podman command line.
+harness_run_args=(
+	--catalog /work/catalog.json
+	--thresholds /work/harness-run-thresholds.json
+	--plan /plans/harness-smoke-plan.yaml
+	--backends /work/backends.local.yaml
+	--backend "${backend}"
+	--workdir /work/harness-smoke-work
+	--output /work/harness-smoke-report
+	--no-attestations
+	--verbose
+)
 harness_smoke_run_podman --rm --userns=keep-id --user "$(id -u):$(id -g)" --network=host \
 	--platform "linux/${arch}" \
 	-v "${repo_root}/work:/work:Z" \
@@ -156,13 +185,4 @@ harness_smoke_run_podman --rm --userns=keep-id --user "$(id -u):$(id -g)" --netw
 	-w /work \
 	-e KUBECONFIG=/work/kubeconfig \
 	-e KUBECTL_INSECURE_SKIP_TLS_VERIFY="${KUBECTL_INSECURE_SKIP_TLS_VERIFY:-false}" \
-	-- \
-	--catalog /work/catalog.json \
-	--thresholds /work/harness-run-thresholds.json \
-	--plan /plans/harness-smoke-plan.yaml \
-	--backends /work/backends.local.yaml \
-	--backend "${backend}" \
-	--workdir /work/harness-smoke-work \
-	--output /work/harness-smoke-report \
-	--no-attestations \
-	--verbose
+	-- "${harness_run_args[@]}"

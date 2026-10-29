@@ -34,6 +34,8 @@ repo_root="${REPO_ROOT}"
 cd "${repo_root}"
 # shellcheck source=../partner-harness-common.sh
 source "${_run_harness_dir}/../partner-harness-common.sh"
+# shellcheck source=smoke-cluster-lease.sh
+source "${_run_harness_dir}/smoke-cluster-lease.sh"
 archive_partner_log "run-quay-image-tests"
 ci_log_init "run-quay-image-tests"
 
@@ -61,6 +63,10 @@ command -v yq >/dev/null 2>&1 || {
 	echo "error: yq is required to validate backend '${backend}' in work/backends.local.yaml" >&2
 	exit 1
 }
+command -v jq >/dev/null 2>&1 || {
+	echo "error: jq is required for cluster smoke lease updates" >&2
+	exit 1
+}
 export YQ_BACKEND="${backend}"
 backend_name="$(yq e -r '.backends[] | select(.name == strenv(YQ_BACKEND)) | .name' work/backends.local.yaml)"
 [[ "${backend_name}" == "${backend}" ]] || {
@@ -72,8 +78,12 @@ backend_name="$(yq e -r '.backends[] | select(.name == strenv(YQ_BACKEND)) | .na
 	exit 1
 }
 
+export SMOKE_CLUSTER_LEASE_KUBECONFIG="$(realpath "${KUBECONFIG}")"
 quay_plan="work/container-smoke.yaml"
 [[ -s "${quay_plan}" ]] || quay_plan="plans/harness-smoke-plan.yaml"
+smoke_cluster_lease_acquire "container-smoke" "${quay_plan}"
+smoke_cluster_lease_install_traps "_ci_log_flush"
+smoke_cluster_lease_start_renewal_loop
 
 image="${HARNESS_IMAGE:-${QUAY_IMAGE}:${version}}"
 # Assumption: Podman can read valid quay.io credentials from its configured
