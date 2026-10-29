@@ -111,6 +111,7 @@ unchanged, while `snapshotJobInputs` supplies job values as JSON in `SNAPSHOT_JO
 The config template uses `fromJson` and `range` to construct legacy or batched
 snapshot jobs, including a final partial batch. Raw template YAML is excluded
 from yamllint; tests validate rendered configuration and preserve native sources.
+
 ## Kube-burner storage setup
 
 Private StorageClass and StorageProfile setup is owned by the harness and uses
