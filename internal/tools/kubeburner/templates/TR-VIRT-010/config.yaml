@@ -27,4 +27,26 @@ jobs:
           vmImage: {{.VM_IMAGE}}
           diskSize: {{.DISK_SIZE}}
 
-# SNAPSHOT_JOBS
+{{ range .SNAPSHOT_JOBS | fromJson }}
+  - name: {{ .name }}
+    jobType: create
+    jobIterations: 1
+    qps: {{ $.QPS }}
+    burst: {{ $.BURST }}
+    namespace: {{ $.NAMESPACE }}
+    namespacedIterations: false
+    waitWhenFinished: true
+    maxWaitTimeout: {{ $.MAX_WAIT }}
+    objects:
+      - objectTemplate: {{ .template }}
+        replicas: {{ .replicas }}
+        {{ if .batch }}
+        inputVars:
+          snapshotBatch: {{ .batch }}
+        {{ end }}
+        wait: true
+        waitOptions:
+          customStatusPaths:
+            - key: '.readyToUse | tostring'
+              value: "true"
+{{ end }}
