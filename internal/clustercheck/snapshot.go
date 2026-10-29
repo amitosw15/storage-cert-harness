@@ -137,7 +137,7 @@ func (s SnapshotSelection) Finding() core.Finding {
 }
 
 // WaitForCreateSupported reports whether the local client can run
-// "wait --for=create", which PrepareVMStorage depends on. The condition
+// "wait --for=create", which snapshot storage provisioning depends on. The condition
 // arrived in kubectl 1.31; an older client gets through preflight and then
 // fails partway into provisioning, after the run has started and cluster
 // objects exist.
@@ -160,67 +160,6 @@ func WaitForCreateSupported(ctx context.Context, kubeconfig string) core.Finding
 	// Any other outcome — a timeout, a missing object, no cluster reach — means
 	// the condition itself was understood, which is all this checks.
 	return core.Finding{Level: "info", Message: `client supports "wait --for=create"`}
-}
-
-// PrepareVMStorage gives KubeVirt a private StorageProfile, because its VM
-// snapshot API has no per-request class selector. The copied StorageClass keeps
-// all provisioning settings, but never carries default annotations. No existing
-// StorageClass, StorageProfile, or default VolumeSnapshotClass is modified.
-// created is returned even on later failure so teardown can remove the copy.
-func (s SnapshotSelection) PrepareVMStorage(ctx context.Context) (created string, err error) {
-	var sc map[string]any
-	if err := snapshotJSON(ctx, s.Kubeconfig, &sc, "get", "storageclass", s.StorageClass, "-o", "json"); err != nil {
-		return "", err
-	}
-	sc["metadata"] = map[string]any{"generateName": "storage-cert-snapshot-", "labels": map[string]string{"app.kubernetes.io/managed-by": "storage-cert-harness"}}
-	delete(sc, "status")
-	data, err := json.Marshal(sc)
-	if err != nil {
-		return "", err
-	}
-	var made struct {
-		Metadata struct {
-			Name string `json:"name"`
-		} `json:"metadata"`
-	}
-	out, err := SnapshotCommand(ctx, s.Kubeconfig, data, "create", "-f", "-", "-o", "json")
-	if err != nil {
-		return "", err
-	}
-	if err := json.Unmarshal(out, &made); err != nil {
-		return "", err
-	}
-	created = made.Metadata.Name
-	if created == "" {
-		return "", fmt.Errorf("created storage class has no name")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	if _, err := SnapshotCommand(ctx, s.Kubeconfig, nil, "wait", "--for=create", "storageprofile/"+created, "--timeout=90s"); err != nil {
-		return created, err
-	}
-	// Preserve claim defaults from the backend's profile for unknown CSI drivers.
-	var source struct {
-		Status struct {
-			ClaimPropertySets []any `json:"claimPropertySets"`
-		} `json:"status"`
-	}
-	if err := snapshotJSON(ctx, s.Kubeconfig, &source, "get", "storageprofile", s.StorageClass, "-o", "json"); err != nil {
-		return created, err
-	}
-	spec := map[string]any{"snapshotClass": s.SnapshotClass}
-	if len(source.Status.ClaimPropertySets) > 0 {
-		spec["claimPropertySets"] = source.Status.ClaimPropertySets
-	}
-	patch, err := json.Marshal(map[string]any{"spec": spec})
-	if err != nil {
-		return created, err
-	}
-	if _, err := SnapshotCommand(ctx, s.Kubeconfig, nil, "patch", "storageprofile", created, "--type=merge", "-p", string(patch)); err != nil {
-		return created, err
-	}
-	_, err = SnapshotCommand(ctx, s.Kubeconfig, nil, "wait", "storageprofile/"+created, "--for=jsonpath={.status.snapshotClass}="+s.SnapshotClass, "--timeout=90s")
-	return created, err
 }
 
 func (s SnapshotSelection) CleanupVMStorage(ctx context.Context, created string) error {

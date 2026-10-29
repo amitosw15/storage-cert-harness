@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
@@ -64,9 +62,14 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 	if err != nil {
 		return nil, err
 	}
-	if err := yaml.Unmarshal(data, &c.Template); err != nil {
+	documents, err := manifest.Documents(data)
+	if err != nil {
 		return nil, fmt.Errorf("snapshot clone VM template: %w", err)
 	}
+	if len(documents) != 1 {
+		return nil, fmt.Errorf("snapshot clone VM template must contain one YAML document")
+	}
+	c.Template = documents[0]
 	spec, _ := c.Template["spec"].(map[string]any)
 	volumes, _ := spec["dataVolumeTemplates"].([]any)
 	for _, item := range volumes {

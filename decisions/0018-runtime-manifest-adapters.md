@@ -15,7 +15,7 @@ is now `internal/tools/<tool>/templates/<TR-ID>/`, with shared resources under
 
 Use a `ManifestRenderer` interface with `Render(source, values)`. Keep file IO,
 cluster lookups, value resolution, and CLI construction in the tool integration. Kube-burner and kube-burner-ocp retain
-native rendering; local KB templates pass through a no-op renderer and KBO
+native workload rendering; local KB workload templates pass through a no-op renderer and KBO
 uses its released CLI's bundled templates. Virtbench receives fully rendered VM
 manifests from the harness. Follow kube-burner's Go `text/template` Parse/Execute
 model with strict missing keys and explicit values. Keep structural choices in
@@ -56,3 +56,7 @@ readiness and namespace defaults in Virtbench; `selected-vm.yaml` expresses the
 source changes. Snapshot conversion consumes the selected source and hands its
 final artifact directly to execution validation. CLI argument builders perform
 no staging IO.
+
+KB storage setup is harness-owned and uses the shared Go renderer with templates
+under `templates/TR-VIRT-010/setup/`. Runtime YAML decoding uses
+`manifest.Documents`; typed JSON API requests use standard JSON encoding.

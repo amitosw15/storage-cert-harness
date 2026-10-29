@@ -9,15 +9,11 @@
 package virtbench
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"path/filepath"
 	"slices"
 	"strconv"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
@@ -135,37 +131,45 @@ func templateDiskCount(path string, tr core.TestRequirement) (int, error) {
 }
 
 func manifestDiskCount(data []byte) (int, error) {
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	for {
-		var doc struct {
-			Kind string `yaml:"kind"`
-			Spec struct {
-				Template struct {
-					Spec struct {
-						Volumes []map[string]any `yaml:"volumes"`
-					} `yaml:"spec"`
-				} `yaml:"template"`
-			} `yaml:"spec"`
-		}
-		err := dec.Decode(&doc)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return 0, err
-		}
-		if doc.Kind != "VirtualMachine" {
+	documents, err := manifest.Documents(data)
+	if err != nil {
+		return 0, err
+	}
+	for _, object := range documents {
+		if object["kind"] != "VirtualMachine" {
 			continue
 		}
-		n := 0
-		for _, v := range doc.Spec.Template.Spec.Volumes {
-			_, cloudNoCloud := v["cloudInitNoCloud"]
-			_, cloudConfig := v["cloudInitConfigDrive"]
-			if !cloudNoCloud && !cloudConfig {
-				n++
+		for _, field := range []string{"spec", "template", "spec"} {
+			value := object[field]
+			if value == nil {
+				return 0, nil
+			}
+			var ok bool
+			object, ok = value.(map[string]any)
+			if !ok {
+				return 0, fmt.Errorf("VM %s must be a mapping", field)
 			}
 		}
-		return n, nil
+		if object["volumes"] == nil {
+			return 0, nil
+		}
+		volumes, ok := object["volumes"].([]any)
+		if !ok {
+			return 0, fmt.Errorf("VM volumes must be a list")
+		}
+		count := 0
+		for _, item := range volumes {
+			volume, ok := item.(map[string]any)
+			if !ok {
+				return 0, fmt.Errorf("VM volume must be a mapping")
+			}
+			_, noCloud := volume["cloudInitNoCloud"]
+			_, configDrive := volume["cloudInitConfigDrive"]
+			if !noCloud && !configDrive {
+				count++
+			}
+		}
+		return count, nil
 	}
 	return 0, fmt.Errorf("no VirtualMachine document found")
 }

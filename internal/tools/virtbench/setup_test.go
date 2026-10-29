@@ -3,6 +3,7 @@ package virtbench
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -573,5 +574,31 @@ func TestSSHHelperOnTargetNode(t *testing.T) {
 	}
 	if sshPodOnNode(pod, map[string]struct{}{"worker-06.example.test": {}}) {
 		t.Fatal("helper on another node was incorrectly detected")
+	}
+}
+
+func TestSSHPodDeleteOptionsEncodesUID(t *testing.T) {
+	uid := "uid-with-\"quotes\"-and-\\slash\n"
+	path, err := writeSSHPodDeleteOptions(uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var options struct {
+		APIVersion    string `json:"apiVersion"`
+		Kind          string `json:"kind"`
+		Preconditions struct {
+			UID string `json:"uid"`
+		} `json:"preconditions"`
+	}
+	if err := json.Unmarshal(data, &options); err != nil {
+		t.Fatal(err)
+	}
+	if options.APIVersion != "v1" || options.Kind != "DeleteOptions" || options.Preconditions.UID != uid {
+		t.Fatalf("unexpected delete request: %s", data)
 	}
 }

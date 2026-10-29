@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
@@ -273,6 +274,45 @@ func TestSingleNodeCeilingValidate(t *testing.T) {
 			}
 			if !tc.wantErr && err != nil {
 				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestManifestDiskCountUsesSharedDocumentValidation(t *testing.T) {
+	source := `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata: {name: vm}
+spec:
+  template:
+    spec:
+      volumes:
+        - {name: root, dataVolume: {name: root}}
+        - {name: extra, persistentVolumeClaim: {claimName: extra}}
+        - {name: cloudinit, cloudInitNoCloud: {}}
+        - {name: configdrive, cloudInitConfigDrive: {}}
+`
+	for _, tt := range []struct {
+		name, source string
+		count        int
+		wantError    string
+	}{
+		{"cloud-init excluded", source, 2, ""},
+		{"preceding object", "kind: ConfigMap\n---\n" + source, 2, ""},
+		{"missing volumes", "kind: VirtualMachine\nspec: {}", 0, ""},
+		{"bad trailing document", source + "---\ninvalid: [", 0, "invalid YAML"},
+		{"no VM", "kind: ConfigMap", 0, "no VirtualMachine"},
+		{"bad volumes", "kind: VirtualMachine\nspec: {template: {spec: {volumes: wrong}}}", 0, "volumes must be a list"},
+		{"bad volume", "kind: VirtualMachine\nspec: {template: {spec: {volumes: [wrong]}}}", 0, "volume must be a mapping"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			count, err := manifestDiskCount([]byte(tt.source))
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("error=%v, want %s", err, tt.wantError)
+				}
+			} else if err != nil || count != tt.count {
+				t.Fatalf("count=%d error=%v", count, err)
 			}
 		})
 	}

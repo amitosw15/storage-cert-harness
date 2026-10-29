@@ -427,12 +427,23 @@ func deleteSSHPodUID(ctx context.Context, kubeconfig, uid string) error {
 }
 
 func writeSSHPodDeleteOptions(uid string) (string, error) {
-	body := fmt.Sprintf(`{"apiVersion":"v1","kind":"DeleteOptions","preconditions":{"uid":"%s"}}`, uid)
+	options := struct {
+		APIVersion    string `json:"apiVersion"`
+		Kind          string `json:"kind"`
+		Preconditions struct {
+			UID string `json:"uid"`
+		} `json:"preconditions"`
+	}{APIVersion: "v1", Kind: "DeleteOptions"}
+	options.Preconditions.UID = uid
+	body, err := json.Marshal(options)
+	if err != nil {
+		return "", err
+	}
 	f, err := os.CreateTemp("", "ssh-pod-delete-*.json")
 	if err != nil {
 		return "", err
 	}
-	if _, err := f.WriteString(body); err != nil {
+	if _, err := f.Write(body); err != nil {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
 		return "", err

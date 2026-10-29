@@ -108,7 +108,10 @@ User-supplied template paths remain external inputs.
 
 `internal/manifest.ManifestRenderer` exposes `Render(source []byte, values
 map[string]any) ([]byte, error)`. It has no filesystem, cluster, or CLI responsibilities.
-Kube-burner uses `manifest.Native` to preserve template bytes for its own renderer.
+Kube-burner uses `manifest.Native` to preserve workload template bytes for its own renderer.
+Its harness-owned StorageClass and StorageProfile setup uses `manifest.GoTemplate`
+with sources under `templates/TR-VIRT-010/setup/`; these are applied by the harness
+and are not staged as native kube-burner workload templates.
 Kube-burner-ocp owns its templates inside the released CLI and needs no harness
 rendering call; any future local templates use the same native renderer.
 Kube-burner's snapshot-job list is passed as JSON in `SNAPSHOT_JOBS`; its native
@@ -203,6 +206,7 @@ their owners after the migration.
 | --- | --- |
 | KB `snapshotJobs`, `legacySnapshotJob`, marker replacement in `writeConfig` | `snapshotJobInputs` builds values; native `config.yaml` builds the YAML |
 | KB `writeConfig`, `buildEnv` | Copy sources unchanged; pass explicit environment values to KB |
+| KB `PrepareVMStorage` resource-map mutation and patch construction | Tool-owned `prepareVMStorage`; `setup/storageclass.yaml` and `setup/storageprofile-patch.yaml` use the shared renderer |
 | KBO workload flags | Upstream owns the workload templates |
 | VB `stageTemplate`, `stageFIOTemplate`, `stageCloneAtScaleTemplate` | Removed; `vmSourceTemplate` selects raw bytes and `prepareManifest` writes the rendered artifact once |
 | VB datasource-clone, disk-ops, FIO substitution | `prepareManifest` resolves all values, renders, validates, and selects the runtime file |
@@ -212,6 +216,8 @@ their owners after the migration.
 | VB `ensureNamespace` inline YAML | Shared `namespace.yaml` |
 | VB snapshot object maps and nested VM map mutation | `volume-snapshot.yaml` and `snapshot-vm.yaml`; source maps are read-only |
 | VB `templateDiskCount` placeholder replacement | Render with selected values, then inspect volumes; execution also checks the final count |
+| VB disk-count and snapshot YAML decoding | `manifest.Documents`; tool code only inspects decoded objects |
+| VB `writeSSHPodDeleteOptions` JSON string formatting | Standard JSON encoding of a typed API request |
 | VB source and rendered file writes | One `writeTemplateFile` in `virtbench/manifest.go` |
 | Example adapter | No runtime manifests |
 
