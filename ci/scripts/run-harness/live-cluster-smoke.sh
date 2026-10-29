@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Trusted CI entry for live-cluster smoke on secret-bearing runners.
-# Installed from the default branch only; PR code is read from LIVE_SMOKE_SRC_DIR.
 set -euo pipefail
+
+LIVE_SMOKE_EXIT_NOT_IMPLEMENTED="${LIVE_SMOKE_EXIT_NOT_IMPLEMENTED:-5}"
 
 _run_harness_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../ci-utils.sh
@@ -21,17 +21,18 @@ echo "live-cluster-smoke: pr=${LIVE_SMOKE_PR_NUMBER} head_sha=${LIVE_SMOKE_HEAD_
 echo "trusted_runner_root=${REPO_ROOT} pr_source=${src_root}"
 
 kubeconfig="${LIVE_SMOKE_KUBECONFIG:-${KUBECONFIG:-${REPO_ROOT}/work/kubeconfig}}"
-if [[ -s "${kubeconfig}" && -r "${kubeconfig}" ]]; then
-	export KUBECONFIG="${kubeconfig}"
-	export SMOKE_CLUSTER_LEASE_KUBECONFIG="${kubeconfig}"
-	plan_file="${src_root}/plans/harness-smoke-plan.yaml"
-	smoke_cluster_lease_acquire "harness-smoke" "${plan_file}"
-	smoke_cluster_lease_install_traps "_ci_log_flush"
-	smoke_cluster_lease_start_renewal_loop
-else
-	echo "note: kubeconfig not available; skipping cluster lease until secrets are materialized"
+if [[ ! -s "${kubeconfig}" || ! -r "${kubeconfig}" ]]; then
+	echo "error: kubeconfig missing for live-cluster smoke: ${kubeconfig}" >&2
+	exit "${LIVE_SMOKE_EXIT_NOT_IMPLEMENTED}"
 fi
 
-# TODO(ECOPROJECT-5488): materialize secrets, load image, run harness from src_root, janitor.
-echo "note: full live-cluster smoke (secrets, podman run, janitor) is not implemented yet"
-exit 0
+export KUBECONFIG="${kubeconfig}"
+export SMOKE_CLUSTER_LEASE_KUBECONFIG="${kubeconfig}"
+plan_file="${src_root}/plans/harness-smoke-plan.yaml"
+smoke_cluster_lease_acquire "harness-smoke" "${plan_file}"
+smoke_cluster_lease_install_traps "_ci_log_flush"
+smoke_cluster_lease_start_renewal_loop
+
+echo "error: live-cluster harness execution is not implemented yet (ECOPROJECT-5488)" >&2
+echo "error: secrets materialization, image load, and podman run from pr-src are pending" >&2
+exit "${LIVE_SMOKE_EXIT_NOT_IMPLEMENTED}"

@@ -200,10 +200,12 @@ and implemented by [`.github/workflows/ci-live-smoke.yml`](.github/workflows/ci-
 when the repository variable `CI_LIVE_SMOKE_ENABLED` is `true` and the `live-smoke`
 environment is configured. Until then, run smoke **locally** (below).
 
-When CI live smoke is enabled: it runs **once** per PR to `main` on open; a
-**failed** run **blocks merge** until you investigate and get a passing on-demand
-re-run. That does not replace validation on **your own** cluster before you open
-the PR.
+When CI live smoke is enabled, smoke does **not** run automatically on PR open.
+Request it with `/run-live-smoke`, **Actions → CI Live Smoke → Run workflow**
+(`pr_number`), or rely on the **daily schedule** when an open PR had activity in
+the last 24 hours. A **failed** run **blocks merge** until you investigate and
+get a passing on-demand re-run. That does not replace validation on **your own**
+cluster before you open the PR.
 
 If your change touches paths that **trigger** CI live smoke (`cmd/`, `internal/`,
 `catalog.json`, `Containerfile`, image/tool pins, etc. — **not** `vendor/` or

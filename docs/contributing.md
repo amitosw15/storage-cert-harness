@@ -40,11 +40,11 @@ make set-next-version BINARY=1.0.0   # or IMAGE=1.0.0; see docs/ci.md Versioning
 [ci-live-smoke.yml](../.github/workflows/ci-live-smoke.yml)). Until operators
 enable it, use the local commands below.
 
-When enabled, upstream CI schedules **live smoke** on the shared lab when a PR to
-`main` is **opened** (once per PR, path filters apply). A **failed** live-smoke
-run **blocks merging the PR** until you investigate, fix your branch, and get a
-**passing** re-run (on demand — below). Run smoke on your own lab **before**
-opening the PR (next section).
+When enabled, upstream CI runs live smoke **only on demand** (PR comment or
+`workflow_dispatch`) or on the **daily schedule** when an open same-repo PR to
+`main` was updated in the last 24 hours. A **failed** live-smoke run **blocks
+merging the PR** until you investigate, fix your branch, and get a **passing**
+re-run. Run smoke on your own lab **before** opening the PR (next section).
 
 ### When you must run smoke locally
 
@@ -82,17 +82,17 @@ Optional: `KUBECTL_INSECURE_SKIP_TLS_VERIFY=true` for lab TLS. Reports land unde
 
 ### After the PR is open — on-demand CI smoke
 
-When `CI_LIVE_SMOKE_ENABLED` is true, the shared cluster runs smoke **once** when
-the PR is created. If the job **fails**,
+When `CI_LIVE_SMOKE_ENABLED` is true, request shared-cluster smoke explicitly —
+there is **no** automatic run when the PR is created. If a run **fails**,
 read the workflow logs and `report` artifacts, fix the issue, then trigger another
-run — **do not merge** until live-smoke is green. To run smoke again
+run — **do not merge** until live-smoke is green. To run smoke
 (same-repo PRs only):
 
 | Method | Action |
 | --- | --- |
 | PR comment | Post `/run-live-smoke` on the pull request |
 | GitHub CLI | `gh pr comment <number> --body '/run-live-smoke'` |
-| Actions UI | Re-run the PR-open smoke workflow (uses current PR head via API) or `workflow_dispatch` with the PR **number** |
+| Actions UI | **CI Live Smoke** → **Run workflow** with the PR **number** |
 
 Do not use `[skip live-smoke]` in the PR title/body unless the lab is down or
 maintainers agree — see [ci.md](ci.md) (Skip live smoke). Fork PRs
