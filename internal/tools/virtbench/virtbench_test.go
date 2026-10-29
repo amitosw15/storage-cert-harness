@@ -170,6 +170,52 @@ func TestParseFIOFleet(t *testing.T) {
 	goldenParse(t, ParseFIO, "fio_fleet.json", "parse_fio_fleet.golden.json", "TR-STOR-002")
 }
 
+func TestParseFIORequiresCompletionP99(t *testing.T) {
+	for _, direction := range []string{"read", "write"} {
+		for _, missing := range []string{"clat_ns", "p99"} {
+			for _, fleet := range []bool{false, true} {
+				name := direction + "/missing-" + missing + "/raw"
+				if fleet {
+					name = direction + "/missing-" + missing + "/fleet"
+				}
+				t.Run(name, func(t *testing.T) {
+					data, err := os.ReadFile(filepath.Join("testdata", FIOFileName))
+					if err != nil {
+						t.Fatal(err)
+					}
+					var raw map[string]any
+					if err := json.Unmarshal(data, &raw); err != nil {
+						t.Fatal(err)
+					}
+					job := raw["jobs"].([]any)[0].(map[string]any)
+					d := job[direction].(map[string]any)
+					if missing == "clat_ns" {
+						delete(d, "clat_ns")
+					} else {
+						d["clat_ns"] = map[string]any{"percentile": map[string]float64{"95.000000": 1000000}}
+					}
+					var payload any = raw
+					if fleet {
+						payload = map[string]any{
+							"summary": fioSummaryFile{TotalVMs: 1, Successful: 1},
+							"results": []any{raw},
+						}
+					}
+					data, err = json.Marshal(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, err = ParseFIO(data, "TR-STOR-002")
+					want := direction + " completion latency (clat_ns): p99 percentile missing"
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Fatalf("ParseFIO error = %v, want %q", err, want)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestParseFIOErrors(t *testing.T) {
 	if _, err := ParseFIO(nil, "TR-STOR-002"); err == nil {
 		t.Error("empty payload: want error, got nil")
