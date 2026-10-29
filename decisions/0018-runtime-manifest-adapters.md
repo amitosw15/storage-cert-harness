@@ -48,4 +48,3 @@ depending on stage interfaces as required by ADR-0003.
 The renderer uses Go `text/template` and Sprig v3 with one added `toYaml` helper. New dynamic values require an explicit resolver
 entry. Renderer tests cover typed values, control flow, legacy aliases, native passthrough,
 and invalid input. Tool migrations will add coverage at their execution boundaries.
-
