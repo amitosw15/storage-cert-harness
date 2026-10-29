@@ -104,6 +104,13 @@ and need no `templates.go`. Keep upstream-owned templates in their released
 runtime; do not copy them into the harness merely to populate a TR directory.
 User-supplied template paths remain external inputs.
 
+## Kube-burner workload templates
+
+Kube-burner keeps native rendering. `manifest.Native` passes source bytes through
+unchanged, while `snapshotJobInputs` supplies job values as JSON in `SNAPSHOT_JOBS`.
+The config template uses `fromJson` and `range` to construct legacy or batched
+snapshot jobs, including a final partial batch. Raw template YAML is excluded
+from yamllint; tests validate rendered configuration and preserve native sources.
 ## Kube-burner storage setup
 
 Private StorageClass and StorageProfile setup is owned by the harness and uses
