@@ -441,7 +441,7 @@ func TestTeardown_DeletesNamespaceAfterCancellation(t *testing.T) {
 }
 
 func TestSnapshotJobs_SplitsPartialFinalBatch(t *testing.T) {
-	jobs := snapshotJobs(Params{Replicas: 2, SnapshotCount: 3, snapshotCountSet: true})
+	jobs := renderConfig(t, Params{Replicas: 2, SnapshotCount: 3, snapshotCountSet: true})
 	for _, want := range []string{
 		"name: vmsnapshot-snapshot-1",
 		"name: vmsnapshot-snapshot-2",
@@ -558,7 +558,7 @@ func TestEvaluator_SkipsUnmeasurableSLA(t *testing.T) {
 
 func TestWriteConfig_EmbedsAssets(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := writeConfig(dir, Params{Replicas: 2, SnapshotCount: 3, snapshotCountSet: true}); err != nil {
+	if _, err := writeConfig(dir); err != nil {
 		t.Fatalf("writeConfig: %v", err)
 	}
 	for _, f := range []string{"config.yaml", "templates/vm.yaml", "templates/vmsnapshot.yaml", "templates/vmsnapshot-batch.yaml"} {
@@ -570,8 +570,8 @@ func TestWriteConfig_EmbedsAssets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
-	if !strings.Contains(string(config), "replicas: {{.REPLICAS}}") || strings.Count(string(config), "name: vmsnapshot-snapshot-") != 2 || !strings.Contains(string(config), "replicas: 2") || !strings.Contains(string(config), "replicas: 1") || !strings.Contains(string(config), "snapshotBatch: 1") || !strings.Contains(string(config), "snapshotBatch: 2") {
-		t.Errorf("config does not preserve replicas and use snapshot batches:\n%s", config)
+	if !strings.Contains(string(config), "replicas: {{.REPLICAS}}") || !strings.Contains(string(config), "range .SNAPSHOT_JOBS | fromJson") {
+		t.Errorf("config does not preserve native rendering:\n%s", config)
 	}
 	template, err := os.ReadFile(filepath.Join(dir, "templates", "vmsnapshot-batch.yaml"))
 	if err != nil {
@@ -585,14 +585,11 @@ func TestWriteConfig_EmbedsAssets(t *testing.T) {
 func TestWriteConfig_PreservesLegacySnapshotJob(t *testing.T) {
 	dir := t.TempDir()
 	p := resolveParams([]core.TestRequirement{{Params: map[string]any{"replicas": 2}}})
-	if _, err := writeConfig(dir, p); err != nil {
+	if _, err := writeConfig(dir); err != nil {
 		t.Fatalf("writeConfig: %v", err)
 	}
-	config, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
-	if err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	if !strings.Contains(string(config), "name: vmsnapshot-snapshot\n") || !strings.Contains(string(config), "objectTemplate: templates/vmsnapshot.yaml") || !strings.Contains(string(config), "replicas: {{.REPLICAS}}") || strings.Contains(string(config), "snapshotBatch:") {
+	config := renderConfig(t, p)
+	if !strings.Contains(config, "name: vmsnapshot-snapshot\n") || !strings.Contains(config, "objectTemplate: templates/vmsnapshot.yaml") || !strings.Contains(config, "replicas: 2") || strings.Contains(config, "snapshotBatch:") {
 		t.Errorf("config does not preserve the legacy snapshot job:\n%s", config)
 	}
 	template, err := os.ReadFile(filepath.Join(dir, "templates", "vmsnapshot.yaml"))
