@@ -580,7 +580,14 @@ const (
 	defaultFIOVMReadyTimeout   = 600
 	defaultFIOCollectRetries   = 8
 	defaultFIOCollectRetryWait = 20
-	defaultFIOVMName           = "fio-vm"
+)
+
+const (
+	fioActionDeploy        = "deploy"
+	fioActionStatus        = "status"
+	fioActionGatherResults = "gather-results"
+	fioActionCleanup       = "cleanup"
+	fioActionRunAll        = "run-all"
 )
 
 // fioArgs builds the fixed 4 KiB random read/write profile. The plan's start/end
@@ -598,7 +605,8 @@ func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestReq
 		if _, err := fioVMReadyTimeout(tr); err != nil {
 			return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 		}
-		if _, _, err := fioCollectionSettings(tr); err != nil {
+		retries, delay, err := fioCollectionSettings(tr)
+		if err != nil {
 			return nil, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 		}
 		if _, err := fioProfile(tr); err != nil {
@@ -618,7 +626,7 @@ func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestReq
 
 		args := clusterArgs(tr)
 		args = append(args, "fio",
-			"--action", "run-all",
+			"--action", fioActionRunAll,
 			"--start", strconv.Itoa(start),
 			"--end", strconv.Itoa(end),
 			"--namespace-prefix", strParamOr(tr, "namespace_prefix", nsPrefix),
@@ -628,7 +636,8 @@ func fioArgs(nsPrefix string) func(rc *core.RunCtx, _ *core.Bag, tr core.TestReq
 			"--fio-bs", bs,
 			"--save-results",
 			"--results-dir", resultsRoot,
-			"--cleanup",
+			"--collect-retries", strconv.Itoa(retries),
+			"--collect-retry-delay", strconv.Itoa(delay),
 		)
 		runtime := intParam(tr, "fio_runtime", defaultFIORuntime)
 		if runtime < 1 {
@@ -683,46 +692,34 @@ func runFIO(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.Test
 		return stages.RunHandle{}, fmt.Errorf("virtbench: no results_root in bag")
 	}
 	tr := trs[0]
-	base, err := fioArgs("fio-latency")(rc, nil, tr, root)
+	runArgs, err := fioArgs("fio-latency")(rc, nil, tr, root)
 	if err != nil {
 		return stages.RunHandle{}, err
 	}
-	retries, delay, err := fioCollectionSettings(tr)
+	cleanupArgs, err := fioActionArgs(runArgs, fioActionCleanup)
 	if err != nil {
 		return stages.RunHandle{}, fmt.Errorf("virtbench: %s: %w", tr.ID, err)
 	}
-	runAll := fioRunAllArgs(base, retries, delay)
-	cleanup := fioActionArgs(base, "cleanup")
-
-	deployed := false
 	defer func() {
-		if !deployed {
-			return
-		}
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancel()
-		if err := runVirtbench(cleanupCtx, rc, root, cleanup); err != nil {
+		if err := runVirtbench(cleanupCtx, rc, root, cleanupArgs); err != nil {
 			rc.Logger.Warn("virtbench fio: cleanup failed; teardown will retry", "err", err)
 		}
 	}()
 
-	deployed = true
-	if err := runVirtbench(ctx, rc, root, runAll); err != nil {
+	if err := runVirtbench(ctx, rc, root, runArgs); err != nil {
 		return stages.RunHandle{}, fmt.Errorf("virtbench fio: run-all: %w", err)
 	}
 	return stages.RunHandle{ID: "virtbench-" + rc.RunID}, nil
 }
 
-// fioRunAllArgs configures Virtbench's full FIO workflow and leaves cleanup to the harness.
-func fioRunAllArgs(base []string, retries, delay int) []string {
-	args := fioActionArgs(base, "run-all")
-	return append(args,
-		"--collect-retries", strconv.Itoa(retries),
-		"--collect-retry-delay", strconv.Itoa(delay),
-	)
-}
-
-func fioActionArgs(base []string, action string) []string {
+func fioActionArgs(base []string, action string) ([]string, error) {
+	switch action {
+	case fioActionDeploy, fioActionStatus, fioActionGatherResults, fioActionCleanup, fioActionRunAll:
+	default:
+		return nil, fmt.Errorf("unsupported FIO action %q", action)
+	}
 	args := make([]string, 0, len(base)+4)
 	for i := 0; i < len(base); i++ {
 		if base[i] == "--cleanup" {
@@ -735,7 +732,7 @@ func fioActionArgs(base []string, action string) []string {
 		}
 		args = append(args, base[i])
 	}
-	return args
+	return args, nil
 }
 
 func fioVMReadyTimeout(tr core.TestRequirement) (time.Duration, error) {

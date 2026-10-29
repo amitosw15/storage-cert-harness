@@ -3,12 +3,16 @@ package virtbench
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -461,11 +465,13 @@ func TestBuildArgsFIO(t *testing.T) {
 		"--fio-rw randrw --fio-bs 4k",
 		"--fio-runtime 600",
 		"--results-dir " + resultsDir,
-		"--cleanup",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("fio args missing %q; got %q", want, joined)
 		}
+	}
+	if slices.Contains(got, "--cleanup") {
+		t.Errorf("FIO arguments must leave cleanup to the harness: %v", got)
 	}
 	fleet := core.TestRequirement{ID: "TR-STOR-002", Params: map[string]any{
 		"storage_class":   "ocs-storagecluster-ceph-rbd",
@@ -519,94 +525,221 @@ func TestBuildArgsFIO(t *testing.T) {
 }
 
 func TestFIOActionArgs(t *testing.T) {
-	base := []string{"fio", "--action", "run-all", "--cleanup", "--start", "1"}
-	for _, action := range []string{"deploy", "gather-results", "cleanup"} {
-		got := strings.Join(fioActionArgs(base, action), " ")
-		if got != "fio --action "+action+" --start 1" {
-			t.Errorf("%s args = %q", action, got)
+	base := []string{"fio", "--start", "1", "--action", fioActionRunAll, "--cleanup"}
+	original := slices.Clone(base)
+	for _, action := range []string{fioActionDeploy, fioActionStatus, fioActionGatherResults, fioActionCleanup, fioActionRunAll} {
+		t.Run(action, func(t *testing.T) {
+			got, err := fioActionArgs(base, action)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(got, "fio") || !hasArgPair(got, "--action", action) || !hasArgPair(got, "--start", "1") {
+				t.Errorf("%s arguments missing command or flag/value pair: %v", action, got)
+			}
+			if slices.Contains(got, "--cleanup") {
+				t.Errorf("%s arguments must leave cleanup to the harness: %v", action, got)
+			}
+			if !slices.Equal(base, original) {
+				t.Errorf("fioActionArgs mutated the base arguments: %v", base)
+			}
+		})
+	}
+	for _, action := range []string{"", "invalid"} {
+		if _, err := fioActionArgs(base, action); err == nil {
+			t.Errorf("action %q: want error", action)
 		}
 	}
 }
 
-func TestFIORunAllArgs(t *testing.T) {
-	base := []string{"fio", "--action", "run-all", "--cleanup", "--save-results", "--start", "1"}
-	want := []string{
-		"fio", "--action", "run-all", "--save-results", "--start", "1",
-		"--collect-retries", "8", "--collect-retry-delay", "20",
-	}
-	if got := fioRunAllArgs(base, 8, 20); !reflect.DeepEqual(got, want) {
-		t.Fatalf("run-all args = %#v; want %#v", got, want)
+func TestBuildFIOCollectionArgs(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		retries int
+		delay   int
+	}{
+		{name: "defaults", retries: defaultFIOCollectRetries, delay: defaultFIOCollectRetryWait},
+		{name: "overrides", retries: 11, delay: 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := core.TestRequirement{ID: "TR-STOR-002", Params: map[string]any{
+				"storage_class": "test-sc", "num_vms": 1, "fio_bs": "4k", "fio_runtime": 30,
+			}}
+			if tc.name == "overrides" {
+				tr.Params["fio_collect_retries"] = tc.retries
+				tr.Params["fio_collect_retry_delay"] = tc.delay
+			}
+			args, err := fioArgs("fio-latency")(&core.RunCtx{}, nil, tr, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, pair := range [][2]string{
+				{"--action", fioActionRunAll},
+				{"--collect-retries", strconv.Itoa(tc.retries)},
+				{"--collect-retry-delay", strconv.Itoa(tc.delay)},
+			} {
+				if !hasArgPair(args, pair[0], pair[1]) {
+					t.Errorf("missing %s %s: %v", pair[0], pair[1], args)
+				}
+			}
+			if !slices.Contains(args, "--save-results") || slices.Contains(args, "--cleanup") {
+				t.Errorf("FIO must save results and leave cleanup to the harness: %v", args)
+			}
+		})
 	}
 }
 
-func TestRunFIOInvokesRunAll(t *testing.T) {
-	binDir := t.TempDir()
-	argsPath := filepath.Join(t.TempDir(), "virtbench-args.log")
-	fakeCLI := "#!/bin/sh\nprintf '%s\\n' '--CALL--' \"$@\" >> \"$VIRTBENCH_ARGS\"\n"
-	if err := os.WriteFile(filepath.Join(binDir, binary), []byte(fakeCLI), 0o755); err != nil {
-		t.Fatalf("write fake Virtbench CLI: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("VIRTBENCH_ARGS", argsPath)
+func TestRunFIOInvokesRunAllAndCleanup(t *testing.T) {
+	const (
+		collectRetries = 11
+		collectDelay   = 7
+		runFailureCode = 42
+	)
+	for _, tc := range []struct {
+		name      string
+		exitCode  int
+		cancelRun bool
+	}{
+		{name: "success"},
+		{name: "run failure", exitCode: runFailureCode},
+		{name: "cancellation", cancelRun: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			argsPath := filepath.Join(t.TempDir(), "virtbench-args.log")
+			startedPath := filepath.Join(t.TempDir(), "started")
+			fakeCLI := `#!/bin/sh
+printf '%s\n' '--CALL--' "$@" >> "$VIRTBENCH_ARGS"
+previous=''
+for arg; do
+    if [ "$previous" = '--action' ]; then
+        action="$arg"
+        break
+    fi
+    previous="$arg"
+done
+if [ "$action" = 'run-all' ]; then
+    if [ "$VIRTBENCH_CANCEL" = 'true' ]; then
+        touch "$VIRTBENCH_STARTED"
+        exec sleep 30
+    fi
+    exit "$VIRTBENCH_RUN_EXIT"
+fi
+`
+			if err := os.WriteFile(filepath.Join(binDir, binary), []byte(fakeCLI), 0o755); err != nil {
+				t.Fatalf("write fake Virtbench CLI: %v", err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("VIRTBENCH_ARGS", argsPath)
+			t.Setenv("VIRTBENCH_STARTED", startedPath)
+			t.Setenv("VIRTBENCH_CANCEL", strconv.FormatBool(tc.cancelRun))
+			t.Setenv("VIRTBENCH_RUN_EXIT", strconv.Itoa(tc.exitCode))
 
-	resultsRoot := t.TempDir()
-	bag := core.NewBag()
-	bag.Set("results_root", resultsRoot)
-	rc := &core.RunCtx{
-		RunID:   "test-run",
-		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Backend: &core.ResolvedBackend{StorageClass: "test-sc"},
-	}
-	tr := core.TestRequirement{ID: "TR-STOR-002", Params: map[string]any{
-		"num_vms":                 3,
-		"fio_bs":                  "4k",
-		"fio_runtime":             30,
-		"fio_collect_retries":     8,
-		"fio_collect_retry_delay": 20,
-	}}
-	if _, err := runFIO(context.Background(), rc, bag, []core.TestRequirement{tr}); err != nil {
-		t.Fatalf("runFIO: %v", err)
-	}
+			resultsRoot := t.TempDir()
+			bag := core.NewBag()
+			bag.Set("results_root", resultsRoot)
+			rc := &core.RunCtx{
+				RunID:   "test-run",
+				Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+				Backend: &core.ResolvedBackend{StorageClass: "test-sc"},
+			}
+			tr := core.TestRequirement{ID: "TR-STOR-002", Params: map[string]any{
+				"num_vms":                 3,
+				"fio_bs":                  "4k",
+				"fio_runtime":             30,
+				"fio_collect_retries":     collectRetries,
+				"fio_collect_retry_delay": collectDelay,
+				"kubeconfig":              "/test/kubeconfig",
+			}}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			started := make(chan bool, 1)
+			if tc.cancelRun {
+				go func() {
+					defer cancel()
+					ticker := time.NewTicker(10 * time.Millisecond)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ctx.Done():
+							started <- false
+							return
+						case <-ticker.C:
+							if _, err := os.Stat(startedPath); err == nil {
+								started <- true
+								return
+							}
+						}
+					}
+				}()
+			}
+			handle, err := runFIO(ctx, rc, bag, []core.TestRequirement{tr})
+			if tc.cancelRun && !<-started {
+				t.Fatal("run-all did not start before cancellation")
+			}
+			if tc.exitCode != 0 || tc.cancelRun {
+				if err == nil || !strings.Contains(err.Error(), "virtbench fio: run-all:") {
+					t.Fatalf("runFIO error = %v; want run-all failure", err)
+				}
+				if handle.ID != "" {
+					t.Errorf("failed run returned success handle: %v", handle)
+				}
+				if tc.exitCode != 0 {
+					var exitErr *exec.ExitError
+					if !errors.As(err, &exitErr) || exitErr.ExitCode() != tc.exitCode {
+						t.Errorf("runFIO did not preserve exit code %d: %v", tc.exitCode, err)
+					}
+				}
+			} else if err != nil || handle.ID != "virtbench-"+rc.RunID {
+				t.Fatalf("runFIO = %v, %v; want success handle", handle, err)
+			}
 
-	data, err := os.ReadFile(argsPath)
-	if err != nil {
-		t.Fatalf("read fake CLI arguments: %v", err)
-	}
-	log := strings.TrimSpace(string(data))
-	calls := strings.Split(strings.TrimPrefix(log, "--CALL--\n"), "\n--CALL--\n")
-	if len(calls) != 2 {
-		t.Fatalf("fake Virtbench calls = %d; want run-all and cleanup; log:\n%s", len(calls), data)
-	}
-	runArgs := strings.Split(calls[0], "\n")
-	cleanupArgs := strings.Split(calls[1], "\n")
-	if len(runArgs) < 3 || !reflect.DeepEqual(runArgs[:3], []string{"fio", "--action", "run-all"}) {
-		t.Fatalf("first Virtbench call = %#v; want run-all", runArgs)
-	}
-	for _, pair := range [][2]string{{"--collect-retries", "8"}, {"--collect-retry-delay", "20"}} {
-		if !hasArgPair(runArgs, pair[0], pair[1]) {
-			t.Errorf("run-all call missing %s %s: %#v", pair[0], pair[1], runArgs)
-		}
-	}
-	if containsArg(runArgs, "--cleanup") {
-		t.Errorf("run-all call should leave cleanup to the harness: %#v", runArgs)
-	}
-	if len(cleanupArgs) < 3 || !reflect.DeepEqual(cleanupArgs[:3], []string{"fio", "--action", "cleanup"}) {
-		t.Fatalf("second Virtbench call = %#v; want cleanup", cleanupArgs)
+			data, err := os.ReadFile(argsPath)
+			if err != nil {
+				t.Fatalf("read fake CLI arguments: %v", err)
+			}
+			log := strings.TrimSpace(string(data))
+			calls := strings.Split(strings.TrimPrefix(log, "--CALL--\n"), "\n--CALL--\n")
+			if len(calls) != 2 {
+				t.Fatalf("fake Virtbench calls = %d; want run-all and cleanup; log:\n%s", len(calls), data)
+			}
+			for i, action := range []string{fioActionRunAll, fioActionCleanup} {
+				args := strings.Split(calls[i], "\n")
+				if !slices.Contains(args, "fio") || !hasArgPair(args, "--action", action) {
+					t.Fatalf("Virtbench call %d = %v; want fio --action %s", i, args, action)
+				}
+				for _, pair := range [][2]string{
+					{"--kubeconfig", tr.Params["kubeconfig"].(string)},
+					{"--start", "1"}, {"--end", "3"},
+					{"--namespace-prefix", "fio-latency"},
+				} {
+					if !hasArgPair(args, pair[0], pair[1]) {
+						t.Errorf("%s missing %s %s: %v", action, pair[0], pair[1], args)
+					}
+				}
+				if slices.Contains(args, "--cleanup") {
+					t.Errorf("%s must leave cleanup to the harness: %v", action, args)
+				}
+			}
+			runArgs := strings.Split(calls[0], "\n")
+			for _, pair := range [][2]string{
+				{"--collect-retries", strconv.Itoa(collectRetries)},
+				{"--collect-retry-delay", strconv.Itoa(collectDelay)},
+				{"--results-dir", resultsRoot},
+			} {
+				if !hasArgPair(runArgs, pair[0], pair[1]) {
+					t.Errorf("run-all missing %s %s: %v", pair[0], pair[1], runArgs)
+				}
+			}
+			if !slices.Contains(runArgs, "--save-results") {
+				t.Errorf("run-all missing --save-results: %v", runArgs)
+			}
+		})
 	}
 }
 
 func hasArgPair(args []string, flag, value string) bool {
 	for i := 0; i+1 < len(args); i++ {
 		if args[i] == flag && args[i+1] == value {
-			return true
-		}
-	}
-	return false
-}
-
-func containsArg(args []string, want string) bool {
-	for _, arg := range args {
-		if arg == want {
 			return true
 		}
 	}
