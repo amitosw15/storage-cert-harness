@@ -2,6 +2,7 @@ package report
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -39,6 +40,43 @@ func TestBuildCertifiedLevel(t *testing.T) {
 			r := Build("run", "2.0", core.Provenance{}, c.verdicts)
 			if r.Summary.CertifiedLevel != c.want {
 				t.Fatalf("certified level = %d, want %d (levels=%+v)", r.Summary.CertifiedLevel, c.want, r.Levels)
+			}
+		})
+	}
+}
+
+func TestBlockingSkipPreventsCertification(t *testing.T) {
+	blocked := core.Verdict{TR: "TR-1", Level: 3, Item: "sla:latency", Outcome: core.OutcomeSkip, BlocksCertification: true}
+	for _, tc := range []struct {
+		name      string
+		verdicts  []core.Verdict
+		wantLevel int
+	}{
+		{"same level pass", []core.Verdict{v(3, "TR-1", core.OutcomePass), blocked}, 0},
+		{"retain lower earned level", []core.Verdict{v(2, "TR-2", core.OutcomePass), blocked}, 2},
+		{"block higher level", []core.Verdict{blocked, v(4, "TR-4", core.OutcomePass)}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Build("blocked", "2.0", core.Provenance{}, tc.verdicts)
+			if r.Certifiable || r.Summary.CertifiedLevel != tc.wantLevel || r.Summary.Skip != 1 || r.Summary.Fail != 0 || r.Summary.Error != 0 {
+				t.Fatalf("unexpected certification result: %+v", r)
+			}
+			for _, level := range r.Levels {
+				if level.Level == 3 && level.Outcome != core.OutcomeSkip {
+					t.Fatalf("blocked level must remain skipped: %+v", level)
+				}
+			}
+			b, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var restored core.Report
+			if err := json.Unmarshal(b, &restored); err != nil {
+				t.Fatal(err)
+			}
+			RefreshLifecycle(&restored)
+			if restored.Certifiable {
+				t.Fatal("JSON round trip lost the certification blocker")
 			}
 		})
 	}

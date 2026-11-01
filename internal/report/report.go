@@ -106,6 +106,12 @@ func RefreshLifecycle(r *core.Report) {
 				return
 			}
 		}
+		for _, verdict := range r.Verdicts {
+			if verdict.BlocksCertification {
+				r.Certifiable = false
+				return
+			}
+		}
 		r.Certifiable = r.Summary.Fail == 0 && r.Summary.Error == 0
 		return
 	}
@@ -136,14 +142,9 @@ func Finalize(r *core.Report, status core.RunStatus, reason, endedAt string) {
 
 // rollupLevels groups verdicts by partner level and computes the certified level.
 //
-// A level passes iff it has at least one pass and no fail/error; a skip-only level
-// is "not evaluated". CertifiedLevel is the highest *tested* level that passed,
-// with no lower tested level failing; levels that were not tested are ignored (not
-// treated as failures). Today every harness TR is Level 2, and Level 1 is a
-// separate external suite (openshift-origin-csi), so a strict cumulative ladder
-// across all three levels is intentionally NOT enforced here — see ADR-0014.
+// Certification blockers stop the level ladder; ordinary skips remain ungraded (ADR-0014).
 func rollupLevels(verdicts []core.Verdict) ([]core.LevelRollup, int) {
-	type acc struct{ pass, failErr bool }
+	type acc struct{ pass, failErr, blocked bool }
 	per := map[int]*acc{}
 	for _, v := range verdicts {
 		lvl := v.Level
@@ -161,6 +162,7 @@ func rollupLevels(verdicts []core.Verdict) ([]core.LevelRollup, int) {
 		case core.OutcomeFail, core.OutcomeError:
 			a.failErr = true
 		}
+		a.blocked = a.blocked || v.BlocksCertification
 	}
 	if len(per) == 0 {
 		return nil, 0
@@ -175,6 +177,8 @@ func rollupLevels(verdicts []core.Verdict) ([]core.LevelRollup, int) {
 		switch {
 		case a.failErr:
 			return core.OutcomeFail
+		case a.blocked:
+			return core.OutcomeSkip
 		case a.pass:
 			return core.OutcomePass
 		default:
@@ -185,10 +189,12 @@ func rollupLevels(verdicts []core.Verdict) ([]core.LevelRollup, int) {
 	for _, l := range levels {
 		rollups = append(rollups, core.LevelRollup{Level: l, Outcome: outcome(per[l])})
 	}
-	// Walk tested levels ascending: a pass raises the certified level; a fail/error
-	// at a tested level stops the ladder; a skip-only level is ignored.
+	// A fail/error or certification blocker stops the ladder; ordinary skips are ignored.
 	certified := 0
 	for _, l := range levels {
+		if per[l].blocked {
+			return rollups, certified
+		}
 		switch outcome(per[l]) {
 		case core.OutcomePass:
 			certified = l

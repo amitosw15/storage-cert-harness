@@ -41,6 +41,12 @@ func gradeSLAs(tr core.TestRequirement, res core.TestResult) []core.Verdict {
 		if len(bars) == 0 || bars[0].Value == nil {
 			v := core.Verdict{TR: tr.ID, Item: item, Outcome: core.OutcomeSkip,
 				Reason: "report-only: no threshold bar for these run params"}
+			if len(bars) == 0 && slices.ContainsFunc(tr.Bars, func(b core.SLA) bool {
+				return b.Metric == d.Metric && b.Percentile == d.Percentile && b.Value != nil
+			}) {
+				v.BlocksCertification = true
+				v.Reason += "; certification blocked because configured thresholds do not cover these run params"
+			}
 			if m != nil {
 				v.Actual = fmt.Sprintf("%g %s", m.Value, unitOr(m.Unit, d.Unit))
 			}

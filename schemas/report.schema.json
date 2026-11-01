@@ -129,6 +129,7 @@
           "variant": { "type": "string", "description": "Named plan execution, absent for default executions" },
           "item": { "type": "string", "description": "scorable item, e.g. sla:latency_ms@p99 or check:snapshot-restore" },
           "outcome": { "enum": ["pass", "fail", "error", "skip"] },
+          "blocks_certification": { "type": "boolean", "description": "Whether this verdict prevents certification even when its outcome is skip" },
           "reason": { "type": "string" },
           "expected": { "type": "string" },
           "actual": { "type": "string" }

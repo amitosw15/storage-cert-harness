@@ -244,6 +244,8 @@ type Verdict struct {
 	Reason    string  `json:"reason,omitempty"`
 	Expected  string  `json:"expected,omitempty"`
 	Actual    string  `json:"actual,omitempty"`
+
+	BlocksCertification bool `json:"blocks_certification,omitempty"`
 }
 
 // Provenance records where the KB export came from, stamped into every report

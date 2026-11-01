@@ -222,23 +222,26 @@ func (p *progressTracker) loggerDebug(msg string, args ...any) {
 	}
 }
 
-// summarizeTR collapses the item-level verdicts for one execution into the
-// user-facing progress outcome. Errors take precedence over failures, then
-// passes; a result containing only skips is shown as skipped.
+// summarizeTR prioritizes errors, failures, certification-blocking skips, then passes.
 func summarizeTR(verdicts []core.Verdict, tr core.TestRequirement) core.Outcome {
 	best := core.OutcomeSkip
 	seen := false
+	blocked := false
 	for _, verdict := range verdicts {
 		if verdict.TR != tr.ID || verdict.Variant != tr.Variant {
 			continue
 		}
 		seen = true
+		blocked = blocked || verdict.BlocksCertification
 		if outcomeRank(verdict.Outcome) > outcomeRank(best) {
 			best = verdict.Outcome
 		}
 	}
 	if !seen {
 		return core.OutcomeError
+	}
+	if blocked && best == core.OutcomePass {
+		return core.OutcomeSkip
 	}
 	return best
 }

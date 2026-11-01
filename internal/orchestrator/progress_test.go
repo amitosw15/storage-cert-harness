@@ -47,6 +47,10 @@ func TestProgressSummaryOutcome(t *testing.T) {
 	if got := summarizeTR(verdicts, tr); got != core.OutcomePass {
 		t.Fatalf("summarizeTR = %q, want pass", got)
 	}
+	verdicts[1].BlocksCertification = true
+	if got := summarizeTR(verdicts, tr); got != core.OutcomeSkip {
+		t.Fatalf("summarizeTR with blocking skip = %q, want skip", got)
+	}
 	verdicts[0].Outcome = core.OutcomeFail
 	if got := summarizeTR(verdicts, tr); got != core.OutcomeFail {
 		t.Fatalf("summarizeTR = %q, want fail", got)

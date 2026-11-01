@@ -21,6 +21,7 @@ func init() {
 				"SLA bars to-be-validated (KB sla: []); native = all kube-burner-ocp jobs passed")
 		}
 	}
+	evals["TR-STOR-006"] = pvcDensityEvaluator{Evaluator: evals["TR-STOR-006"]}
 	registry.Register(stages.ToolIntegration{
 		Name:              "kube-burner-ocp",
 		Provides:          provides,

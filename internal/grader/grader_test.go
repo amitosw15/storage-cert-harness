@@ -83,6 +83,38 @@ func TestGradeSLAReportOnly(t *testing.T) {
 	if v.Actual != "42 MBps" {
 		t.Errorf("report-only skip should carry the measured value, got %q", v.Actual)
 	}
+	if v.BlocksCertification {
+		t.Fatal("an intentionally ungraded metric must not block certification")
+	}
+}
+
+func TestGradeSLASkipCertification(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		bars      []core.SLA
+		wantBlock bool
+	}{
+		{"uncovered scale", []core.SLA{{Metric: "latency", Percentile: "p99", Value: f64(30), When: map[string]any{"iterations": 1000}}}, true},
+		{"undefined SLA", nil, false},
+		{"null threshold", []core.SLA{{Metric: "latency", Percentile: "p99"}}, false},
+		{"explicit ungraded scale", []core.SLA{
+			{Metric: "latency", Percentile: "p99", When: map[string]any{"iterations": 3}},
+			{Metric: "latency", Percentile: "p99", Value: f64(30), When: map[string]any{"iterations": 1000}},
+		}, false},
+		{"other metric", []core.SLA{{Metric: "other", Percentile: "p99", Value: f64(30)}}, false},
+		{"other percentile", []core.SLA{{Metric: "latency", Percentile: "p95", Value: f64(30)}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := core.TestRequirement{ID: "TR-1", Params: map[string]any{"iterations": 3},
+				SLAs: []core.SLA{{Metric: "latency", Percentile: "p99", Unit: "ms"}}, Bars: tc.bars}
+			res := core.TestResult{Metrics: []core.Metric{{Name: "latency", Percentile: "p99", Value: 7, Unit: "ms"}}}
+			vs := New().GradeTR(context.Background(), tr, res, nil)
+			v := verdictByItem(vs, "sla:latency@p99")
+			if v == nil || v.Outcome != core.OutcomeSkip || v.BlocksCertification != tc.wantBlock || v.Actual != "7 ms" {
+				t.Fatalf("unexpected verdict: %+v", v)
+			}
+		})
+	}
 }
 
 func TestGradeSLAMissingMetricErrors(t *testing.T) {
