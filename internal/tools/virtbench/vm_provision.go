@@ -3,7 +3,6 @@ package virtbench
 import (
 	"context"
 	crand "crypto/rand"
-	_ "embed"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -12,9 +11,6 @@ import (
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
-
-//go:embed templates/rhel9-vm-failure-recovery.yaml
-var failureRecoveryVMTemplate string
 
 // provisionFailureRecoveryVMs creates vm_count VMs (one per namespace) on the
 // target node using a required nodeSelector. The custom virtbench FAR mode
@@ -58,6 +54,11 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 
 	rc.Logger.Info("virtbench: creating VMs on target node", "node", node, "count", count, "storage_class", sc)
 
+	source, err := templates.ReadFile(failureRecoveryVMTemplatePath)
+	if err != nil {
+		return err
+	}
+
 	for i := 1; i <= count; i++ {
 		ns := nsPrefix + "-" + strconv.Itoa(i)
 		if err := ensureNamespace(ctx, kubeconfig, ns); err != nil {
@@ -69,7 +70,7 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 			"{{NODE_NAME}}", node,
 			"{{HOSTNAME_LABEL}}", hostnameLabel,
 			"{{STORAGE_CLASS_NAME}}", sc,
-		).Replace(failureRecoveryVMTemplate)
+		).Replace(string(source))
 		if err := kubectlApply(ctx, kubeconfig, manifest); err != nil {
 			return fmt.Errorf("virtbench: apply VM in %s: %w", ns, err)
 		}

@@ -468,9 +468,12 @@ func TestSSHHelperReplayDoesNotUseCluster(t *testing.T) {
 }
 
 func TestSSHHelperManifestAvoidsTargetNodes(t *testing.T) {
-	manifest := sshPodManifestForNodes(map[string]struct{}{
+	manifest, err := sshPodManifestForNodes(map[string]struct{}{
 		"worker-05": {},
 	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{
 		"requiredDuringSchedulingIgnoredDuringExecution",
 		"key: kubernetes.io/hostname",
@@ -484,7 +487,10 @@ func TestSSHHelperManifestAvoidsTargetNodes(t *testing.T) {
 }
 
 func TestSSHHelperManifestWithoutTargetKeepsDefaultScheduling(t *testing.T) {
-	manifest := sshPodManifestForNodes(nil, nil)
+	manifest, err := sshPodManifestForNodes(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(manifest, "nodeAffinity") {
 		t.Fatalf("unexpected node affinity without a target node:\n%s", manifest)
 	}
@@ -492,7 +498,10 @@ func TestSSHHelperManifestWithoutTargetKeepsDefaultScheduling(t *testing.T) {
 
 func TestSSHHelperManifestIncludesBootstrapAnnotations(t *testing.T) {
 	rc := &core.RunCtx{RunID: "run-abc", PartKind: "initial"}
-	manifest := sshPodManifestForNodes(nil, sshPodBootstrapAnnotations(rc))
+	manifest, err := sshPodManifestForNodes(nil, sshPodBootstrapAnnotations(rc))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{
 		"annotations:",
 		"storage-cert-harness.redhat.com/run-id: \"run-abc\"",

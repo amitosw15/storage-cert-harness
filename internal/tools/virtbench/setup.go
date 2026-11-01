@@ -35,68 +35,11 @@ const (
 	sshPodRollbackPollDeleting = time.Second
 	sshPodRollbackSettle       = time.Second
 
-	// Pinned quay.io/virtarraycert/ssh-helper release (0.1.11; log wrappers in /opt/sshhelper/bin).
-	sshHelperImage = "quay.io/virtarraycert/ssh-helper@sha256:369697c3002c1971bb608189d343fe9ea4989d2b66fde1bd1b64e924416533d1"
-
 	sshPodAnnotPrefix = "storage-cert-harness.redhat.com/"
 )
 
 // errSSHPodUIDPreconditionFailed means delete targeted a different object instance.
 var errSSHPodUIDPreconditionFailed = errors.New("ssh helper pod delete UID precondition failed")
-
-// sshPodManifest is the helper pod virtbench uses for ping and in-VM SSH checks.
-// Keep in sync with container-patches/virtbench/examples/utilities/ssh-pod.yaml.
-// Remove manually when decommissioning the cluster:
-//
-//	kubectl delete pod ssh-test-pod -n default
-var sshPodManifest = `apiVersion: v1
-kind: Pod
-metadata:
-  name: ` + sshPodName + `
-  namespace: ` + sshPodNS + `
-  labels:
-    app: kubevirt-perf-test
-    managed-by: storage-cert-harness
-spec:
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 65532
-    runAsGroup: 65532
-    fsGroup: 65532
-    seccompProfile:
-      type: RuntimeDefault
-  containers:
-  - name: ssh-client
-    image: ` + sshHelperImage + `
-    imagePullPolicy: IfNotPresent
-    securityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop: ["ALL"]
-      readOnlyRootFilesystem: true
-      runAsNonRoot: true
-      runAsUser: 65532
-      runAsGroup: 65532
-    command: ["/bin/bash", "-c", "exec sleep infinity"]
-    volumeMounts:
-    - name: tmp
-      mountPath: /tmp
-    - name: home
-      mountPath: /home/sshhelper
-    resources:
-      requests:
-        memory: "128Mi"
-        cpu: "100m"
-      limits:
-        memory: "256Mi"
-        cpu: "200m"
-  volumes:
-  - name: tmp
-    emptyDir: {}
-  - name: home
-    emptyDir: {}
-  restartPolicy: Always
-`
 
 // sshPodSetup is the group-scoped provider that ensures the shared ssh helper pod.
 type sshPodSetup struct {
@@ -155,8 +98,12 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 			// Create (not apply) so a pod another harness created between get and
 			// create is not patched with this run's annotations. Create can still
 			// commit before its command returns, so rollback reconciles by run-id/UID.
+			manifest, err := sshPodManifestForNodes(avoidHostnameLabels, sshPodBootstrapAnnotations(rc))
+			if err != nil {
+				return err
+			}
 			createAttemptedThisSetup = true
-			uid, err := kubectlCreateSSHPod(ctx, kubeconfig, sshPodManifestForNodes(avoidHostnameLabels, sshPodBootstrapAnnotations(rc)))
+			uid, err := kubectlCreateSSHPod(ctx, kubeconfig, manifest)
 			if err != nil {
 				if isKubectlAlreadyExists(err) {
 					continue
@@ -300,8 +247,12 @@ func sshHelperAvoidNodes(ctx context.Context, kubeconfig string, trs []core.Test
 	return avoidNames, avoidLabels, nil
 }
 
-func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[string]string) string {
-	manifest := sshPodManifest
+func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[string]string) (string, error) {
+	source, err := templates.ReadFile(sshPodManifestPath)
+	if err != nil {
+		return "", err
+	}
+	manifest := string(source)
 	if len(annotations) > 0 {
 		var ann strings.Builder
 		ann.WriteString("  annotations:\n")
@@ -315,7 +266,7 @@ func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[stri
 		manifest = strings.Replace(manifest, "    managed-by: storage-cert-harness\n", "    managed-by: storage-cert-harness\n"+ann.String(), 1)
 	}
 	if len(avoidNodes) == 0 {
-		return manifest
+		return manifest, nil
 	}
 	values := make([]string, 0, len(avoidNodes))
 	for node := range avoidNodes {
@@ -329,7 +280,7 @@ func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[stri
 		affinity.WriteString(strconv.Quote(node))
 		affinity.WriteByte('\n')
 	}
-	return strings.Replace(manifest, "spec:\n", "spec:\n"+affinity.String(), 1)
+	return strings.Replace(manifest, "spec:\n", "spec:\n"+affinity.String(), 1), nil
 }
 
 func sortedMapKeys(m map[string]string) []string {

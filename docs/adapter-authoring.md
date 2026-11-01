@@ -75,6 +75,40 @@ independently-ownable tasks — great for parallel work.
 8. **Verify:** `make unittest && ./bin/harness list` should show your tool and
    `run --tool <tool>` should exercise it.
 
+## Runtime template layout
+
+Keep harness-owned source YAML under `internal/tools/<tool>/templates/<TR-ID>/`.
+Use `templates/shared/` for resources used by several TRs, such as Virtbench's
+SSH helper pod. Keep the embed declarations together in the adapter's
+`templates.go`; test fixtures stay under `testdata/`.
+
+```text
+internal/tools/<tool>/
+├── templates.go
+├── templates/
+│   ├── <TR-ID>/
+│   │   └── <template>.yaml
+│   └── shared/
+│       └── <template>.yaml
+└── testdata/
+```
+
+Source templates are embedded in the binary and remain unchanged during runs.
+Stage generated files in the run's working directory using the filenames and
+relative paths required by the external tool. For example, kube-burner's
+`templates/shared/config.yaml` becomes `config.yaml`, while its object
+templates become `templates/*.yaml` in the run directory.
+
+Adapters without harness-owned templates document that in `templates/README.md`
+and need no `templates.go`. Keep upstream-owned templates in their released
+runtime; do not copy them into the harness merely to populate a TR directory.
+User-supplied template paths remain external inputs.
+
+Kube-burner workload definitions select the source directory for `stageConfig`.
+Staging copies the source bytes into the expected runtime layout and does not
+receive workload parameters. Snapshot-specific job preparation runs separately
+after staging; native template batching is addressed in the workload migration.
+
 ## Multi-scenario tools = a scenario table
 
 Some tools expose several subcommands, each mapping to a different TR and (often)

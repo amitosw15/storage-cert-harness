@@ -2,6 +2,7 @@ package kubeburner
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
@@ -19,14 +20,16 @@ const (
 )
 
 type snapshotScenario struct {
+	TemplateDir        string
 	SnapshotsPerVolume bool
 	SingleSourceVolume bool
 	AllowZeroSnapshots bool
 }
 
 var snapshotScenarios = map[string]snapshotScenario{
-	"TR-VIRT-010": {},
+	"TR-VIRT-010": {TemplateDir: workloadTemplatesDir},
 	"TR-VIRT-027": {
+		TemplateDir:        workloadTemplatesDir,
 		SnapshotsPerVolume: true,
 		SingleSourceVolume: true,
 		AllowZeroSnapshots: true,
@@ -105,4 +108,19 @@ func (p Params) validateFor(trID string) error {
 		return fmt.Errorf("kube-burner: param %q must be >= 1", "snapshot_count")
 	}
 	return nil
+}
+
+// buildEnv supplies workload values to kube-burner as environment entries.
+func buildEnv(p Params, storageClass string) []string {
+	return []string{
+		"REPLICAS=" + strconv.Itoa(p.Replicas),
+		"VM_IMAGE=" + p.VMImage,
+		"DISK_SIZE=" + p.DiskSize,
+		"STORAGE_CLASS=" + storageClass,
+		"NAMESPACE=" + p.NS,
+		"USE_POPULATOR=" + strconv.FormatBool(p.UsePopulator),
+		"MAX_WAIT=" + p.MaxWait,
+		"QPS=" + strconv.Itoa(p.QPS),
+		"BURST=" + strconv.Itoa(p.Burst),
+	}
 }

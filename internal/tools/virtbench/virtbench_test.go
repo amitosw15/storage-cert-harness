@@ -495,7 +495,7 @@ func TestBuildArgsFIO(t *testing.T) {
 	resultsDir := t.TempDir()
 	tr := core.TestRequirement{ID: "TR-STOR-002", Params: map[string]any{
 		"storage_class":   "ocs-storagecluster-ceph-rbd",
-		"fio_vm_template": "assets/fio-vm-template.yaml",
+		"fio_vm_template": "templates/TR-STOR-002/fio-vm-template.yaml",
 		"num_vms":         1,
 		"fio_bs":          "4k",
 	}}
@@ -521,7 +521,7 @@ func TestBuildArgsFIO(t *testing.T) {
 	}
 	fleet := core.TestRequirement{ID: "TR-STOR-002", Params: map[string]any{
 		"storage_class":   "ocs-storagecluster-ceph-rbd",
-		"fio_vm_template": "assets/fio-vm-template.yaml",
+		"fio_vm_template": "templates/TR-STOR-002/fio-vm-template.yaml",
 		"num_vms":         40,
 		"fio_bs":          "4k",
 		"profile":         "load-80",
@@ -562,7 +562,7 @@ func TestBuildArgsFIO(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read staged embedded template: %v", err)
 	}
-	if string(data) != fioVMTemplate {
+	if string(data) != embeddedTemplateForTest(t, fioVMTemplatePath) {
 		t.Fatal("staged embedded template differs from the compiled template")
 	}
 	if !strings.Contains(strings.Join(got, " "), "--vm-template "+staged) {
@@ -1113,4 +1113,13 @@ func TestStageTemplateRejectsSymlinkEscape(t *testing.T) {
 	if _, err := stageTemplate(resultsDir, template); err == nil {
 		t.Fatal("stageTemplate accepted a symlink escaping the source directory")
 	}
+}
+
+func embeddedTemplateForTest(t *testing.T, path string) string {
+	t.Helper()
+	data, err := templates.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
