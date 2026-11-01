@@ -104,10 +104,14 @@ and need no `templates.go`. Keep upstream-owned templates in their released
 runtime; do not copy them into the harness merely to populate a TR directory.
 User-supplied template paths remain external inputs.
 
-Kube-burner workload definitions select the source directory for `stageConfig`.
-Staging copies the source bytes into the expected runtime layout and does not
-receive workload parameters. Snapshot-specific job preparation runs separately
-after staging; native template batching is addressed in the workload migration.
+## Kube-burner workload templates
+
+Kube-burner keeps native rendering. `manifest.Native` passes source bytes through
+unchanged. Workload definitions select the source directory for `stageConfig`;
+parameter resolution supplies scalar counts and the legacy-mode flag. The native
+config template uses `untilStep` and `range` to construct legacy or batched
+snapshot jobs, including a final partial batch. Raw template YAML is excluded
+from yamllint; tests validate rendered configuration and preserve native sources.
 
 ## Multi-scenario tools = a scenario table
 

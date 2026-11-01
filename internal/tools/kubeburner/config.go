@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
+
+var renderer manifest.ManifestRenderer = manifest.Native{}
 
 // stageConfig copies a selected workload into kube-burner's runtime layout.
 func stageConfig(dir, sourceDir string) (string, error) {
@@ -25,6 +28,10 @@ func stageConfig(dir, sourceDir string) (string, error) {
 		b, err := templates.ReadFile(sourceDir + "/" + name)
 		if err != nil {
 			return "", fmt.Errorf("kube-burner: read template %s: %w", name, err)
+		}
+		b, err = manifest.Render(renderer, name, b, nil)
+		if err != nil {
+			return "", err
 		}
 		dst := filepath.Join(dir, "templates", name)
 		if name == "config.yaml" {
