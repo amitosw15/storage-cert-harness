@@ -128,7 +128,11 @@ func TestPrepareVMStoragePreservesProvisioningFields(t *testing.T) {
 	if err := json.Unmarshal([]byte(source), &input); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manifest.Render(manifest.GoTemplate{}, "storageclass.yaml", []byte(storageClassTemplate), map[string]any{"STORAGE_CLASS": input}); err != nil {
+	templateSource, err := templates.ReadFile(storageClassTemplatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manifest.Render(manifest.GoTemplate{}, "storageclass.yaml", templateSource, map[string]any{"STORAGE_CLASS": input}); err != nil {
 		t.Fatal(err)
 	}
 	if input["metadata"].(map[string]any)["name"] != "backend" || input["status"] == nil {

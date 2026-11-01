@@ -96,7 +96,7 @@ internal/tools/<tool>/
 Source templates are embedded in the binary and remain unchanged during runs.
 Stage generated files in the run's working directory using the filenames and
 relative paths required by the external tool. For example, kube-burner's
-`templates/TR-VIRT-010/config.yaml` becomes `config.yaml`, while its object
+`templates/shared/config.yaml` becomes `config.yaml`, while its object
 templates become `templates/*.yaml` in the run directory.
 
 Adapters without harness-owned templates document that in `templates/README.md`
@@ -116,7 +116,7 @@ from yamllint; tests validate rendered configuration and preserve native sources
 
 Private StorageClass and StorageProfile setup is owned by the harness and uses
 `manifest.GoTemplate`, independently of kube-burner's native workload rendering.
-Templates live under `templates/TR-VIRT-010/setup/`. They preserve provisioning
+Templates live under `templates/shared/setup/`. They preserve provisioning
 fields and claim defaults while replacing metadata and omitting copied status.
 The created StorageClass name is retained on later failure so cleanup can remove
 it without modifying the backend's original resources. Tests cover preservation,
