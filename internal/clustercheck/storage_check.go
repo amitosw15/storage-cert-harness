@@ -48,11 +48,7 @@ func CheckStorage(ctx context.Context, kubeconfig string, requests []StorageRequ
 		emit := func(level, message string) {
 			findings = append(findings, core.Finding{Level: level, Message: request.Identity + ": " + message})
 		}
-		target, reason, err := storageTarget(request, classes)
-		if err != nil {
-			emit("warn", "target selection incomplete: "+err.Error())
-			continue
-		}
+		target, reason := storageTarget(request, classes)
 		if target == "" {
 			if request.ExpectedClass != "" {
 				emit("error", fmt.Sprintf("no target StorageClass selected (%s); backend requires %q", reason, request.ExpectedClass))
@@ -201,29 +197,33 @@ func CheckStorage(ctx context.Context, kubeconfig string, requests []StorageRequ
 	return findings
 }
 
-func storageTarget(request StorageRequest, classes []StorageClass) (string, string, error) {
+func storageTarget(request StorageRequest, classes []StorageClass) (string, string) {
 	if request.Claim.StorageClassName != nil {
-		return *request.Claim.StorageClassName, "explicit storageClassName", nil
+		return *request.Claim.StorageClassName, "explicit storageClassName"
 	}
 	annotations := []string{kubeDefaultAnnotation}
 	if request.CDIStorage && request.ContentType != "archive" {
 		annotations = append([]string{virtDefaultAnnotation}, annotations...)
 	}
 	for _, annotation := range annotations {
-		var matches []string
+		var matches []StorageClass
 		for _, class := range classes {
 			if strings.EqualFold(class.Metadata.Annotations[annotation], "true") || (annotation == kubeDefaultAnnotation && strings.EqualFold(class.Metadata.Annotations["storageclass.beta.kubernetes.io/is-default-class"], "true")) {
-				matches = append(matches, class.Metadata.Name)
+				matches = append(matches, class)
 			}
 		}
-		if len(matches) > 1 {
-			return "", "", fmt.Errorf("multiple classes have %s=true: %s", annotation, strings.Join(matches, ","))
-		}
-		if len(matches) == 1 {
-			return matches[0], annotation, nil
+		if len(matches) > 0 {
+			// Match CDI: newest first, then name ascending: https://github.com/kubevirt/containerized-data-importer/blob/eec6bfc8000c10452ff73e2704029c48791ec7a7/pkg/controller/common/util.go#L574-L602
+			slices.SortFunc(matches, func(a, b StorageClass) int {
+				if order := b.Metadata.CreationTimestamp.Compare(a.Metadata.CreationTimestamp); order != 0 {
+					return order
+				}
+				return strings.Compare(a.Metadata.Name, b.Metadata.Name)
+			})
+			return matches[0].Metadata.Name, annotation
 		}
 	}
-	return "", "no default StorageClass", nil
+	return "", "no default StorageClass"
 }
 
 // defaultStorageClaim follows CDI's ordered profile matching and Filesystem fallback.

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
@@ -159,24 +160,52 @@ func TestStorageProfileDefaulting(t *testing.T) {
 }
 
 func TestStorageDefaultPrecedence(t *testing.T) {
-	classes := []StorageClass{{Metadata: ResourceMetadata{Name: "kube", Annotations: map[string]string{kubeDefaultAnnotation: "true"}}}, {Metadata: ResourceMetadata{Name: "virt", Annotations: map[string]string{virtDefaultAnnotation: "true"}}}}
-	for _, cdi := range []bool{true, false} {
-		got, _, err := storageTarget(StorageRequest{CDIStorage: cdi}, classes)
-		want := "kube"
-		if cdi {
-			want = "virt"
-		}
-		if err != nil || got != want {
-			t.Fatalf("got %s %v", got, err)
-		}
+	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := older.Add(time.Hour)
+	makeClass := func(name, annotation string, created time.Time) StorageClass {
+		return StorageClass{Metadata: ResourceMetadata{Name: name, CreationTimestamp: created, Annotations: map[string]string{annotation: "true"}}}
 	}
-	got, _, err := storageTarget(StorageRequest{CDIStorage: true}, classes[:1])
-	if err != nil || got != "kube" {
-		t.Fatalf("fallback: %s %v", got, err)
+	kube := makeClass("kube", kubeDefaultAnnotation, newer)
+	virt := makeClass("virt", virtDefaultAnnotation, older)
+	for _, tc := range []struct {
+		name    string
+		request StorageRequest
+		classes []StorageClass
+		want    string
+	}{
+		{"explicit wins", StorageRequest{CDIStorage: true, Claim: StorageClaim{StorageClassName: stringPointer("chosen")}}, []StorageClass{kube, virt}, "chosen"},
+		{"explicit empty disables defaulting", StorageRequest{CDIStorage: true, Claim: StorageClaim{StorageClassName: stringPointer("")}}, []StorageClass{kube, virt}, ""},
+		{"virt default precedes newer Kubernetes default", StorageRequest{CDIStorage: true}, []StorageClass{kube, virt}, "virt"},
+		{"native PVC uses Kubernetes default", StorageRequest{}, []StorageClass{kube, virt}, "kube"},
+		{"archive uses Kubernetes default", StorageRequest{CDIStorage: true, ContentType: "archive"}, []StorageClass{kube, virt}, "kube"},
+		{"Kubernetes fallback", StorageRequest{CDIStorage: true}, []StorageClass{kube}, "kube"},
+		{"newest virt default", StorageRequest{CDIStorage: true}, []StorageClass{makeClass("old-virt", virtDefaultAnnotation, older), makeClass("new-virt", virtDefaultAnnotation, newer)}, "new-virt"},
+		{"newest Kubernetes default", StorageRequest{}, []StorageClass{makeClass("new-kube", kubeDefaultAnnotation, newer), makeClass("old-kube", kubeDefaultAnnotation, older)}, "new-kube"},
+		{"same timestamp chooses name ascending", StorageRequest{CDIStorage: true}, []StorageClass{makeClass("z-virt", virtDefaultAnnotation, newer), makeClass("a-virt", virtDefaultAnnotation, newer)}, "a-virt"},
+		{"no defaults", StorageRequest{CDIStorage: true}, nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _ := storageTarget(tc.request, tc.classes)
+			if got != tc.want {
+				t.Fatalf("selected %q; want %q", got, tc.want)
+			}
+		})
 	}
-	classes = append(classes, classes[1])
-	if _, _, err := storageTarget(StorageRequest{CDIStorage: true}, classes); err == nil {
-		t.Fatal("ambiguous resolution not reported")
+}
+
+func TestMultipleDefaultClassesStillValidateTargetAndSource(t *testing.T) {
+	storageCLI(t)
+	t.Setenv("STORAGE_CLASSES", `{"items":[{"metadata":{"name":"nas","creationTimestamp":"2026-01-01T00:00:00Z","annotations":{"storageclass.kubevirt.io/is-default-virt-class":"true"}}},{"metadata":{"name":"economy","creationTimestamp":"2026-02-01T00:00:00Z","annotations":{"storageclass.kubevirt.io/is-default-virt-class":"true"}}}]}`)
+	t.Setenv("AUTH_RAW", `{"status":{"allowed":false}}`)
+	request := StorageRequest{Identity: "root", Namespace: "workloads", ExpectedClass: "nas", CDIStorage: true, CDI: true, Claim: StorageClaim{AccessModes: []string{"ReadWriteMany"}, VolumeMode: "Filesystem"}, SourceKind: "DataSource", Source: NamespacedName{Name: "image", Namespace: "images"}}
+	findings := CheckStorage(t.Context(), "", []StorageRequest{request})
+	if !findingContains(findings, "error", `target StorageClass "economy"`) || !findingContains(findings, "error", "lacks CDI clone authorization") {
+		t.Fatalf("selected target or source authorization validation was skipped: %+v", findings)
+	}
+	t.Setenv("STORAGE_SOURCE", "")
+	findings = CheckStorage(t.Context(), "", []StorageRequest{request})
+	if !findingContains(findings, "error", "boot source validation failed") {
+		t.Fatalf("missing source check skipped: %+v", findings)
 	}
 }
 

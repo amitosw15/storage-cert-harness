@@ -21,6 +21,7 @@ type NamespacedName struct {
 
 // ResourceMetadata contains the metadata needed by the cluster operations.
 type ResourceMetadata struct {
+	CreationTimestamp time.Time         `json:"creationTimestamp"`
 	UID               string            `json:"uid"`
 	DeletionTimestamp string            `json:"deletionTimestamp"`
 	Labels            map[string]string `json:"labels"`
