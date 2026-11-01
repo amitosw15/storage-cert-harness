@@ -110,10 +110,12 @@ func (p Params) validateFor(trID string) error {
 	return nil
 }
 
-// buildEnv supplies workload values to kube-burner as environment entries.
+// buildEnv supplies scalar workload values to kube-burner's native renderer.
 func buildEnv(p Params, storageClass string) []string {
 	return []string{
 		"REPLICAS=" + strconv.Itoa(p.Replicas),
+		"SNAPSHOT_COUNT=" + strconv.Itoa(p.SnapshotCount),
+		"LEGACY_SNAPSHOT_JOB=" + strconv.FormatBool(!p.snapshotCountSet && p.SnapshotCount == p.Replicas),
 		"VM_IMAGE=" + p.VMImage,
 		"DISK_SIZE=" + p.DiskSize,
 		"STORAGE_CLASS=" + storageClass,
