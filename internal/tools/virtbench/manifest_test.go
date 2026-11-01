@@ -21,7 +21,7 @@ func TestManifestAdapterRendersFIOWithMatchingCLIValues(t *testing.T) {
 		t.Run(map[bool]string{false: "defaults", true: "overrides"}[custom], func(t *testing.T) {
 			root := t.TempDir()
 			source := filepath.Join(root, "source.yaml")
-			if err := os.WriteFile(source, []byte(fioVMTemplate), 0o600); err != nil {
+			if err := os.WriteFile(source, []byte(embeddedTemplateForTest(t, fioVMTemplatePath)), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			args := []string{"--kubeconfig", "/chosen", "fio", "--action", "deploy", "--storage-class=fast", "--vm-template", source}
@@ -59,7 +59,7 @@ func TestManifestAdapterRendersFIOWithMatchingCLIValues(t *testing.T) {
 				t.Fatalf("VM identity/storage disagree: %s", data)
 			}
 			original, err := os.ReadFile(source)
-			if err != nil || string(original) != fioVMTemplate {
+			if err != nil || string(original) != embeddedTemplateForTest(t, fioVMTemplatePath) {
 				t.Fatalf("source template changed: %v", err)
 			}
 			info, err := os.Stat(path)
@@ -180,7 +180,7 @@ func TestAllOwnedTemplatesRender(t *testing.T) {
 	} {
 		values[key] = value
 	}
-	vm, err := renderVMTemplate("two-disk", []byte(twoDiskVMTemplate), values)
+	vm, err := renderVMTemplate("two-disk", []byte(embeddedTemplateForTest(t, twoDiskVMTemplatePath)), values)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,4 +351,13 @@ func TestRuntimeTemplateUsesInstalledPythonEnvironment(t *testing.T) {
 			t.Fatalf("shebang=%s data=%s error=%v", shebang, data, err)
 		}
 	}
+}
+
+func embeddedTemplateForTest(t *testing.T, path string) string {
+	t.Helper()
+	data, err := templates.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

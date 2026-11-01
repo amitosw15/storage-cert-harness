@@ -52,5 +52,5 @@ values. Raw Go-template YAML is excluded from yamllint. See
 [adapter authoring](../docs/adapter-authoring.md#runtime-manifest-rendering).
 
 KB storage setup is harness-owned and uses the shared Go renderer with templates
-under `templates/TR-VIRT-010/setup/`. Runtime YAML decoding uses
+under `templates/shared/setup/`. Runtime YAML decoding uses
 `manifest.Documents`; typed JSON API requests use standard JSON encoding.

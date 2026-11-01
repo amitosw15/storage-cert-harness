@@ -13,7 +13,7 @@ import (
 
 func renderConfig(t *testing.T, p Params) string {
 	t.Helper()
-	asset, err := templates.ReadFile(snapshotTemplatesDir + "/config.yaml")
+	asset, err := templates.ReadFile(workloadTemplatesDir + "/config.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,12 +50,15 @@ func TestWriteConfigPreservesEveryNativeTemplate(t *testing.T) {
 	if _, err := writeConfig(dir); err != nil {
 		t.Fatalf("writeConfig: %v", err)
 	}
-	entries, err := templates.ReadDir(snapshotTemplatesDir)
+	entries, err := templates.ReadDir(workloadTemplatesDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		source, err := templates.ReadFile(snapshotTemplatesDir + "/" + entry.Name())
+		if entry.IsDir() {
+			continue
+		}
+		source, err := templates.ReadFile(workloadTemplatesDir + "/" + entry.Name())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,7 +79,7 @@ func TestNativeObjectTemplatesRender(t *testing.T) {
 		"storageClass": "fast", "diskSize": "2Gi", "vmImage": "quay.io/example/disk:latest",
 	}
 	for _, name := range []string{"vm.yaml", "vmsnapshot.yaml", "vmsnapshot-batch.yaml"} {
-		source, err := templates.ReadFile(snapshotTemplatesDir + "/" + name)
+		source, err := templates.ReadFile(workloadTemplatesDir + "/" + name)
 		if err != nil {
 			t.Fatal(err)
 		}

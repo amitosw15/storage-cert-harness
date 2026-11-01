@@ -253,7 +253,11 @@ func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[stri
 		values = append(values, node)
 	}
 	slices.Sort(values)
-	rendered, err := manifest.Render(vmRenderer, "ssh-pod.yaml", []byte(sshPodManifest), map[string]any{
+	templateSource, err := templates.ReadFile(sshPodManifestPath)
+	if err != nil {
+		return "", err
+	}
+	rendered, err := manifest.Render(vmRenderer, "ssh-pod.yaml", templateSource, map[string]any{
 		"NAME": sshPodName, "NAMESPACE": sshPodNS, "ANNOTATIONS": annotations, "AVOID_NODES": values,
 	})
 	return string(rendered), err
