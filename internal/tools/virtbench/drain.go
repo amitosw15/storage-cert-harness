@@ -12,14 +12,13 @@ package virtbench
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
@@ -179,35 +178,16 @@ func drainCloneArgs(rc *core.RunCtx, tr core.TestRequirement, resultsRoot, templ
 
 // --- kubectl helpers ---------------------------------------------------------
 
-type nodeList struct {
-	Items []struct {
-		Metadata struct {
-			Name   string            `json:"name"`
-			Labels map[string]string `json:"labels"`
-		} `json:"metadata"`
-		Spec struct {
-			Unschedulable bool `json:"unschedulable"`
-		} `json:"spec"`
-	} `json:"items"`
-}
-
 // listWorkers returns the worker nodes' names: schedulable (not cordoned) first,
 // then all workers. A worker carries the worker role label and neither
 // control-plane nor master role. Both slices are sorted for deterministic
 // target selection.
 func listWorkers(ctx context.Context, kubeconfig string) (schedulable, all []string, err error) {
-	out, ok, err := runKubectl(ctx, kubeconfig, "get", "nodes", "-o", "json")
+	nodes, err := clustercheck.ListNodes(ctx, kubeconfig)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !ok {
-		return nil, nil, fmt.Errorf("kubectl get nodes failed: %s", strings.TrimSpace(out))
-	}
-	var nl nodeList
-	if err := json.Unmarshal([]byte(out), &nl); err != nil {
-		return nil, nil, fmt.Errorf("parse nodes: %w", err)
-	}
-	for _, n := range nl.Items {
+	for _, n := range nodes {
 		_, isWorker := n.Metadata.Labels["node-role.kubernetes.io/worker"]
 		_, isCP := n.Metadata.Labels["node-role.kubernetes.io/control-plane"]
 		_, isMaster := n.Metadata.Labels["node-role.kubernetes.io/master"]
@@ -225,12 +205,5 @@ func listWorkers(ctx context.Context, kubeconfig string) (schedulable, all []str
 }
 
 func uncordonNode(ctx context.Context, kubeconfig, node string) error {
-	out, ok, err := runKubectl(ctx, kubeconfig, "uncordon", node)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("kubectl uncordon %s: %s", node, strings.TrimSpace(out))
-	}
-	return nil
+	return clustercheck.UncordonNode(ctx, kubeconfig, node)
 }
