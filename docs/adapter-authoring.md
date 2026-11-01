@@ -131,6 +131,20 @@ within the setup deadline. A timeout logs the source class, private profile and
 missing fields, and returns a provisioning error for the normal report reason.
 The generated class remains available to teardown for cleanup.
 
+## Virtbench command manifests
+
+Clone, disk-ops, and FIO resolve explicit template values before launching
+Virtbench. The shared Go/Sprig renderer validates YAML and the tool validates
+VM identity and disk counts. Argument builders select sources without copying
+them; preparation writes a private rendered file once. Legacy upstream tokens
+use aliases in the same engine. Templates are discovered from the runtime
+checkout or the installed CLI's Python environment.
+
+The final clone command omits `--storage-class` after rendering so upstream
+cannot overwrite fixed classes or reject PVC-form storage definitions. FIO
+retains upstream's run-all lifecycle and harness cleanup. Template tests cover
+source preservation, invalid inputs, native defaults, and the process boundary.
+
 ## Multi-scenario tools = a scenario table
 
 Some tools expose several subcommands, each mapping to a different TR and (often)
