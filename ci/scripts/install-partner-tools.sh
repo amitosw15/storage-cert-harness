@@ -156,9 +156,20 @@ install_system_package() {
 		fi
 	elif [[ "${fam}" == "linux" ]] && have apt-get; then
 		echo "best-effort: attempting to install ${tool} with apt (may prompt for sudo)"
-		if run_as_admin apt-get update -qq && run_as_admin apt-get install -y "${tool}"; then
-			return 0
-		fi
+		local attempt
+		for attempt in 1 2 3 4 5; do
+			if run_as_admin apt-get update -qq && run_as_admin apt-get install -y "${tool}"; then
+				return 0
+			fi
+			if have "${tool}"; then
+				echo "ok  ${tool}  $(command -v "${tool}") (available after apt attempt)"
+				return 0
+			fi
+			if [[ "${attempt}" -lt 5 ]]; then
+				echo "warning: apt operation failed; checking for a concurrent install and retrying shortly." >&2
+				sleep 3
+			fi
+		done
 	elif [[ "${fam}" == "macos" ]] && have brew; then
 		echo "best-effort: attempting to install ${tool} with brew"
 		if brew install "${tool}"; then
@@ -168,8 +179,33 @@ install_system_package() {
 		echo "best-effort automatic installation unavailable for ${tool} on this platform."
 	fi
 
+	if have "${tool}"; then
+		echo "ok  ${tool}  $(command -v "${tool}") (available after package-install attempt)"
+		return 0
+	fi
 	echo "warning: automatic installation of ${tool} did not succeed." >&2
 	suggest_pkg "${tool}"
+	return 1
+}
+
+expose_homebrew_make() {
+	local make_link
+	[[ "$(os_family)" == "macos" ]] && have gmake || return 1
+	ensure_path
+	make_link="${USER_BIN}/make"
+	if [[ -e "${make_link}" || -L "${make_link}" ]]; then
+		have make && return 0
+		return 1
+	fi
+	if ! ln -s "$(command -v gmake)" "${make_link}"; then
+		have make && return 0
+		return 1
+	fi
+	hash -r
+	if have make; then
+		echo "configured make via Homebrew gmake at ${make_link}"
+		return 0
+	fi
 	return 1
 }
 
@@ -183,8 +219,19 @@ ensure_system_tool() {
 		echo "missing  ${tool}"
 		return 1
 	fi
+	if [[ "${tool}" == "make" ]] && expose_homebrew_make; then
+		echo "ok  make  $(command -v make)"
+		return 0
+	fi
 	echo "${tool} is not installed."
-	if install_system_package "${tool}" && have "${tool}"; then
+	if ! install_system_package "${tool}"; then
+		echo "warning: checking whether ${tool} became available during the failed install attempt." >&2
+	fi
+	if [[ "${tool}" == "make" ]] && expose_homebrew_make; then
+		echo "ok  make  $(command -v make)"
+		return 0
+	fi
+	if have "${tool}"; then
 		echo "ok  ${tool}  $(command -v "${tool}")"
 		return 0
 	fi
