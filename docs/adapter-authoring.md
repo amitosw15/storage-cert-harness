@@ -114,8 +114,10 @@ with sources under `templates/shared/setup/`; these are applied by the harness
 and are not staged as native kube-burner workload templates.
 Kube-burner-ocp owns its templates inside the released CLI and needs no harness
 rendering call; any future local templates use the same native renderer.
-Kube-burner's snapshot-job list is passed as JSON in `SNAPSHOT_JOBS`; its native
-template uses `fromJson` and `range` to generate the jobs. Go builds input values.
+Workload definitions select the template directory for KB's generic `stageConfig`.
+Go resolves scalar inputs such as replica count, snapshot count, and legacy mode.
+The native config template uses `untilStep` and `range` to generate jobs, including
+a partial final batch; no generated job list is passed through the environment.
 Virtbench resolves values and loads sources in its tool package, calls the shared
 renderer, validates the VM, writes a private artifact, and constructs the final CLI.
 
@@ -204,8 +206,8 @@ their owners after the migration.
 
 | Former path | Current owner |
 | --- | --- |
-| KB `snapshotJobs`, `legacySnapshotJob`, marker replacement in `writeConfig` | `snapshotJobInputs` builds values; native `config.yaml` builds the YAML |
-| KB `writeConfig`, `buildEnv` | Copy sources unchanged; pass explicit environment values to KB |
+| KB `snapshotJobs`, `legacySnapshotJob`, marker replacement in `writeConfig` | Scalar parameters supply counts and legacy mode; native `config.yaml` constructs the jobs |
+| KB `writeConfig`, `buildEnv` | Generic `stageConfig` copies the selected sources unchanged; parameter resolution supplies scalar environment values |
 | KB `PrepareVMStorage` resource-map mutation and patch construction | Tool-owned `prepareVMStorage`; `setup/storageclass.yaml` and `setup/storageprofile-patch.yaml` use the shared renderer |
 | KBO workload flags | Upstream owns the workload templates |
 | VB `stageTemplate`, `stageFIOTemplate`, `stageCloneAtScaleTemplate` | Removed; `vmSourceTemplate` selects raw bytes and `prepareManifest` writes the rendered artifact once |
