@@ -160,7 +160,7 @@ func configureScenarios() {
 			AutomationTool: "virtbench datasource-clone --num-disks 2",
 			ProvidesTR:     "TR-VIRT-018",
 			VMRange:        cloneAtScaleRange,
-			Template:       vmTemplateConfig{Source: twoDiskVMTemplate},
+			Template:       vmTemplateConfig{Embedded: twoDiskVMTemplatePath},
 			ResultFile:     SummaryFileName,
 			NSPrefix:       "virtbench",
 			BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
@@ -177,7 +177,7 @@ func configureScenarios() {
 			AutomationTool:   "virtbench vm-ops drain-nodes",
 			ProvidesTR:       "TR-VIRT-008",
 			VMRange:          drainVMRange,
-			Template:         vmTemplateConfig{Source: drainVMTemplate},
+			Template:         vmTemplateConfig{Embedded: drainVMTemplatePath},
 			ResultFile:       DrainFileName,
 			NSPrefix:         drainNSPrefix,
 			BuildArgs:        drainArgs,
@@ -191,7 +191,7 @@ func configureScenarios() {
 			AutomationTool: "virtbench fio",
 			ProvidesTR:     "TR-STOR-002",
 			VMRange:        fioVMRange,
-			Template:       vmTemplateConfig{Param: "fio_vm_template", Source: fioVMTemplate},
+			Template:       vmTemplateConfig{Param: "fio_vm_template", Embedded: fioVMTemplatePath},
 			ResultFile:     FIOFileName,
 			NSPrefix:       "fio-latency",
 			BuildArgs:      fioArgs("fio-latency"),
@@ -223,7 +223,7 @@ func configureScenarios() {
 			AutomationTool: "virtbench failure-recovery",
 			ProvidesTR:     "TR-VIRT-007",
 			VMRange:        recoveryVMRange,
-			Template:       vmTemplateConfig{Source: failureRecoveryVMTemplate},
+			Template:       vmTemplateConfig{Embedded: failureRecoveryVMTemplatePath},
 			ResultFile:     FailureRecoveryFileName,
 			NSPrefix:       "failure-recovery",
 			BuildArgs:      failureRecoveryArgs("failure-recovery"),
@@ -325,7 +325,7 @@ func validateVMRange(tr core.TestRequirement, start, end int) (int, int, error) 
 // vmTemplateConfig describes the template owned by a workload and its custom override.
 type vmTemplateConfig struct {
 	Param    string
-	Source   string
+	Embedded string
 	Upstream string
 }
 

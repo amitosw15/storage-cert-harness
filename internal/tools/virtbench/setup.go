@@ -98,8 +98,12 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 			// Create (not apply) so a pod another harness created between get and
 			// create is not patched with this run's annotations. Create can still
 			// commit before its command returns, so rollback reconciles by run-id/UID.
+			manifest, err := sshPodManifestForNodes(avoidHostnameLabels, sshPodBootstrapAnnotations(rc))
+			if err != nil {
+				return err
+			}
 			createAttemptedThisSetup = true
-			uid, err := kubectlCreateSSHPod(ctx, kubeconfig, sshPodManifestForNodes(avoidHostnameLabels, sshPodBootstrapAnnotations(rc)))
+			uid, err := kubectlCreateSSHPod(ctx, kubeconfig, manifest)
 			if err != nil {
 				if isKubectlAlreadyExists(err) {
 					continue
@@ -243,8 +247,12 @@ func sshHelperAvoidNodes(ctx context.Context, kubeconfig string, trs []core.Test
 	return avoidNames, avoidLabels, nil
 }
 
-func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[string]string) string {
-	manifest := sshPodManifest
+func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[string]string) (string, error) {
+	source, err := templates.ReadFile(sshPodManifestPath)
+	if err != nil {
+		return "", err
+	}
+	manifest := string(source)
 	if len(annotations) > 0 {
 		var ann strings.Builder
 		ann.WriteString("  annotations:\n")
@@ -258,7 +266,7 @@ func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[stri
 		manifest = strings.Replace(manifest, "    managed-by: storage-cert-harness\n", "    managed-by: storage-cert-harness\n"+ann.String(), 1)
 	}
 	if len(avoidNodes) == 0 {
-		return manifest
+		return manifest, nil
 	}
 	values := make([]string, 0, len(avoidNodes))
 	for node := range avoidNodes {
@@ -272,7 +280,7 @@ func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[stri
 		affinity.WriteString(strconv.Quote(node))
 		affinity.WriteByte('\n')
 	}
-	return strings.Replace(manifest, "spec:\n", "spec:\n"+affinity.String(), 1)
+	return strings.Replace(manifest, "spec:\n", "spec:\n"+affinity.String(), 1), nil
 }
 
 func sortedMapKeys(m map[string]string) []string {

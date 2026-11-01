@@ -1,18 +1,14 @@
 package virtbench
 
-import _ "embed"
+import "embed"
 
-//go:embed templates/TR-STOR-002/fio-vm-template.yaml
-var fioVMTemplate string
+//go:embed templates
+var templates embed.FS
 
-//go:embed templates/TR-VIRT-008/rhel9-vm-drain.yaml
-var drainVMTemplate string
-
-//go:embed templates/TR-VIRT-018/rhel9-vm-2disk.yaml
-var twoDiskVMTemplate string
-
-//go:embed templates/TR-VIRT-007/rhel9-vm-failure-recovery.yaml
-var failureRecoveryVMTemplate string
-
-//go:embed templates/shared/ssh-pod.yaml
-var sshPodManifest string
+const (
+	fioVMTemplatePath             = "templates/TR-STOR-002/fio-vm-template.yaml"
+	drainVMTemplatePath           = "templates/TR-VIRT-008/rhel9-vm-drain.yaml"
+	twoDiskVMTemplatePath         = "templates/TR-VIRT-018/rhel9-vm-2disk.yaml"
+	failureRecoveryVMTemplatePath = "templates/TR-VIRT-007/rhel9-vm-failure-recovery.yaml"
+	sshPodManifestPath            = "templates/shared/ssh-pod.yaml"
+)
