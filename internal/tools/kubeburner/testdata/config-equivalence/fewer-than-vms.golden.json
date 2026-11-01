@@ -1,0 +1,73 @@
+[
+  {
+    "global": {
+      "measurements": [
+        {
+          "name": "volumeSnapshotLatency"
+        }
+      ]
+    },
+    "jobs": [
+      {
+        "burst": 20,
+        "jobIterations": 1,
+        "jobType": "create",
+        "maxWaitTimeout": "1h",
+        "name": "vmsnapshot-provision",
+        "namespace": "storage-cert-vmsnapshot",
+        "namespacedIterations": false,
+        "objects": [
+          {
+            "inputVars": {
+              "diskSize": "10Gi",
+              "storageClass": "fast",
+              "usePopulator": true,
+              "vmImage": "quay.io/kubevirt/cirros-container-disk-demo:latest"
+            },
+            "objectTemplate": "templates/vm.yaml",
+            "replicas": 5
+          }
+        ],
+        "qps": 20,
+        "waitWhenFinished": true
+      },
+      {
+        "burst": 20,
+        "jobIterations": 1,
+        "jobType": "create",
+        "maxWaitTimeout": "1h",
+        "name": "vmsnapshot-snapshot-1",
+        "namespace": "storage-cert-vmsnapshot",
+        "namespacedIterations": false,
+        "objects": [
+          {
+            "inputVars": {
+              "snapshotBatch": 1
+            },
+            "objectTemplate": "templates/vmsnapshot-batch.yaml",
+            "replicas": 3,
+            "wait": true,
+            "waitOptions": {
+              "customStatusPaths": [
+                {
+                  "key": ".readyToUse | tostring",
+                  "value": "true"
+                }
+              ]
+            }
+          }
+        ],
+        "qps": 20,
+        "waitWhenFinished": true
+      }
+    ],
+    "metricsEndpoints": [
+      {
+        "indexer": {
+          "metricsDirectory": "collected-metrics",
+          "type": "local"
+        }
+      }
+    ]
+  }
+]
