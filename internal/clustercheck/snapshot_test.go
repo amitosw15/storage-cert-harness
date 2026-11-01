@@ -17,7 +17,13 @@ printf '%s\n' "$*" >> "$SNAPSHOT_TEST_DIR/commands"
 if [ "$1" = --kubeconfig ]; then shift 2; fi
 case "$1 $2" in
   'get storageclass') echo 'Warning: a harmless API warning' >&2; echo '{"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"name":"backend","annotations":{"storageclass.kubernetes.io/is-default-class":"true","storageclass.kubevirt.io/is-default-virt-class":"true"}},"provisioner":"driver","parameters":{"pool":"pool-a"},"allowVolumeExpansion":true,"volumeBindingMode":"Immediate"}' ;;
-  'get storageprofile') printf '%s' "$TEST_PROFILE" ;;
+  'get storageprofile')
+    if [ -n "$TEST_INITIAL_PROFILE" ] && [ ! -f "$SNAPSHOT_TEST_DIR/profile-observed" ]; then
+      : > "$SNAPSHOT_TEST_DIR/profile-observed"
+      printf '%s' "$TEST_INITIAL_PROFILE"
+    else
+      printf '%s' "$TEST_PROFILE"
+    fi ;;
   'get volumesnapshotclass')
     case "$3" in
       missing) echo 'NotFound' >&2; exit 1 ;;
@@ -34,6 +40,7 @@ esac
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
+	t.Setenv("TEST_INITIAL_PROFILE", "")
 	t.Setenv("TEST_PROFILE", `{"status":{"snapshotClass":"profile-class","claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]}}`)
 	t.Setenv("TEST_CLASSES", `{"items":[{"metadata":{"name":"default","annotations":{"snapshot.storage.kubernetes.io/is-default-class":"true"}},"driver":"driver"},{"metadata":{"name":"nondefault"},"driver":"driver"}]}`)
 	return dir
