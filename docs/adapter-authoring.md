@@ -104,6 +104,11 @@ and need no `templates.go`. Keep upstream-owned templates in their released
 runtime; do not copy them into the harness merely to populate a TR directory.
 User-supplied template paths remain external inputs.
 
+Kube-burner workload definitions select the source directory for `stageConfig`.
+Staging copies the source bytes into the expected runtime layout and does not
+receive workload parameters. Snapshot-specific job preparation runs separately
+after staging; native template batching is addressed in the workload migration.
+
 ## Multi-scenario tools = a scenario table
 
 Some tools expose several subcommands, each mapping to a different TR and (often)
