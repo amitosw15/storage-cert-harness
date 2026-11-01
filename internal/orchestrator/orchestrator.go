@@ -691,7 +691,13 @@ func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verd
 			return errTRs(j.trs, "preflight: "+err.Error()), nil
 		}
 		for _, f := range findings {
+			if rc.Logger != nil && f.Level == "warn" {
+				rc.Logger.Warn("preflight: " + f.Message)
+			}
 			if f.Level == "error" {
+				if rc.Logger != nil {
+					rc.Logger.Error("preflight: " + f.Message)
+				}
 				return errTRs(j.trs, "preflight failed: "+f.Message), nil
 			}
 		}

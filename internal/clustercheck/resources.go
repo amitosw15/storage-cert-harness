@@ -42,6 +42,8 @@ type PersistentVolumeClaim struct {
 }
 type PVCSpec struct {
 	StorageClassName string `json:"storageClassName"`
+	VolumeMode       string `json:"volumeMode"`
+	VolumeName       string `json:"volumeName"`
 }
 type PVCStatus struct {
 	Phase string `json:"phase"`
@@ -55,9 +57,13 @@ type VolumeSnapshot struct {
 }
 type VolumeSnapshotSpec struct {
 	VolumeSnapshotClassName string `json:"volumeSnapshotClassName"`
+	Source                  struct {
+		PersistentVolumeClaimName string `json:"persistentVolumeClaimName"`
+	} `json:"source"`
 }
 type VolumeSnapshotStatus struct {
-	ReadyToUse bool `json:"readyToUse"`
+	ReadyToUse                     bool   `json:"readyToUse"`
+	BoundVolumeSnapshotContentName string `json:"boundVolumeSnapshotContentName"`
 }
 
 // DataSource contains CDI source references and readiness conditions.
@@ -69,7 +75,8 @@ type DataSourceSpec struct {
 	Source map[string]NamespacedName `json:"source"`
 }
 type DataSourceStatus struct {
-	Conditions []ResourceCondition `json:"conditions"`
+	Source     map[string]NamespacedName `json:"source"`
+	Conditions []ResourceCondition       `json:"conditions"`
 }
 type ResourceCondition struct {
 	Type   string `json:"type"`

@@ -247,3 +247,15 @@ func (*datasourceRunProbe) Parse(_ context.Context, _ *core.RunCtx, bag *core.Ba
 	}
 	return results, nil
 }
+
+func TestPreflightWarningsAreVisibleAndNonfatal(t *testing.T) {
+	var out strings.Builder
+	results := preflightOutput{out: &out}
+	results.add("WARN", "storage", "source and target differ; cloning might not be accelerated")
+	if err := results.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "[WARN] storage:") || !strings.Contains(out.String(), "1 WARN") || results.passed != 0 || results.skipped != 0 {
+		t.Fatalf("unexpected warning output: %s", out.String())
+	}
+}

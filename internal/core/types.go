@@ -256,7 +256,7 @@ type Provenance struct {
 
 // Finding is one preflight check result. Successful checks use info, failed
 // checks use error, and checks that did not run use skip with a reason.
-// Legacy warn findings are non-fatal and displayed as SKIP by the CLI.
+// Warning findings are non-fatal and displayed as WARN by the CLI.
 type Finding struct {
 	Level   string `json:"level"` // info | error | skip | warn
 	Message string `json:"message"`

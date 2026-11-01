@@ -221,7 +221,9 @@ func newPreflightCmd() *cobra.Command {
 					switch f.Level {
 					case "info":
 						results.add("PASS", tool, f.Message)
-					case "skip", "warn":
+					case "warn":
+						results.add("WARN", tool, f.Message)
+					case "skip":
 						results.add("SKIP", tool, f.Message)
 					default:
 						results.add("FAIL", tool, f.Message)
