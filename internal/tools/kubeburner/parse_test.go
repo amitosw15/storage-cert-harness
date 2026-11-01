@@ -556,10 +556,10 @@ func TestEvaluator_SkipsUnmeasurableSLA(t *testing.T) {
 	}
 }
 
-func TestWriteConfig_EmbedsAssets(t *testing.T) {
+func TestStageConfig_EmbedsAssets(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := writeConfig(dir); err != nil {
-		t.Fatalf("writeConfig: %v", err)
+	if _, err := stageConfig(dir, workloadTemplatesDir); err != nil {
+		t.Fatalf("stageConfig: %v", err)
 	}
 	for _, f := range []string{"config.yaml", "templates/vm.yaml", "templates/vmsnapshot.yaml", "templates/vmsnapshot-batch.yaml"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
@@ -570,7 +570,7 @@ func TestWriteConfig_EmbedsAssets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
-	if !strings.Contains(string(config), "replicas: {{.REPLICAS}}") || !strings.Contains(string(config), "range .SNAPSHOT_JOBS | fromJson") {
+	if !strings.Contains(string(config), "replicas: {{.REPLICAS}}") || !strings.Contains(string(config), "range $start := untilStep 0 $count $replicas") {
 		t.Errorf("config does not preserve native rendering:\n%s", config)
 	}
 	template, err := os.ReadFile(filepath.Join(dir, "templates", "vmsnapshot-batch.yaml"))
@@ -582,11 +582,11 @@ func TestWriteConfig_EmbedsAssets(t *testing.T) {
 	}
 }
 
-func TestWriteConfig_PreservesLegacySnapshotJob(t *testing.T) {
+func TestStageConfig_PreservesLegacySnapshotJob(t *testing.T) {
 	dir := t.TempDir()
 	p := resolveParams([]core.TestRequirement{{Params: map[string]any{"replicas": 2}}})
-	if _, err := writeConfig(dir); err != nil {
-		t.Fatalf("writeConfig: %v", err)
+	if _, err := stageConfig(dir, workloadTemplatesDir); err != nil {
+		t.Fatalf("stageConfig: %v", err)
 	}
 	config := renderConfig(t, p)
 	if !strings.Contains(config, "name: vmsnapshot-snapshot\n") || !strings.Contains(config, "objectTemplate: templates/vmsnapshot.yaml") || !strings.Contains(config, "replicas: 2") || strings.Contains(config, "snapshotBatch:") {
