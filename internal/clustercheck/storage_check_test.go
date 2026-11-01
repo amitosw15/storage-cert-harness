@@ -34,6 +34,7 @@ case "$2" in
  storageclass) printf '%s' "$STORAGE_CLASSES" ;;
  storageprofile) if [ "$PROFILE_DENIED" = true ]; then echo Forbidden >&2; exit 1; fi; printf '%s' "$STORAGE_PROFILE" ;;
  cdiconfig) printf '%s' "$STORAGE_CDI" ;;
+ dataimportcron) if [ "$CRON_DENIED" = true ]; then echo Forbidden >&2; exit 1; fi; printf '%s' "$STORAGE_CRON" ;;
  datasource) printf '%s' "$STORAGE_SOURCE" ;;
  pvc) printf '%s' "$STORAGE_PVC" ;;
  volumesnapshot) printf '%s' "$STORAGE_SNAPSHOT" ;;

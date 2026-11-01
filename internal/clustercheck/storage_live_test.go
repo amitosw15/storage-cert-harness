@@ -30,14 +30,12 @@ func TestStoragePreflightLive(t *testing.T) {
 	for _, tc := range []struct {
 		name, target, expected, source string
 		registry                       bool
-		allowDifferent                 bool
 		wantError, wantWarning         bool
 	}{
 		{name: "NAS matching target", target: nas, expected: nas, source: nasSource},
 		{name: "omitted target selects wrong default", expected: nas, source: nasSource, wantError: true},
 		{name: "economy dedicated source", target: economy, expected: economy, source: economySource},
-		{name: "NAS source to economy blocked by default", target: economy, expected: economy, source: nasSource, wantError: true},
-		{name: "NAS source to economy explicit optout warns", target: economy, expected: economy, source: nasSource, allowDifferent: true, wantWarning: true},
+		{name: "NAS source to economy warns", target: economy, expected: economy, source: nasSource, wantWarning: true},
 		{name: "missing boot source", target: nas, expected: nas, source: "openshift-virtualization-os-images/storage-preflight-missing-source", wantError: true},
 		{name: "missing target", target: "storage-preflight-nonexistent", expected: "storage-preflight-nonexistent", wantError: true},
 		{name: "independent scratch class", target: economy, expected: economy, registry: true},
@@ -64,12 +62,7 @@ func TestStoragePreflightLive(t *testing.T) {
 				t.Fatal(err)
 			}
 			tr := core.TestRequirement{ID: "live-storage", Params: map[string]any{}}
-			if tc.allowDifferent {
-				tr.Params["require_same_source_storage_class"] = false
-			}
-			if err := ApplyStoragePolicy(requests, tr); err != nil {
-				t.Fatal(err)
-			}
+			LabelStorageRequests(requests, tr)
 			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 			defer cancel()
 			findings := CheckStorage(ctx, kubeconfig, requests)

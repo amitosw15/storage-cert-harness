@@ -23,14 +23,7 @@ func CheckStorage(ctx context.Context, kubeconfig string, requests []StorageRequ
 	}
 	classes, err := ListStorageClasses(ctx, kubeconfig)
 	if err != nil {
-		level := "warn"
-		for _, request := range requests {
-			if request.RequireSameSourceClass && request.SourceKind != "" {
-				level = "error"
-				break
-			}
-		}
-		return []core.Finding{{Level: level, Message: "storage preflight incomplete: " + err.Error()}}
+		return []core.Finding{{Level: "warn", Message: "storage preflight incomplete: " + err.Error()}}
 	}
 	byName := map[string]StorageClass{}
 	for _, class := range classes {
@@ -57,11 +50,7 @@ func CheckStorage(ctx context.Context, kubeconfig string, requests []StorageRequ
 		}
 		target, reason, err := storageTarget(request, classes)
 		if err != nil {
-			level := "warn"
-			if request.RequireSameSourceClass && request.SourceKind != "" {
-				level = "error"
-			}
-			emit(level, "target selection incomplete: "+err.Error())
+			emit("warn", "target selection incomplete: "+err.Error())
 			continue
 		}
 		if target == "" {
@@ -135,22 +124,14 @@ func CheckStorage(ctx context.Context, kubeconfig string, requests []StorageRequ
 			}
 			if sourceErr != nil {
 				level := "warn"
-				if request.RequireSameSourceClass || errors.Is(sourceErr, ErrNotFound) || errors.Is(sourceErr, errStorageSourceNotReady) {
+				if errors.Is(sourceErr, ErrNotFound) || errors.Is(sourceErr, errStorageSourceNotReady) {
 					level = "error"
 				}
 				emit(level, "boot source validation failed: "+sourceErr.Error())
 			} else if source.Class == "" {
-				level := "info"
-				if request.RequireSameSourceClass {
-					level = "error"
-				}
-				emit(level, "source exists and is ready; original StorageClass is unavailable"+sourceClassPolicyReason(request))
+				emit("warn", "source exists and is ready; original StorageClass is unavailable; source/target class compatibility could not be assessed; continuing")
 			} else if source.Class != target {
-				level := "warn"
-				if request.RequireSameSourceClass {
-					level = "error"
-				}
-				emit(level, fmt.Sprintf("source StorageClass %q differs from target StorageClass %q; cloning might not be accelerated and could require host-assisted copying%s", source.Class, target, sourceClassPolicyReason(request)))
+				emit("warn", fmt.Sprintf("source StorageClass %q differs from target StorageClass %q; there may be a compatibility or performance issue; cloning might not be accelerated and could require host-assisted copying; continuing", source.Class, target))
 			} else {
 				emit("info", "source StorageClass="+source.Class+" matches target; acceleration is not verified")
 			}
@@ -306,11 +287,4 @@ func validateStorageClaim(claim StorageClaim) error {
 		}
 	}
 	return nil
-}
-
-func sourceClassPolicyReason(request StorageRequest) string {
-	if request.RequireSameSourceClass {
-		return "; TR requires matching source and target StorageClasses (require_same_source_storage_class=true)"
-	}
-	return ""
 }

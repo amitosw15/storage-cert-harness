@@ -70,3 +70,34 @@ func GetPersistentVolume(ctx context.Context, kubeconfig, name string) (Persiste
 	err := getResource(ctx, kubeconfig, "pv", name, "", &volume)
 	return volume, err
 }
+
+// DataImportCron records the current CDI image import and its storage provenance.
+type DataImportCron struct {
+	Metadata ResourceMetadata     `json:"metadata"`
+	Spec     DataImportCronSpec   `json:"spec"`
+	Status   DataImportCronStatus `json:"status"`
+}
+
+type DataImportCronSpec struct {
+	ManagedDataSource string `json:"managedDataSource"`
+}
+
+type DataImportCronStatus struct {
+	CurrentImports  []DataImportCronImport `json:"currentImports"`
+	LastImportedPVC NamespacedName         `json:"lastImportedPVC"`
+	SourceFormat    string                 `json:"sourceFormat"`
+}
+
+type DataImportCronImport struct {
+	DataVolumeName string `json:"DataVolumeName"`
+}
+
+// GetDataImportCron reads an existing CDI import in an explicit namespace.
+func GetDataImportCron(ctx context.Context, kubeconfig string, ref NamespacedName) (DataImportCron, error) {
+	var value DataImportCron
+	if err := validateReference("dataimportcron", ref); err != nil {
+		return value, err
+	}
+	err := getResource(ctx, kubeconfig, "dataimportcron", ref.Name, ref.Namespace, &value)
+	return value, err
+}

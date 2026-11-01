@@ -67,46 +67,63 @@ func inspectStorageSource(ctx context.Context, kubeconfig, kind string, ref Name
 		if !snapshot.Status.ReadyToUse {
 			return result, fmt.Errorf("source snapshot %s/%s is not readyToUse: %w", ref.Namespace, ref.Name, errStorageSourceNotReady)
 		}
-		contentName := snapshot.Status.BoundVolumeSnapshotContentName
-		if contentName == "" {
-			result.Notes = append(result.Notes, "ready snapshot has no bound content reference; driver and original class cannot be assessed")
-			return result, nil
-		}
-		content, err := GetVolumeSnapshotContent(ctx, kubeconfig, contentName)
+		result, err = inspectSnapshotVolume(ctx, kubeconfig, ref, snapshot)
 		if err != nil {
 			return result, err
 		}
-		bound := content.Spec.VolumeSnapshotRef
-		if (bound.Name != "" && bound.Name != ref.Name) || (bound.Namespace != "" && bound.Namespace != ref.Namespace) {
-			return result, fmt.Errorf("snapshot content %q references another snapshot: %w", contentName, errStorageSourceNotReady)
-		}
-		result.Driver = content.Spec.Driver
-		result.VolumeMode = content.Spec.SourceVolumeMode
-		name := snapshot.Spec.Source.PersistentVolumeClaimName
-		if name == "" || content.Spec.Source.VolumeHandle == "" {
-			return result, nil
-		}
-		pvc, err := GetPVC(ctx, kubeconfig, NamespacedName{Name: name, Namespace: ref.Namespace})
-		if errors.Is(err, ErrNotFound) {
-			return result, nil
-		}
-		if err != nil {
-			result.Notes = append(result.Notes, "snapshot is ready; original PVC provenance could not be read")
-			return result, nil
-		}
-		if pvc.Spec.VolumeName == "" {
-			return result, nil
-		}
-		pv, err := GetPersistentVolume(ctx, kubeconfig, pvc.Spec.VolumeName)
-		if err != nil {
-			result.Notes = append(result.Notes, "snapshot is ready; original PV provenance could not be read")
-			return result, nil
-		}
-		if pv.Spec.CSI != nil && pv.Spec.CSI.Driver == result.Driver && pv.Spec.CSI.VolumeHandle == content.Spec.Source.VolumeHandle {
-			result.Class = pv.Spec.StorageClassName
+		if result.Class == "" {
+			class, note := inferCDISnapshotClass(ctx, kubeconfig, ref, snapshot)
+			result.Class = class
+			if note != "" {
+				result.Notes = append(result.Notes, note)
+			}
 		}
 		return result, nil
 	default:
 		return result, fmt.Errorf("unsupported source kind %q", kind)
 	}
+}
+
+func inspectSnapshotVolume(ctx context.Context, kubeconfig string, ref NamespacedName, snapshot VolumeSnapshot) (storageSource, error) {
+	result := storageSource{Kind: "snapshot", Reference: ref}
+	contentName := snapshot.Status.BoundVolumeSnapshotContentName
+	if contentName == "" {
+		result.Notes = append(result.Notes, "ready snapshot has no bound content reference; snapshot-content provenance is unavailable")
+		return result, nil
+	}
+	content, err := GetVolumeSnapshotContent(ctx, kubeconfig, contentName)
+	if err != nil {
+		result.Notes = append(result.Notes, "snapshot is ready; snapshot-content provenance could not be read: "+err.Error())
+		return result, nil
+	}
+	bound := content.Spec.VolumeSnapshotRef
+	if (bound.Name != "" && bound.Name != ref.Name) || (bound.Namespace != "" && bound.Namespace != ref.Namespace) {
+		return result, fmt.Errorf("snapshot content %q references another snapshot: %w", contentName, errStorageSourceNotReady)
+	}
+	result.Driver = content.Spec.Driver
+	result.VolumeMode = content.Spec.SourceVolumeMode
+	name := snapshot.Spec.Source.PersistentVolumeClaimName
+	if name == "" || content.Spec.Source.VolumeHandle == "" {
+		return result, nil
+	}
+	pvc, err := GetPVC(ctx, kubeconfig, NamespacedName{Name: name, Namespace: ref.Namespace})
+	if errors.Is(err, ErrNotFound) {
+		return result, nil
+	}
+	if err != nil {
+		result.Notes = append(result.Notes, "snapshot is ready; original PVC provenance could not be read")
+		return result, nil
+	}
+	if pvc.Spec.VolumeName == "" {
+		return result, nil
+	}
+	pv, err := GetPersistentVolume(ctx, kubeconfig, pvc.Spec.VolumeName)
+	if err != nil {
+		result.Notes = append(result.Notes, "snapshot is ready; original PV provenance could not be read")
+		return result, nil
+	}
+	if pv.Spec.CSI != nil && pv.Spec.CSI.Driver == result.Driver && pv.Spec.CSI.VolumeHandle == content.Spec.Source.VolumeHandle {
+		result.Class = pv.Spec.StorageClassName
+	}
+	return result, nil
 }

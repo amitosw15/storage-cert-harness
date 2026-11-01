@@ -17,17 +17,16 @@ type StorageClaim struct {
 
 // StorageRequest describes one target disk without depending on a concrete tool.
 type StorageRequest struct {
-	Identity               string
-	Namespace              string
-	ExpectedClass          string
-	Claim                  StorageClaim
-	CDIStorage             bool
-	CDI                    bool
-	SourceKind             string
-	Source                 NamespacedName
-	ScratchRequired        bool
-	RequireSameSourceClass bool
-	ContentType            string
+	Identity        string
+	Namespace       string
+	ExpectedClass   string
+	Claim           StorageClaim
+	CDIStorage      bool
+	CDI             bool
+	SourceKind      string
+	Source          NamespacedName
+	ScratchRequired bool
+	ContentType     string
 }
 
 // StorageRequests extracts disks from prepared PVCs, DataVolumes, and VM templates.
@@ -38,7 +37,7 @@ func StorageRequests(data []byte, expectedClass, namespace string) ([]StorageReq
 	}
 	var requests []StorageRequest
 	add := func(identity, ns string, spec map[string]any, dv bool) error {
-		request := StorageRequest{Identity: identity, Namespace: ns, ExpectedClass: expectedClass, RequireSameSourceClass: true}
+		request := StorageRequest{Identity: identity, Namespace: ns, ExpectedClass: expectedClass}
 		claim := spec
 		if dv {
 			request.CDI = true
@@ -123,22 +122,11 @@ func StorageRequests(data []byte, expectedClass, namespace string) ([]StorageReq
 	return requests, nil
 }
 
-// ApplyStoragePolicy applies the selected TR's policy to every extracted disk.
-func ApplyStoragePolicy(requests []StorageRequest, tr core.TestRequirement) error {
-	value, exists := tr.Params["require_same_source_storage_class"]
-	required := true
-	if exists {
-		var ok bool
-		required, ok = value.(bool)
-		if !ok {
-			return fmt.Errorf("%s: require_same_source_storage_class must be a boolean", tr.ID)
-		}
-	}
+// LabelStorageRequests prefixes disk findings with the selected test identity.
+func LabelStorageRequests(requests []StorageRequest, tr core.TestRequirement) {
 	for i := range requests {
-		requests[i].RequireSameSourceClass = required
 		if tr.ID != "" {
 			requests[i].Identity = core.ExecutionLabel(tr.ID, tr.Variant) + "/" + requests[i].Identity
 		}
 	}
-	return nil
 }

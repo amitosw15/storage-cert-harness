@@ -39,15 +39,10 @@ func (c storageLiveCluster) create(t *testing.T, object map[string]any) {
 	c.run(t, object, "create", "-f", "-")
 }
 
-func (c storageLiveCluster) check(t *testing.T, requests []StorageRequest, policy any, wantError, wantWarning bool) []core.Finding {
+func (c storageLiveCluster) check(t *testing.T, requests []StorageRequest, wantError, wantWarning bool) []core.Finding {
 	t.Helper()
 	tr := core.TestRequirement{ID: t.Name(), Params: map[string]any{}}
-	if policy != nil {
-		tr.Params["require_same_source_storage_class"] = policy
-	}
-	if err := ApplyStoragePolicy(requests, tr); err != nil {
-		t.Fatal(err)
-	}
+	LabelStorageRequests(requests, tr)
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	findings := CheckStorage(ctx, c.kubeconfig, requests)
@@ -204,29 +199,18 @@ spec:
 	}
 	for _, source := range []string{nas, economy, scratch} {
 		for _, target := range []string{nas, economy, scratch} {
-			for _, policy := range []struct {
-				name   string
-				value  any
-				strict bool
-			}{{"default", nil, true}, {"strict", true, true}, {"optout", false, false}} {
-				t.Run("roles/"+aliases[source]+"_to_"+target+"/"+policy.name, func(t *testing.T) {
-					findings := c.check(t, requestsFor(source, target), policy.value, source != target && policy.strict, source != target && !policy.strict)
-					if source != target {
-						level := "warn"
-						if policy.strict {
-							level = "error"
-						}
-						if !findingContains(findings, level, "source StorageClass") {
-							t.Fatalf("expected class comparison: %+v", findings)
-						}
-					}
-					if !findingContains(findings, "info", "CDI scratch StorageClass="+scratch) {
-						t.Fatalf("scratch class not assessed: %+v", findings)
-					}
-				})
-			}
+			t.Run("roles/"+aliases[source]+"_to_"+target, func(t *testing.T) {
+				findings := c.check(t, requestsFor(source, target), false, source != target)
+				if source != target && !findingContains(findings, "warn", "source StorageClass") {
+					t.Fatalf("expected advisory class comparison: %+v", findings)
+				}
+				if !findingContains(findings, "info", "CDI scratch StorageClass="+scratch) {
+					t.Fatalf("scratch class not assessed: %+v", findings)
+				}
+			})
 		}
 	}
+
 	t.Run("profile patches", func(t *testing.T) {
 		c.run(t, nil, "wait", "--for=create", "storageprofile/"+temporaryClass, "--timeout=60s")
 		patchProfile := func(properties string) {
@@ -250,10 +234,10 @@ spec:
 			return []StorageRequest{{Identity: "profile", ExpectedClass: temporaryClass, Namespace: targetNS, CDI: true, CDIStorage: true, Claim: claim}}
 		}
 		patchProfile(`[{"accessModes":["ReadWriteMany"],"volumeMode":"Filesystem"}]`)
-		c.check(t, request(StorageClaim{}), nil, false, false)
+		c.check(t, request(StorageClaim{}), false, false)
 		patchProfile(`[{"accessModes":["ReadWriteMany"],"volumeMode":"Block"}]`)
-		c.check(t, request(StorageClaim{VolumeMode: "Filesystem"}), nil, true, false)
-		c.check(t, request(StorageClaim{VolumeMode: "Filesystem", AccessModes: []string{"ReadWriteOnce"}}), nil, false, false)
+		c.check(t, request(StorageClaim{VolumeMode: "Filesystem"}), true, false)
+		c.check(t, request(StorageClaim{VolumeMode: "Filesystem", AccessModes: []string{"ReadWriteOnce"}}), false, false)
 
 		_, patchErr := runKubeCommand(t.Context(), c.kubeconfig, nil, "patch", "storageprofile", temporaryClass, "--type=merge", "-p", `{"spec":{"claimPropertySets":[{"volumeMode":"Block"}]}}`)
 		if patchErr == nil {
@@ -263,11 +247,11 @@ spec:
 		c.create(t, map[string]any{"apiVersion": "storage.k8s.io/v1", "kind": "StorageClass", "metadata": map[string]any{"name": unknownClass}, "provisioner": "storage-preflight.invalid.csi"})
 		c.run(t, nil, "wait", "--for=create", "storageprofile/"+unknownClass, "--timeout=60s")
 		unknown := []StorageRequest{{Identity: "unknown-profile", ExpectedClass: unknownClass, Namespace: targetNS, CDI: true, CDIStorage: true, Claim: StorageClaim{StorageClassName: &unknownClass}}}
-		c.check(t, unknown, nil, true, false)
+		c.check(t, unknown, true, false)
 		c.run(t, nil, "delete", "storageclass", unknownClass, "--wait=true", "--timeout=60s")
-		c.check(t, unknown, nil, true, false)
+		c.check(t, unknown, true, false)
 		patchProfile(`[{"accessModes":["ReadWriteMany"],"volumeMode":"Filesystem"}]`)
-		c.check(t, request(StorageClaim{}), nil, false, false)
+		c.check(t, request(StorageClaim{}), false, false)
 	})
 	t.Run("snapshot classes", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -304,13 +288,13 @@ spec:
 		}
 		patch("missing-pvc")
 		c.await(t, "datasource", aliases[scratch], sourceNS, func(data []byte) bool { return !readySource(data) })
-		c.check(t, requestsFor(scratch, scratch), nil, true, false)
+		c.check(t, requestsFor(scratch, scratch), true, false)
 		patch(scratchPVC)
 		c.await(t, "datasource", aliases[scratch], sourceNS, readySource)
-		c.check(t, requestsFor(scratch, scratch), nil, false, false)
+		c.check(t, requestsFor(scratch, scratch), false, false)
 		requests := requestsFor(scratch, scratch)
 		requests[0].Source.Namespace = targetNS
-		c.check(t, requests, nil, true, false)
+		c.check(t, requests, true, false)
 	})
 	pending := "pending-source"
 	c.create(t, map[string]any{"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": map[string]any{"name": pending, "namespace": sourceNS}, "spec": map[string]any{"storageClassName": prefix + "-missing", "accessModes": []string{"ReadWriteOnce"}, "resources": map[string]any{"requests": map[string]any{"storage": "1Gi"}}}})
@@ -318,9 +302,9 @@ spec:
 		request := requestsFor(scratch, scratch)[:1]
 		request[0].SourceKind = "pvc"
 		request[0].Source = NamespacedName{Name: pending, Namespace: sourceNS}
-		c.check(t, request, nil, true, false)
+		c.check(t, request, true, false)
 		c.run(t, nil, "delete", "pvc", pending, "-n", sourceNS, "--wait=true", "--timeout=60s")
-		c.check(t, request, nil, true, false)
+		c.check(t, request, true, false)
 	})
 	t.Run("clone authorization patches", func(t *testing.T) {
 		c.create(t, map[string]any{"apiVersion": "v1", "kind": "ServiceAccount", "metadata": map[string]any{"name": "reader", "namespace": sourceNS}})
@@ -350,7 +334,7 @@ spec:
 			t.Fatal(err)
 		}
 		reader := storageLiveCluster{kubeconfig: impersonated}
-		reader.check(t, requestsFor(scratch, scratch), nil, true, false)
+		reader.check(t, requestsFor(scratch, scratch), true, false)
 		grant := map[string]any{"apiGroups": []string{"cdi.kubevirt.io"}, "resources": []string{"datavolumes/source"}, "verbs": []string{"create"}}
 		setRules := func(values []map[string]any) {
 			patch, _ := json.Marshal(map[string]any{"rules": values})
@@ -358,9 +342,9 @@ spec:
 			time.Sleep(time.Second)
 		}
 		setRules(append(append([]map[string]any{}, rules...), grant))
-		reader.check(t, requestsFor(scratch, scratch), nil, false, false)
+		reader.check(t, requestsFor(scratch, scratch), false, false)
 		setRules(rules)
-		reader.check(t, requestsFor(scratch, scratch), nil, true, false)
+		reader.check(t, requestsFor(scratch, scratch), true, false)
 	})
 	t.Run("snapshot survives source deletion", func(t *testing.T) {
 		snap := "retained-source"
@@ -369,11 +353,10 @@ spec:
 		request := requestsFor(scratch, scratch)[:1]
 		request[0].SourceKind = "snapshot"
 		request[0].Source = NamespacedName{Name: snap, Namespace: sourceNS}
-		c.check(t, request, nil, false, false)
+		c.check(t, request, false, false)
 		c.run(t, nil, "delete", "pvc", scratchPVC, "-n", sourceNS, "--wait=true", "--timeout=60s")
-		c.check(t, request, nil, true, false)
-		c.check(t, request, false, false, false)
+		c.check(t, request, false, true)
 		c.run(t, nil, "delete", "volumesnapshot", snap, "-n", sourceNS, "--wait=true", "--timeout=60s")
-		c.check(t, request, false, true, false)
+		c.check(t, request, true, false)
 	})
 }

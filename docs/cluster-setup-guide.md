@@ -278,24 +278,21 @@ class. For DataVolume `spec.storage`, it reports the effective defaults from the
 selected class's CDI StorageProfile. Explicit disk settings are not rejected
 merely because they differ from the profile's recommendations.
 
-Source images must exist and be ready. By default each TR requires the source
-and target StorageClasses to match (`require_same_source_storage_class: true`).
-A mismatch, or an original source StorageClass that cannot be established, blocks
-preflight. To allow different classes for a particular TR, explicitly opt out:
+Source images must exist and be ready. Investigating their original StorageClass
+is advisory: a match is logged as information; a mismatch or an unknown class is
+logged as a warning and does not block execution. The administrator may intend
+cross-class cloning, which can require host-assisted copying and may affect
+performance. Matching classes do not prove acceleration.
 
-```yaml
-overrides:
-  TR-VIRT-001:
-    require_same_source_storage_class: false
-```
-
-With this override a known class difference produces a nonfatal warning that
-cloning might not be accelerated and could require host-assisted copying.
-Matching classes do not prove acceleration. A ready snapshot remains a valid
-source after its original PVC is deleted, but strict mode cannot accept it
-without reliable evidence of its original StorageClass. Surviving PVC names
-alone are not evidence: preflight checks the source PV's CSI volume identity
-against the bound snapshot content before using its class.
+A ready snapshot remains a valid source after its original PVC is deleted.
+When a source PVC survives, preflight checks its PV's CSI volume identity against
+the bound snapshot content before using its class. For CDI-managed image imports,
+it can instead infer the class from the DataImportCron's recorded import-class
+annotation. The snapshot label, current import, last imported PVC, and managed
+DataSource must agree; the snapshot identity and readiness are checked again.
+The finding identifies this as CDI metadata inference. Missing, inaccessible, or
+inconsistent optional provenance leaves the class unknown and produces a warning.
+No storage-vendor resources or opaque volume-handle parsing are used.
 
 Snapshot driver and source volume mode are read from bound snapshot content.
 A shared CSI driver does not establish compatibility across backend types.

@@ -3,8 +3,6 @@ package clustercheck
 import (
 	"errors"
 	"testing"
-
-	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 func storageSnapshotCLI(t *testing.T) {
@@ -66,44 +64,50 @@ func TestMissingAndUnreadyBootSources(t *testing.T) {
 	}
 }
 
-func TestSourceClassPolicy(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		value       any
-		present     bool
-		sourceKind  string
-		wantError   bool
-		wantWarning bool
-	}{
-		{name: "default strict mismatch", sourceKind: "pvc", wantError: true},
-		{name: "explicit strict mismatch", value: true, present: true, sourceKind: "pvc", wantError: true},
-		{name: "explicit optout mismatch", value: false, present: true, sourceKind: "pvc", wantWarning: true},
-		{name: "default strict unknown snapshot class", sourceKind: "snapshot", wantError: true},
-		{name: "optout unknown snapshot class", value: false, present: true, sourceKind: "snapshot"},
+func TestSourceClassInvestigationIsAdvisory(t *testing.T) {
+	for _, tc := range []struct{ name, kind, target, level, fragment string }{
+		{"matching PVC", "pvc", "nas", "info", "matches target"},
+		{"different PVC", "pvc", "economy", "warn", "differs from target"},
+		{"unknown snapshot class", "snapshot", "nas", "warn", "original StorageClass is unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			storageCLI(t)
-			request := StorageRequest{Identity: "root", CDI: true, Namespace: "workloads", ExpectedClass: "economy", Claim: StorageClaim{StorageClassName: stringPointer("economy"), AccessModes: []string{"ReadWriteMany"}, VolumeMode: "Filesystem"}, SourceKind: tc.sourceKind, Source: NamespacedName{Name: "image", Namespace: "images"}}
-			requests := []StorageRequest{request}
-			tr := core.TestRequirement{ID: "test", Params: map[string]any{}}
-			if tc.present {
-				tr.Params["require_same_source_storage_class"] = tc.value
+			request := StorageRequest{Identity: "root", CDI: true, Namespace: "workloads", ExpectedClass: tc.target, Claim: StorageClaim{StorageClassName: stringPointer(tc.target), AccessModes: []string{"ReadWriteMany"}, VolumeMode: "Filesystem"}, SourceKind: tc.kind, Source: NamespacedName{Name: "image", Namespace: "images"}}
+			got := CheckStorage(t.Context(), "", []StorageRequest{request})
+			for _, finding := range got {
+				if finding.Level == "error" {
+					t.Fatalf("source-class investigation blocked execution: %+v", got)
+				}
 			}
-			if err := ApplyStoragePolicy(requests, tr); err != nil {
-				t.Fatal(err)
-			}
-			got := CheckStorage(t.Context(), "", requests)
-			hasError, hasWarning := false, false
-			for _, f := range got {
-				hasError = hasError || f.Level == "error"
-				hasWarning = hasWarning || f.Level == "warn"
-			}
-			if hasError != tc.wantError || hasWarning != tc.wantWarning {
-				t.Fatalf("unexpected findings: %+v", got)
+			if !findingContains(got, tc.level, tc.fragment) {
+				t.Fatalf("missing %s finding %q: %+v", tc.level, tc.fragment, got)
 			}
 		})
 	}
-	if err := ApplyStoragePolicy(nil, core.TestRequirement{ID: "bad", Params: map[string]any{"require_same_source_storage_class": "false"}}); err == nil {
-		t.Fatal("non-boolean policy accepted")
+}
+
+func TestSnapshotDataSourceSurvivesDeletedOriginalVolume(t *testing.T) {
+	storageSnapshotCLI(t)
+	t.Setenv("STORAGE_SOURCE", `{"spec":{"source":{"snapshot":{"name":"image","namespace":"images"}}},"status":{"conditions":[{"type":"Ready","status":"True"}]}}`)
+	t.Setenv("STORAGE_PVC", "")
+	source, err := inspectStorageSource(t.Context(), "", "DataSource", NamespacedName{Name: "golden", Namespace: "images"})
+	if err != nil || source.Kind != "snapshot" || source.Class != "" || source.Driver != "driver" {
+		t.Fatalf("ready snapshot DataSource with deleted original PVC: source=%+v err=%v", source, err)
+	}
+}
+
+func TestReadySnapshotWithoutContentProvenanceDoesNotBlock(t *testing.T) {
+	storageSnapshotCLI(t)
+	t.Setenv("STORAGE_CONTENT", "")
+	ref := NamespacedName{Name: "image", Namespace: "images"}
+	requests := []StorageRequest{{Identity: "root", Namespace: "images", CDI: true, ExpectedClass: "nas", SourceKind: "snapshot", Source: ref, Claim: StorageClaim{StorageClassName: stringPointer("nas"), AccessModes: []string{"ReadWriteMany"}, VolumeMode: "Filesystem"}}}
+	findings := CheckStorage(t.Context(), "", requests)
+	if !findingContains(findings, "warn", "original StorageClass is unavailable") {
+		t.Fatalf("unknown provenance warning missing: %+v", findings)
+	}
+	for _, f := range findings {
+		if f.Level == "error" {
+			t.Fatalf("optional provenance blocked ready snapshot: %+v", findings)
+		}
 	}
 }

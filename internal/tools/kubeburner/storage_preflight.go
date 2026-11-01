@@ -26,8 +26,6 @@ func workloadStoragePreflight(ctx context.Context, tr core.TestRequirement, stor
 	if err != nil {
 		return []core.Finding{{Level: "error", Message: fmt.Sprintf("%s storage: %v", tr.ID, err)}}
 	}
-	if err := clustercheck.ApplyStoragePolicy(requests, tr); err != nil {
-		return []core.Finding{{Level: "error", Message: err.Error()}}
-	}
+	clustercheck.LabelStorageRequests(requests, tr)
 	return clustercheck.CheckStorage(ctx, "", requests)
 }

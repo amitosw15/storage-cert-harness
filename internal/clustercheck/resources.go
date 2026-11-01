@@ -51,7 +51,7 @@ type PVCStatus struct {
 
 // VolumeSnapshot contains the identity, class and readiness fields used by adapters.
 type VolumeSnapshot struct {
-	Metadata NamespacedName       `json:"metadata"`
+	Metadata ResourceMetadata     `json:"metadata"`
 	Spec     VolumeSnapshotSpec   `json:"spec"`
 	Status   VolumeSnapshotStatus `json:"status"`
 }

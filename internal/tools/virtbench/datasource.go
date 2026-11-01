@@ -269,8 +269,6 @@ func vmStoragePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRequir
 		}
 		requests = append(requests, disks...)
 	}
-	if err := clustercheck.ApplyStoragePolicy(requests, tr); err != nil {
-		return []core.Finding{{Level: "error", Message: err.Error()}}
-	}
+	clustercheck.LabelStorageRequests(requests, tr)
 	return clustercheck.CheckStorage(ctx, strParamOr(tr, "kubeconfig", ""), requests)
 }
