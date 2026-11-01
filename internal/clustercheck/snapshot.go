@@ -77,11 +77,7 @@ func ResolveSnapshot(ctx context.Context, storageClass, configured, kubeconfig s
 	}
 	name := configured
 	if name == "" && vmSnapshot {
-		var profile struct {
-			Status struct {
-				SnapshotClass string `json:"snapshotClass"`
-			} `json:"status"`
-		}
+		var profile storageProfile
 		// Missing profiles are allowed by KubeVirt; other lookup errors are not.
 		out, err := SnapshotCommand(ctx, kubeconfig, nil, "get", "storageprofile", storageClass, "--ignore-not-found", "-o", "json")
 		if err != nil {

@@ -75,6 +75,5 @@ func prepareVMStorage(ctx context.Context, s clustercheck.SnapshotSelection) (cr
 	if _, err := clustercheck.SnapshotCommand(ctx, s.Kubeconfig, nil, "patch", "storageprofile", created, "--type=merge", "-p", string(patch)); err != nil {
 		return created, err
 	}
-	_, err = clustercheck.SnapshotCommand(ctx, s.Kubeconfig, nil, "wait", "storageprofile/"+created, "--for=jsonpath={.status.snapshotClass}="+s.SnapshotClass, "--timeout=90s")
-	return created, err
+	return created, clustercheck.WaitForStorageProfile(ctx, s, created)
 }
