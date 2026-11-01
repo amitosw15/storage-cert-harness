@@ -56,6 +56,11 @@ func (preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs 
 	}
 	caps := []clustercheck.Capability{clustercheck.KubeVirt, clustercheck.CDI, snapshotCRD}
 	findings = append(findings, clustercheck.Preflight(ctx, caps, sc)...)
+	if sc != "" {
+		for _, tr := range trs {
+			findings = append(findings, workloadStoragePreflight(ctx, tr, sc)...)
+		}
+	}
 	if sc != "" && needsSnapshot {
 		selection, err := clustercheck.ResolveSnapshot(ctx, sc, rc.Backend.SnapshotClass, "", true)
 		if err != nil {

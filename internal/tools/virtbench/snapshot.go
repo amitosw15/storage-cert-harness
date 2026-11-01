@@ -179,11 +179,12 @@ func (c *snapshotClone) prepare(ctx context.Context, root string) (string, error
 		if err != nil {
 			return "", err
 		}
-		c.Created = append(c.Created, made.Metadata)
-		if err := clustercheck.WaitForVolumeSnapshotReady(ctx, c.Selection.Kubeconfig, made.Metadata, 5*time.Minute); err != nil {
+		madeRef := cloneSource{Name: made.Metadata.Name, Namespace: made.Metadata.Namespace}
+		c.Created = append(c.Created, madeRef)
+		if err := clustercheck.WaitForVolumeSnapshotReady(ctx, c.Selection.Kubeconfig, madeRef, 5*time.Minute); err != nil {
 			return "", err
 		}
-		c.Snapshots[strconv.Itoa(i)] = made.Metadata
+		c.Snapshots[strconv.Itoa(i)] = madeRef
 	}
 	templateSource, err := templates.ReadFile(snapshotVMTemplatePath)
 	if err != nil {

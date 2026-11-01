@@ -338,9 +338,12 @@ func TestPreflightUsesEmbeddedFIOP99Template(t *testing.T) {
 		t.Fatalf("write fake virtbench: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "oc"), []byte(`#!/bin/sh
+if [ "$1" = create ]; then echo '{"status":{"allowed":true}}'; exit 0; fi
 case "$2" in
  datasource) echo '{"spec":{"source":{"pvc":{"name":"disk"}}},"status":{"conditions":[{"type":"Ready","status":"True"}]}}' ;;
- pvc) echo '{"status":{"phase":"Bound"}}' ;;
+ pvc) echo '{"spec":{"storageClassName":"sc"},"status":{"phase":"Bound"}}' ;;
+ storageclass) echo '{"items":[{"metadata":{"name":"sc"}}]}' ;;
+ storageprofile) echo '{"status":{"claimPropertySets":[{"accessModes":["ReadWriteMany"],"volumeMode":"Filesystem"}]}}' ;;
  *) exit 1 ;;
 esac
 `), 0o700); err != nil {
@@ -353,7 +356,7 @@ esac
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
-	if len(findings) != 4 {
+	if len(findings) != 11 {
 		t.Fatalf("findings = %+v, want binary, storage class, and parameter checks", findings)
 	}
 	for _, f := range findings {

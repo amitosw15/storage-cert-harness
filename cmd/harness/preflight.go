@@ -7,9 +7,9 @@ import (
 )
 
 type preflightOutput struct {
-	out                     io.Writer
-	passed, failed, skipped int
-	err                     error
+	out                             io.Writer
+	passed, failed, skipped, warned int
+	err                             error
 }
 
 func (p *preflightOutput) add(status, tool, message string) {
@@ -18,6 +18,8 @@ func (p *preflightOutput) add(status, tool, message string) {
 		p.passed++
 	case "FAIL":
 		p.failed++
+	case "WARN":
+		p.warned++
 	case "SKIP":
 		p.skipped++
 	}
@@ -34,6 +36,11 @@ func (p *preflightOutput) finish() error {
 	}
 	if p.err != nil {
 		return p.err
+	}
+	if p.warned > 0 {
+		if _, err := fmt.Fprintf(p.out, "Preflight warnings: %d WARN\n", p.warned); err != nil {
+			return err
+		}
 	}
 	if p.failed > 0 {
 		return fmt.Errorf("%d preflight problem(s)", p.failed)

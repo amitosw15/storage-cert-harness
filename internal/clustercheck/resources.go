@@ -21,6 +21,7 @@ type NamespacedName struct {
 
 // ResourceMetadata contains the metadata needed by the cluster operations.
 type ResourceMetadata struct {
+	CreationTimestamp time.Time         `json:"creationTimestamp"`
 	UID               string            `json:"uid"`
 	DeletionTimestamp string            `json:"deletionTimestamp"`
 	Labels            map[string]string `json:"labels"`
@@ -42,6 +43,8 @@ type PersistentVolumeClaim struct {
 }
 type PVCSpec struct {
 	StorageClassName string `json:"storageClassName"`
+	VolumeMode       string `json:"volumeMode"`
+	VolumeName       string `json:"volumeName"`
 }
 type PVCStatus struct {
 	Phase string `json:"phase"`
@@ -49,15 +52,19 @@ type PVCStatus struct {
 
 // VolumeSnapshot contains the identity, class and readiness fields used by adapters.
 type VolumeSnapshot struct {
-	Metadata NamespacedName       `json:"metadata"`
+	Metadata ResourceMetadata     `json:"metadata"`
 	Spec     VolumeSnapshotSpec   `json:"spec"`
 	Status   VolumeSnapshotStatus `json:"status"`
 }
 type VolumeSnapshotSpec struct {
 	VolumeSnapshotClassName string `json:"volumeSnapshotClassName"`
+	Source                  struct {
+		PersistentVolumeClaimName string `json:"persistentVolumeClaimName"`
+	} `json:"source"`
 }
 type VolumeSnapshotStatus struct {
-	ReadyToUse bool `json:"readyToUse"`
+	ReadyToUse                     bool   `json:"readyToUse"`
+	BoundVolumeSnapshotContentName string `json:"boundVolumeSnapshotContentName"`
 }
 
 // DataSource contains CDI source references and readiness conditions.
@@ -69,7 +76,8 @@ type DataSourceSpec struct {
 	Source map[string]NamespacedName `json:"source"`
 }
 type DataSourceStatus struct {
-	Conditions []ResourceCondition `json:"conditions"`
+	Source     map[string]NamespacedName `json:"source"`
+	Conditions []ResourceCondition       `json:"conditions"`
 }
 type ResourceCondition struct {
 	Type   string `json:"type"`
