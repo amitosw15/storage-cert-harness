@@ -2,7 +2,9 @@ package kubeburner
 
 import "embed"
 
-//go:embed templates/TR-VIRT-010/*.yaml
+//go:embed templates
 var templates embed.FS
 
-const snapshotTemplatesDir = "templates/TR-VIRT-010"
+const (
+	workloadTemplatesDir = "templates/shared"
+)
