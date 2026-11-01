@@ -96,7 +96,7 @@ internal/tools/<tool>/
 Source templates are embedded in the binary and remain unchanged during runs.
 Stage generated files in the run's working directory using the filenames and
 relative paths required by the external tool. For example, kube-burner's
-`templates/TR-VIRT-010/config.yaml` becomes `config.yaml`, while its object
+`templates/shared/config.yaml` becomes `config.yaml`, while its object
 templates become `templates/*.yaml` in the run directory.
 
 Adapters without harness-owned templates document that in `templates/README.md`
@@ -110,7 +110,7 @@ User-supplied template paths remain external inputs.
 map[string]any) ([]byte, error)`. It has no filesystem, cluster, or CLI responsibilities.
 Kube-burner uses `manifest.Native` to preserve workload template bytes for its own renderer.
 Its harness-owned StorageClass and StorageProfile setup uses `manifest.GoTemplate`
-with sources under `templates/TR-VIRT-010/setup/`; these are applied by the harness
+with sources under `templates/shared/setup/`; these are applied by the harness
 and are not staged as native kube-burner workload templates.
 Kube-burner-ocp owns its templates inside the released CLI and needs no harness
 rendering call; any future local templates use the same native renderer.

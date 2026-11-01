@@ -197,7 +197,11 @@ func waitForVMRunning(ctx context.Context, kubeconfig, ns, vmName string, timeou
 
 // ensureNamespace creates a namespace if it does not already exist.
 func ensureNamespace(ctx context.Context, kubeconfig, ns string) error {
-	rendered, err := manifest.Render(vmRenderer, "namespace.yaml", []byte(namespaceTemplate), map[string]any{"NAMESPACE": ns})
+	templateSource, err := templates.ReadFile(namespaceTemplatePath)
+	if err != nil {
+		return err
+	}
+	rendered, err := manifest.Render(vmRenderer, "namespace.yaml", templateSource, map[string]any{"NAMESPACE": ns})
 	if err != nil {
 		return err
 	}

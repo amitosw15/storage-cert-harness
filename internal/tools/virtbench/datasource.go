@@ -208,7 +208,11 @@ func selectVMSource(data []byte, selection string, defaults bool) ([]byte, []clo
 	if (selection == "" && !defaults) || len(volumes) == 0 {
 		return data, refs, nil
 	}
-	rendered, err := manifest.Render(vmRenderer, "selected-vm.yaml", []byte(selectedVMTemplate), map[string]any{
+	templateSource, err := templates.ReadFile(selectedVMTemplatePath)
+	if err != nil {
+		return nil, nil, err
+	}
+	rendered, err := manifest.Render(vmRenderer, "selected-vm.yaml", templateSource, map[string]any{
 		"VM": docs[0], "DATASOURCE": selected, "DEFAULTS": defaults,
 	})
 	return rendered, refs, err

@@ -2,13 +2,11 @@ package kubeburner
 
 import "embed"
 
-//go:embed templates/TR-VIRT-010/*.yaml
+//go:embed templates
 var templates embed.FS
 
-const snapshotTemplatesDir = "templates/TR-VIRT-010"
-
-//go:embed templates/TR-VIRT-010/setup/storageclass.yaml
-var storageClassTemplate string
-
-//go:embed templates/TR-VIRT-010/setup/storageprofile-patch.yaml
-var storageProfilePatchTemplate string
+const (
+	workloadTemplatesDir            = "templates/shared"
+	storageClassTemplatePath        = "templates/shared/setup/storageclass.yaml"
+	storageProfilePatchTemplatePath = "templates/shared/setup/storageprofile-patch.yaml"
+)
