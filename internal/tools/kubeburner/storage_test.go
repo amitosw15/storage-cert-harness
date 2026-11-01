@@ -1,15 +1,20 @@
 package kubeburner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 )
 
@@ -22,7 +27,15 @@ printf '%s\n' "$*" >> "$SNAPSHOT_TEST_DIR/commands"
 if [ "$1" = --kubeconfig ]; then shift 2; fi
 case "$1 $2" in
  'get storageclass') printf '%s' "$TEST_STORAGE_CLASS" ;;
- 'get storageprofile') printf '%s' "$TEST_PROFILE" ;;
+ 'get storageprofile')
+   if [ "$3" = backend ]; then
+     printf '%s' "$TEST_PROFILE"
+   elif [ -n "$TEST_INITIAL_PROFILE" ] && [ ! -f "$SNAPSHOT_TEST_DIR/profile-observed" ]; then
+     : > "$SNAPSHOT_TEST_DIR/profile-observed"
+     printf '%s' "$TEST_INITIAL_PROFILE"
+   else
+     printf '%s' "$TEST_EFFECTIVE_PROFILE"
+   fi ;;
  'create -f') /bin/cat > "$SNAPSHOT_TEST_DIR/created.json"; echo '{"metadata":{"name":"storage-cert-snapshot-test"}}' ;;
  'patch storageprofile') printf '%s' "$6" > "$SNAPSHOT_TEST_DIR/patch.json" ;;
  'wait --for=create') if [ "$TEST_WAIT_FAIL" = true ]; then exit 1; fi ;;
@@ -36,6 +49,8 @@ esac
 	t.Setenv("PATH", dir)
 	t.Setenv("TEST_STORAGE_CLASS", `{"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"name":"backend","annotations":{"storageclass.kubernetes.io/is-default-class":"true","storageclass.kubevirt.io/is-default-virt-class":"true"}},"provisioner":"driver","parameters":{"pool":"pool-a"},"allowVolumeExpansion":true,"volumeBindingMode":"Immediate"}`)
 	t.Setenv("TEST_PROFILE", `{"status":{"claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]}}`)
+	t.Setenv("TEST_INITIAL_PROFILE", "")
+	t.Setenv("TEST_EFFECTIVE_PROFILE", `{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]}}`)
 	return dir
 }
 
@@ -103,7 +118,7 @@ func TestPrepareVMStoragePreservesProvisioningFields(t *testing.T) {
 	dir := storageCLI(t)
 	source := `{"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"name":"backend","uid":"original","resourceVersion":"7","annotations":{"storageclass.kubernetes.io/is-default-class":"true"}},"status":{"ignored":true},"provisioner":"driver","parameters":{"pool":"pool: a","option":"true"},"reclaimPolicy":"Retain","mountOptions":["nfsvers=4.1"],"allowVolumeExpansion":false,"volumeBindingMode":"WaitForFirstConsumer","allowedTopologies":[{"matchLabelExpressions":[{"key":"topology.example/zone","values":["a","b"]}]}],"futureField":{"enabled":true,"limit":3}}`
 	t.Setenv("TEST_STORAGE_CLASS", source)
-	s := clustercheck.SnapshotSelection{StorageClass: "backend", SnapshotClass: "chosen"}
+	s := clustercheck.SnapshotSelection{StorageClass: "backend", SnapshotClass: "nondefault"}
 	if _, err := prepareVMStorage(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +160,7 @@ func TestPrepareVMStorageOmitsUnavailableClaimDefaults(t *testing.T) {
 		t.Run(source, func(t *testing.T) {
 			dir := storageCLI(t)
 			t.Setenv("TEST_PROFILE", source)
-			s := clustercheck.SnapshotSelection{StorageClass: "backend", SnapshotClass: "chosen"}
+			s := clustercheck.SnapshotSelection{StorageClass: "backend", SnapshotClass: "nondefault"}
 			if _, err := prepareVMStorage(t.Context(), s); err != nil {
 				t.Fatal(err)
 			}
@@ -157,9 +172,140 @@ func TestPrepareVMStorageOmitsUnavailableClaimDefaults(t *testing.T) {
 			if err := json.Unmarshal(data, &patch); err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(patch, map[string]any{"spec": map[string]any{"snapshotClass": "chosen"}}) {
+			if !reflect.DeepEqual(patch, map[string]any{"spec": map[string]any{"snapshotClass": "nondefault"}}) {
 				t.Fatalf("unexpected profile patch: %s", data)
 			}
 		})
+	}
+}
+
+func TestPrepareVMStoragePreservesClaimModes(t *testing.T) {
+	for _, properties := range []string{
+		`[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]`,
+		`[{"volumeMode":"Filesystem","accessModes":["ReadWriteMany"]}]`,
+		`[{"volumeMode":"Filesystem","accessModes":["ReadWriteOnce"]}]`,
+		`[{"volumeMode":"Block","accessModes":["ReadWriteMany"]},{"volumeMode":"Filesystem","accessModes":["ReadWriteOnce"]}]`,
+	} {
+		t.Run(properties, func(t *testing.T) {
+			dir := storageCLI(t)
+			t.Setenv("TEST_PROFILE", `{"status":{"claimPropertySets":`+properties+`}}`)
+			t.Setenv("TEST_EFFECTIVE_PROFILE", `{"status":{"snapshotClass":"nondefault","claimPropertySets":`+properties+`}}`)
+			if _, err := prepareVMStorage(t.Context(), clustercheck.SnapshotSelection{StorageClass: "backend", SnapshotClass: "nondefault"}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "patch.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var patch struct {
+				Spec struct {
+					Properties json.RawMessage `json:"claimPropertySets"`
+				} `json:"spec"`
+			}
+			if err := json.Unmarshal(data, &patch); err != nil {
+				t.Fatal(err)
+			}
+			var got, want any
+			if err := json.Unmarshal(patch.Spec.Properties, &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(properties), &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("claim property values or ordering changed: %s", data)
+			}
+		})
+	}
+}
+
+func TestStorageProfileWaitsForEffectiveDefaults(t *testing.T) {
+	for _, initial := range []string{
+		`{}`,
+		`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block"}]}}`,
+		`{"status":{"snapshotClass":"wrong","claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]}}`,
+	} {
+		t.Run(initial, func(t *testing.T) {
+			dir := storageCLI(t)
+			t.Setenv("TEST_INITIAL_PROFILE", initial)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			if _, err := prepareVMStorage(ctx, clustercheck.SnapshotSelection{StorageClass: "backend", SnapshotClass: "nondefault"}); err != nil {
+				t.Fatal(err)
+			}
+			commands, err := os.ReadFile(filepath.Join(dir, "commands"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Count(string(commands), "get storageprofile storage-cert-snapshot-test") < 2 {
+				t.Fatal("did not wait for the private profile's effective status")
+			}
+		})
+	}
+}
+
+func TestIncompleteStorageProfileReportsMissingFields(t *testing.T) {
+	for _, tc := range []struct{ profile, missing string }{
+		{`{}`, "volumeMode and accessModes"},
+		{`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block"}]}}`, "claimPropertySets[0].accessModes"},
+		{`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"accessModes":["ReadWriteOnce"]}]}}`, "claimPropertySets[0].volumeMode"},
+		{`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block","accessModes":[]}]}}`, "claimPropertySets[0].accessModes"},
+		{`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block","accessModes":[""]}]}}`, "empty status.claimPropertySets[0].accessModes entry"},
+		{`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]},{}]}}`, "claimPropertySets[1].volumeMode"},
+		{`{"status":{"snapshotClass":"wrong","claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]}}`, `expected "nondefault", observed "wrong"`},
+	} {
+		t.Run(tc.missing, func(t *testing.T) {
+			storageCLI(t)
+			t.Setenv("TEST_EFFECTIVE_PROFILE", tc.profile)
+			ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+			defer cancel()
+			err := waitForStorageProfile(ctx, clustercheck.SnapshotSelection{StorageClass: "backend", SnapshotClass: "nondefault"}, "storage-cert-snapshot-test")
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("error = %v, want readiness deadline", err)
+			}
+			for _, want := range []string{"storage-cert-snapshot-test", "backend", tc.missing} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q is missing %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestIncompleteStorageProfileLogsErrorAndRetainsCleanup(t *testing.T) {
+	dir := storageCLI(t)
+	t.Setenv("TEST_EFFECTIVE_PROFILE", `{"status":{"snapshotClass":"nondefault"}}`)
+	var logs bytes.Buffer
+	rc := &core.RunCtx{
+		Logger:  slog.New(slog.NewTextHandler(&logs, nil)),
+		Backend: &core.ResolvedBackend{StorageClass: "backend", SnapshotClass: "nondefault"},
+		WorkDir: t.TempDir(),
+	}
+	bag := core.NewBag()
+	bag.Set("snapshot_selection", clustercheck.SnapshotSelection{StorageClass: "backend", SnapshotClass: "nondefault"})
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	err := (provisioner{}).Provision(ctx, rc, bag, nil)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "prepare snapshot storage:") {
+		t.Fatalf("provisioning error lost diagnostic context: %v", err)
+	}
+	for _, want := range []string{"level=ERROR", "storage_class=backend", "storage_profile=storage-cert-snapshot-test", "volumeMode", "accessModes"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("log is missing %q: %s", want, logs.String())
+		}
+	}
+	created, _ := core.GetAs[string](bag, "snapshot_storage_class")
+	if created != "storage-cert-snapshot-test" {
+		t.Fatal("lost private class name needed by teardown")
+	}
+	if _, ok := core.GetAs[string](bag, "results_dir"); ok {
+		t.Fatal("provisioning continued after incomplete storage profile")
+	}
+	if err := (teardown{}).Teardown(t.Context(), rc, bag); err != nil {
+		t.Fatal(err)
+	}
+	commands, err := os.ReadFile(filepath.Join(dir, "commands"))
+	if err != nil || !strings.Contains(string(commands), "delete storageclass storage-cert-snapshot-test") {
+		t.Fatalf("private class was not cleaned up: %v\n%s", err, commands)
 	}
 }
