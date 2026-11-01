@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
@@ -36,9 +35,8 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 		node, hostnameLabel = picked, label
 		rc.Logger.Info("virtbench: auto-selected worker node", "node", node, "hostname_label", hostnameLabel)
 	} else if hostnameLabel == "" {
-		if label, ok, _ := runKubectl(ctx, kubeconfig, "get", "node", node,
-			`-o`, `jsonpath={.metadata.labels.kubernetes\.io/hostname}`); ok && strings.TrimSpace(label) != "" {
-			hostnameLabel = strings.TrimSpace(label)
+		if obj, err := clustercheck.GetNode(ctx, kubeconfig, node); err == nil && obj.Metadata.Labels["kubernetes.io/hostname"] != "" {
+			hostnameLabel = obj.Metadata.Labels["kubernetes.io/hostname"]
 		} else {
 			hostnameLabel = node
 		}
@@ -87,7 +85,7 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 			return fmt.Errorf("virtbench: create namespace %s: %w", ns, err)
 		}
 
-		if err := kubectlApply(ctx, kubeconfig, string(rendered)); err != nil {
+		if err := clustercheck.ApplyVirtualMachine(ctx, kubeconfig, rendered); err != nil {
 			return fmt.Errorf("virtbench: apply VM in %s: %w", ns, err)
 		}
 		rc.Logger.Info("virtbench: VM applied", "namespace", ns, "vm", vmName)
@@ -137,29 +135,35 @@ func boolParam(tr core.TestRequirement, key string) bool {
 // in the VM template — in OpenShift the node name can be an FQDN while the
 // label is the short hostname, so they must be fetched separately).
 func pickWorkerNode(ctx context.Context, kubeconfig string) (name, hostnameLabel string, err error) {
-	out, ok, err := runKubectl(ctx, kubeconfig, "get", "nodes",
-		"-l", "node-role.kubernetes.io/worker",
-		"-o", "jsonpath={.items[*].metadata.name}")
-	if !ok || err != nil {
+	nodes, err := clustercheck.ListNodes(ctx, kubeconfig)
+	if err != nil {
 		return "", "", fmt.Errorf("virtbench: list worker nodes: %w", err)
 	}
-	allNodes := strings.Fields(strings.TrimSpace(out))
+	var allNodes []string
+	for _, node := range nodes {
+		if _, isWorker := node.Metadata.Labels["node-role.kubernetes.io/worker"]; isWorker {
+			allNodes = append(allNodes, node.Metadata.Name)
+		}
+	}
 	if len(allNodes) == 0 {
 		return "", "", fmt.Errorf("virtbench: no worker nodes found (label node-role.kubernetes.io/worker)")
 	}
 	var ready []string
-	for _, n := range allNodes {
-		cond, condOK, _ := runKubectl(ctx, kubeconfig, "get", "node", n,
-			"-o", `jsonpath={.status.conditions[?(@.type=="Ready")].status}`)
-		if !condOK || strings.TrimSpace(cond) != "True" {
+	for _, n := range nodes {
+		if _, isWorker := n.Metadata.Labels["node-role.kubernetes.io/worker"]; !isWorker {
 			continue
 		}
-		sched, _, _ := runKubectl(ctx, kubeconfig, "get", "node", n,
-			"-o", `jsonpath={.metadata.labels.kubevirt\.io/schedulable}`)
-		if strings.TrimSpace(sched) != "true" {
+		isReady := false
+		for _, condition := range n.Status.Conditions {
+			if condition.Type == "Ready" && condition.Status == "True" {
+				isReady = true
+				break
+			}
+		}
+		if !isReady || n.Metadata.Labels["kubevirt.io/schedulable"] != "true" {
 			continue
 		}
-		ready = append(ready, n)
+		ready = append(ready, n.Metadata.Name)
 	}
 	if len(ready) == 0 {
 		return "", "", fmt.Errorf("virtbench: no Ready+schedulable worker nodes found (all %d workers are not Ready or kubevirt.io/schedulable != true)", len(allNodes))
@@ -169,11 +173,13 @@ func pickWorkerNode(ctx context.Context, kubeconfig string) (name, hostnameLabel
 		return "", "", fmt.Errorf("virtbench: choose worker node: %w", err)
 	}
 	name = ready[index.Int64()]
-	label, labelOK, _ := runKubectl(ctx, kubeconfig, "get", "node", name,
-		`-o`, `jsonpath={.metadata.labels.kubernetes\.io/hostname}`)
-	if labelOK && strings.TrimSpace(label) != "" {
-		hostnameLabel = strings.TrimSpace(label)
-	} else {
+	for _, node := range nodes {
+		if node.Metadata.Name == name && node.Metadata.Labels["kubernetes.io/hostname"] != "" {
+			hostnameLabel = node.Metadata.Labels["kubernetes.io/hostname"]
+			break
+		}
+	}
+	if hostnameLabel == "" {
 		hostnameLabel = name
 	}
 	return name, hostnameLabel, nil
@@ -186,9 +192,8 @@ func waitForVMRunning(ctx context.Context, kubeconfig, ns, vmName string, timeou
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		out, ok, _ := runKubectl(ctx, kubeconfig, "get", "vmi", vmName, "-n", ns,
-			"-o", "jsonpath={.status.phase}")
-		if ok && strings.TrimSpace(out) == "Running" {
+		vmi, err := clustercheck.GetVMI(ctx, kubeconfig, clustercheck.NamespacedName{Name: vmName, Namespace: ns})
+		if err == nil && vmi.Status.Phase == "Running" {
 			return nil
 		}
 		time.Sleep(10 * time.Second)

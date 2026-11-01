@@ -21,9 +21,12 @@ type NamespacedName struct {
 
 // ResourceMetadata contains the metadata needed by the cluster operations.
 type ResourceMetadata struct {
-	Name        string            `json:"name"`
-	Namespace   string            `json:"namespace"`
-	Annotations map[string]string `json:"annotations"`
+	UID               string            `json:"uid"`
+	DeletionTimestamp string            `json:"deletionTimestamp"`
+	Labels            map[string]string `json:"labels"`
+	Name              string            `json:"name"`
+	Namespace         string            `json:"namespace"`
+	Annotations       map[string]string `json:"annotations"`
 }
 
 // VolumeSnapshotClass contains the driver and default-class metadata used in selection.
@@ -185,6 +188,7 @@ func createResource(ctx context.Context, kubeconfig string, data []byte, kind st
 	var resource struct {
 		Kind     string `yaml:"kind"`
 		Metadata struct {
+			Name      string `yaml:"name"`
 			Namespace string `yaml:"namespace"`
 		} `yaml:"metadata"`
 	}
@@ -199,8 +203,15 @@ func createResource(ctx context.Context, kubeconfig string, data []byte, kind st
 	if resource.Kind != kind {
 		return false, fmt.Errorf("create %s requires a %s manifest, got %q", kind, kind, resource.Kind)
 	}
-	if kind == "VolumeSnapshot" && resource.Metadata.Namespace == "" {
-		return false, fmt.Errorf("VolumeSnapshot requires an explicit metadata.namespace")
+	if kind == "VolumeSnapshot" || kind == "Pod" {
+		if resource.Metadata.Namespace == "" {
+			return false, fmt.Errorf("%s requires an explicit metadata.namespace", kind)
+		}
+		if kind == "Pod" {
+			if err := validateResourceName("pod", resource.Metadata.Name); err != nil {
+				return false, err
+			}
+		}
 	}
 	result, err := runKubeCommand(ctx, kubeconfig, data, "create", "-f", "-", "-o", "json")
 	if err != nil {

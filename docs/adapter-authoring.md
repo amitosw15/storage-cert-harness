@@ -247,6 +247,10 @@ and lifecycle semantics.
 | `EnsureNamespace` | Reuse or create without patching existing objects; return whether this call created it |
 | `Delete*` | Delete only the named resource; already-missing resources count as cleaned up |
 | `PatchStorageProfile` | Explicit merge patch to an existing profile |
+| `ApplyVirtualMachine` | Explicit declarative apply; may update an existing VM |
+| `AnnotatePod` / `ExecPod` | Explicit operations on an existing named Pod |
+| `DeletePodWithUID` | Delete only when the named Pod still has the expected UID |
+| `UncordonNode` | Explicitly mark an existing node schedulable |
 | `WaitFor*` | Observe readiness/existence without creating resources |
 
 `EnsureNamespace` handles a concurrent creator by reading the existing namespace
@@ -255,6 +259,12 @@ error still returns `created=true` so ownership is not lost. Permission and
 transport errors are not treated as absence. Tools retain workload decisions,
 rendering, reporting, and cleanup ownership. StorageClass objects and raw profile
 claim-property sets retain fields unknown to the harness when copied.
+
+Pod and Node response models are shared by workload setup, drain handling, and
+environment reporting. Keep retries, node-selection policy, and helper-Pod
+ownership in the adapter; shared operations perform one scoped API operation.
+UID-protected rollback must use `DeletePodWithUID`, preserving a replacement Pod
+created by another actor.
 
 ## Multi-scenario tools = a scenario table
 

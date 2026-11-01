@@ -193,15 +193,11 @@ func (teardown) Teardown(ctx context.Context, rc *core.RunCtx, bag *core.Bag) er
 	if !ok || p.NS == "" {
 		return nil
 	}
-	cli := clustercheck.KubeCLI()
-	if cli == "" {
-		return nil
-	}
 	rc.Logger.Info("kube-burner: removing run namespace", "ns", p.NS)
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	defer cancel()
-	if output, err := exec.CommandContext(cleanupCtx, cli, "delete", "ns", p.NS, "--wait=false", "--ignore-not-found").CombinedOutput(); err != nil { // #nosec G204 -- CLI is resolved by clustercheck and arguments are structured.
-		rc.Logger.Warn("kube-burner: remove run namespace", "ns", p.NS, "err", err, "output", strings.TrimSpace(string(output)))
+	if err := clustercheck.DeleteNamespace(cleanupCtx, "", p.NS); err != nil {
+		rc.Logger.Warn("kube-burner: remove run namespace", "ns", p.NS, "err", err)
 	}
 	return nil
 }
