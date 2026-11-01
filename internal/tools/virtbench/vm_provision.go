@@ -58,7 +58,7 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 
 	rc.Logger.Info("virtbench: creating VMs on target node", "node", node, "count", count, "storage_class", sc)
 
-	source, err := vmSourceTemplate(ctx, tr)
+	source, defaults, err := vmSourceTemplate(ctx, tr)
 	if err != nil {
 		return err
 	}
@@ -74,6 +74,10 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 		ns := nsPrefix + "-" + strconv.Itoa(i)
 		values["NAMESPACE"] = ns
 		rendered, err := renderVMTemplate("failure-recovery.yaml", source, values)
+		if err != nil {
+			return err
+		}
+		rendered, _, err = selectVMSource(rendered, strParamOr(tr, "datasource", ""), defaults)
 		if err != nil {
 			return err
 		}
