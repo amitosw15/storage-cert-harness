@@ -14,4 +14,5 @@ const (
 	namespaceTemplatePath         = "templates/shared/namespace.yaml"
 	volumeSnapshotTemplatePath    = "templates/shared/volume-snapshot.yaml"
 	snapshotVMTemplatePath        = "templates/shared/snapshot-vm.yaml"
+	selectedVMTemplatePath        = "templates/shared/selected-vm.yaml"
 )
