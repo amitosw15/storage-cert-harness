@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -51,8 +50,14 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 		return nil, err
 	}
 	c := &snapshotClone{Selection: selection, Sources: map[int]cloneSource{}}
-	// virtbench also substitutes this placeholder before reading YAML.
-	data = []byte(strings.ReplaceAll(string(data), "{{STORAGE_CLASS_NAME}}", selection.StorageClass))
+	values, err := resolvePlanTemplateValues("datasource-clone", rc, tr)
+	if err != nil {
+		return nil, err
+	}
+	data, err = renderVMTemplate("snapshot-source.yaml", data, values)
+	if err != nil {
+		return nil, err
+	}
 	if err := yaml.Unmarshal(data, &c.Template); err != nil {
 		return nil, fmt.Errorf("snapshot clone VM template: %w", err)
 	}
