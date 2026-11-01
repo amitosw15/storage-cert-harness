@@ -16,13 +16,16 @@ func writeConfig(dir string, params Params) (string, error) {
 	if err := safefs.MkdirAll(filepath.Join(dir, "templates"), 0o755); err != nil {
 		return "", fmt.Errorf("kube-burner: create template directory: %w", err)
 	}
-	entries, err := templates.ReadDir(snapshotTemplatesDir)
+	entries, err := templates.ReadDir(workloadTemplatesDir)
 	if err != nil {
 		return "", fmt.Errorf("kube-burner: read templates: %w", err)
 	}
 	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
 		name := entry.Name()
-		b, err := templates.ReadFile(snapshotTemplatesDir + "/" + name)
+		b, err := templates.ReadFile(workloadTemplatesDir + "/" + name)
 		if err != nil {
 			return "", fmt.Errorf("kube-burner: read template %s: %w", name, err)
 		}

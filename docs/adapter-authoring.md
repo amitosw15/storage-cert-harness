@@ -96,7 +96,7 @@ internal/tools/<tool>/
 Source templates are embedded in the binary and remain unchanged during runs.
 Stage generated files in the run's working directory using the filenames and
 relative paths required by the external tool. For example, kube-burner's
-`templates/TR-VIRT-010/config.yaml` becomes `config.yaml`, while its object
+`templates/shared/config.yaml` becomes `config.yaml`, while its object
 templates become `templates/*.yaml` in the run directory.
 
 Adapters without harness-owned templates document that in `templates/README.md`
