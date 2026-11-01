@@ -1,6 +1,7 @@
 package kubeburner
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,7 @@ func TestBuildEnvSetsUsePopulator(t *testing.T) {
 func TestWriteConfigReplacesYAMLCommentMarker(t *testing.T) {
 	dir := t.TempDir()
 	params := Params{Replicas: 2, SnapshotCount: 3, snapshotCountSet: true}
-	if _, err := writeConfig(dir, params); err != nil {
+	if _, err := stageSnapshotConfigForTest(dir, params); err != nil {
 		t.Fatalf("writeConfig: %v", err)
 	}
 
@@ -54,5 +55,59 @@ func TestWriteConfigReplacesYAMLCommentMarker(t *testing.T) {
 	}
 	if !strings.Contains(string(config), "name: vmsnapshot-snapshot-1") {
 		t.Fatalf("config does not contain generated snapshot batch: %s", config)
+	}
+}
+
+func stageSnapshotConfigForTest(dir string, params Params) (string, error) {
+	config, err := stageConfig(dir, workloadTemplatesDir)
+	if err != nil {
+		return "", err
+	}
+	if err := prepareSnapshotConfig(filepath.Join(dir, config), params); err != nil {
+		return "", err
+	}
+	return config, nil
+}
+
+func TestStageConfigPreservesSources(t *testing.T) {
+	for _, trID := range []string{"TR-VIRT-010", "TR-VIRT-027"} {
+		dir := t.TempDir()
+		sourceDir := scenarioFor(trID).TemplateDir
+		config, err := stageConfig(dir, sourceDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if config != "config.yaml" {
+			t.Fatalf("config path = %q", config)
+		}
+		entries, err := templates.ReadDir(sourceDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			source, err := templates.ReadFile(sourceDir + "/" + entry.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "templates", entry.Name())
+			if entry.Name() == config {
+				path = filepath.Join(dir, config)
+			}
+			staged, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(source, staged) {
+				t.Fatalf("%s: source %s changed: %v", trID, entry.Name(), err)
+			}
+		}
+	}
+}
+
+func TestStageConfigRequiresConfig(t *testing.T) {
+	for _, sourceDir := range []string{"templates", "templates/missing"} {
+		if _, err := stageConfig(t.TempDir(), sourceDir); err == nil {
+			t.Fatalf("accepted source directory %q without config.yaml", sourceDir)
+		}
 	}
 }

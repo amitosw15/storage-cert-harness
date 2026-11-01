@@ -558,7 +558,7 @@ func TestEvaluator_SkipsUnmeasurableSLA(t *testing.T) {
 
 func TestWriteConfig_EmbedsAssets(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := writeConfig(dir, Params{Replicas: 2, SnapshotCount: 3, snapshotCountSet: true}); err != nil {
+	if _, err := stageSnapshotConfigForTest(dir, Params{Replicas: 2, SnapshotCount: 3, snapshotCountSet: true}); err != nil {
 		t.Fatalf("writeConfig: %v", err)
 	}
 	for _, f := range []string{"config.yaml", "templates/vm.yaml", "templates/vmsnapshot.yaml", "templates/vmsnapshot-batch.yaml"} {
@@ -585,7 +585,7 @@ func TestWriteConfig_EmbedsAssets(t *testing.T) {
 func TestWriteConfig_PreservesLegacySnapshotJob(t *testing.T) {
 	dir := t.TempDir()
 	p := resolveParams([]core.TestRequirement{{Params: map[string]any{"replicas": 2}}})
-	if _, err := writeConfig(dir, p); err != nil {
+	if _, err := stageSnapshotConfigForTest(dir, p); err != nil {
 		t.Fatalf("writeConfig: %v", err)
 	}
 	config, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
