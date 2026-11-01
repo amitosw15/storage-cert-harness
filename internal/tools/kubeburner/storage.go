@@ -2,8 +2,6 @@ package kubeburner
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
@@ -12,12 +10,8 @@ import (
 
 // prepareVMStorage creates isolated storage settings and returns the copy's name even on later failure.
 func prepareVMStorage(ctx context.Context, s clustercheck.SnapshotSelection) (created string, err error) {
-	var sc map[string]any
-	sourceData, err := clustercheck.SnapshotCommand(ctx, s.Kubeconfig, nil, "get", "storageclass", s.StorageClass, "-o", "json")
+	sc, err := clustercheck.GetStorageClass(ctx, s.Kubeconfig, s.StorageClass)
 	if err != nil {
-		return "", err
-	}
-	if err := json.Unmarshal(sourceData, &sc); err != nil {
 		return "", err
 	}
 	templateSource, err := templates.ReadFile(storageClassTemplatePath)
@@ -28,38 +22,17 @@ func prepareVMStorage(ctx context.Context, s clustercheck.SnapshotSelection) (cr
 	if err != nil {
 		return "", err
 	}
-	var made struct {
-		Metadata struct {
-			Name string `json:"name"`
-		} `json:"metadata"`
-	}
-	out, err := clustercheck.SnapshotCommand(ctx, s.Kubeconfig, data, "create", "-f", "-", "-o", "json")
+	created, err = clustercheck.CreateStorageClass(ctx, s.Kubeconfig, data)
 	if err != nil {
-		return "", err
-	}
-	if err := json.Unmarshal(out, &made); err != nil {
-		return "", err
-	}
-	created = made.Metadata.Name
-	if created == "" {
-		return "", fmt.Errorf("created storage class has no name")
+		return created, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	if _, err := clustercheck.SnapshotCommand(ctx, s.Kubeconfig, nil, "wait", "--for=create", "storageprofile/"+created, "--timeout=90s"); err != nil {
+	if err := clustercheck.WaitForStorageProfileCreated(ctx, s.Kubeconfig, created, 90*time.Second); err != nil {
 		return created, err
 	}
-	// Preserve claim defaults from the backend's profile for unknown CSI drivers.
-	var source struct {
-		Status struct {
-			ClaimPropertySets []any `json:"claimPropertySets"`
-		} `json:"status"`
-	}
-	sourceData, err = clustercheck.SnapshotCommand(ctx, s.Kubeconfig, nil, "get", "storageprofile", s.StorageClass, "-o", "json")
+	source, err := clustercheck.GetStorageProfile(ctx, s.Kubeconfig, s.StorageClass)
 	if err != nil {
-		return created, err
-	}
-	if err := json.Unmarshal(sourceData, &source); err != nil {
 		return created, err
 	}
 	templateSource, err = templates.ReadFile(storageProfilePatchTemplatePath)
@@ -72,9 +45,8 @@ func prepareVMStorage(ctx context.Context, s clustercheck.SnapshotSelection) (cr
 	if err != nil {
 		return created, err
 	}
-	if _, err := clustercheck.SnapshotCommand(ctx, s.Kubeconfig, nil, "patch", "storageprofile", created, "--type=merge", "-p", string(patch)); err != nil {
+	if err := clustercheck.PatchStorageProfile(ctx, s.Kubeconfig, created, patch); err != nil {
 		return created, err
 	}
-	_, err = clustercheck.SnapshotCommand(ctx, s.Kubeconfig, nil, "wait", "storageprofile/"+created, "--for=jsonpath={.status.snapshotClass}="+s.SnapshotClass, "--timeout=90s")
-	return created, err
+	return created, clustercheck.WaitForStorageProfile(ctx, s, created)
 }

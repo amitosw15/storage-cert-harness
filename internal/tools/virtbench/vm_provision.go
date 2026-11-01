@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 )
@@ -205,5 +206,6 @@ func ensureNamespace(ctx context.Context, kubeconfig, ns string) error {
 	if err != nil {
 		return err
 	}
-	return kubectlApply(ctx, kubeconfig, string(rendered))
+	_, err = clustercheck.EnsureNamespace(ctx, kubeconfig, ns, rendered)
+	return err
 }
