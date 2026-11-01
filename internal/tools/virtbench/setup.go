@@ -1,18 +1,16 @@
 package virtbench
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
@@ -103,9 +101,9 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 				return err
 			}
 			createAttemptedThisSetup = true
-			uid, err := kubectlCreateSSHPod(ctx, kubeconfig, manifest)
+			uid, err := createSSHPod(ctx, kubeconfig, manifest)
 			if err != nil {
-				if isKubectlAlreadyExists(err) {
+				if errors.Is(err, clustercheck.ErrAlreadyExists) {
 					continue
 				}
 				return fmt.Errorf("create ssh helper pod: %w", err)
@@ -119,16 +117,14 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 			// for it to disappear, then create a fresh pod on the next poll.
 		case pod.Status.Phase == "Failed" || pod.Status.Phase == "Succeeded":
 			rc.Logger.Info("virtbench: replacing stopped ssh helper pod", "phase", pod.Status.Phase)
-			out, ok, err := runKubectl(ctx, kubeconfig, "delete", "pod", sshPodName, "-n", sshPodNS, "--wait=false", "--ignore-not-found")
-			if err != nil || !ok {
-				return fmt.Errorf("delete stopped ssh helper pod: %v: %s", err, strings.TrimSpace(out))
+			if err := clustercheck.DeletePod(ctx, kubeconfig, sshPodReference()); err != nil {
+				return fmt.Errorf("delete stopped ssh helper pod: %w", err)
 			}
 			continue
 		case sshPodOnNode(pod, avoidNodeNames):
 			rc.Logger.Info("virtbench: replacing ssh helper on FAR target node", "node", pod.Spec.NodeName)
-			out, ok, err := runKubectl(ctx, kubeconfig, "delete", "pod", sshPodName, "-n", sshPodNS, "--wait=false", "--ignore-not-found")
-			if err != nil || !ok {
-				return fmt.Errorf("delete ssh helper on FAR target node: %v: %s", err, strings.TrimSpace(out))
+			if err := clustercheck.DeletePod(ctx, kubeconfig, sshPodReference()); err != nil {
+				return fmt.Errorf("delete ssh helper on FAR target node: %w", err)
 			}
 			continue
 		case pod.Status.Phase == "Running" && sshpassReady(ctx, kubeconfig):
@@ -234,15 +230,15 @@ func sshHelperAvoidNodes(ctx context.Context, kubeconfig string, trs []core.Test
 			continue
 		}
 		avoidNames[node] = struct{}{}
-		label, ok, err := runKubectl(ctx, kubeconfig, "get", "node", node,
-			"-o", `jsonpath={.metadata.labels.kubernetes\.io/hostname}`)
+		resource, err := clustercheck.GetNode(ctx, kubeconfig, node)
 		if err != nil {
 			return nil, nil, fmt.Errorf("get FAR target node %s: %w", node, err)
 		}
-		if !ok || strings.TrimSpace(label) == "" {
-			return nil, nil, fmt.Errorf("get FAR target node %s: %s", node, strings.TrimSpace(label))
+		label := strings.TrimSpace(resource.Metadata.Labels["kubernetes.io/hostname"])
+		if label == "" {
+			return nil, nil, fmt.Errorf("FAR target node %s has no hostname label", node)
 		}
-		avoidLabels[strings.TrimSpace(label)] = struct{}{}
+		avoidLabels[label] = struct{}{}
 	}
 	return avoidNames, avoidLabels, nil
 }
@@ -263,15 +259,6 @@ func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[stri
 	return string(rendered), err
 }
 
-func sortedMapKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
-}
-
 func sshPodBootstrapAnnotations(rc *core.RunCtx) map[string]string {
 	if rc == nil {
 		return nil
@@ -289,14 +276,14 @@ func sshPodBootstrapAnnotations(rc *core.RunCtx) map[string]string {
 	return ann
 }
 
-func sshPodHarnessRunID(pod *sshPodState) string {
+func sshPodHarnessRunID(pod *clustercheck.Pod) string {
 	if pod == nil || pod.Metadata.Annotations == nil {
 		return ""
 	}
 	return strings.TrimSpace(pod.Metadata.Annotations[sshPodAnnotPrefix+"run-id"])
 }
 
-func logExistingSSHPodAtStartup(rc *core.RunCtx, pod *sshPodState) {
+func logExistingSSHPodAtStartup(rc *core.RunCtx, pod *clustercheck.Pod) {
 	if rc == nil || pod == nil {
 		return
 	}
@@ -328,7 +315,7 @@ func logExistingSSHPodAtStartup(rc *core.RunCtx, pod *sshPodState) {
 	}
 }
 
-func sshPodLogAttrs(pod *sshPodState, managedBy string) []any {
+func sshPodLogAttrs(pod *clustercheck.Pod, managedBy string) []any {
 	attrs := []any{
 		"pod", sshPodNS + "/" + sshPodName,
 		"phase", pod.Status.Phase,
@@ -345,7 +332,7 @@ func sshPodLogAttrs(pod *sshPodState, managedBy string) []any {
 	return attrs
 }
 
-func stampSSHPodHarness(ctx context.Context, kubeconfig string, rc *core.RunCtx, pod *sshPodState) error {
+func stampSSHPodHarness(ctx context.Context, kubeconfig string, rc *core.RunCtx, pod *clustercheck.Pod) error {
 	ann := sshPodBootstrapAnnotations(rc)
 	if ip := strings.TrimSpace(pod.Status.PodIP); ip != "" {
 		ann[sshPodAnnotPrefix+"pod-ip"] = ip
@@ -353,7 +340,7 @@ func stampSSHPodHarness(ctx context.Context, kubeconfig string, rc *core.RunCtx,
 	if len(ann) == 0 {
 		return nil
 	}
-	if err := kubectlAnnotatePod(ctx, kubeconfig, ann); err != nil {
+	if err := clustercheck.AnnotatePod(ctx, kubeconfig, sshPodReference(), ann); err != nil {
 		return fmt.Errorf("annotate ssh helper pod: %w", err)
 	}
 	return nil
@@ -389,33 +376,16 @@ func deleteSSHPodUID(ctx context.Context, kubeconfig, uid string) error {
 	if uid == "" {
 		return fmt.Errorf("delete ssh helper pod: missing UID")
 	}
-	optsPath, err := writeSSHPodDeleteOptions(uid)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(optsPath) }()
-
-	rawPath := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s", sshPodNS, sshPodName)
 	var lastErr error
 	for attempt := 0; attempt < sshPodDeleteAttempts; attempt++ {
-		out, ok, err := runKubectl(ctx, kubeconfig, "delete", "--raw", rawPath, "-f", optsPath)
-		if err == nil && ok {
+		err := clustercheck.DeletePodWithUID(ctx, kubeconfig, sshPodReference(), uid)
+		if err == nil {
 			return nil
 		}
-		trimmed := strings.TrimSpace(out)
-		if !ok {
-			if strings.Contains(trimmed, "does not match the UID") {
-				return fmt.Errorf("%w: %s", errSSHPodUIDPreconditionFailed, trimmed)
-			}
-			if strings.Contains(trimmed, "NotFound") {
-				return nil
-			}
+		if errors.Is(err, clustercheck.ErrUIDPreconditionFailed) {
+			return fmt.Errorf("%w: %v", errSSHPodUIDPreconditionFailed, err)
 		}
-		if err != nil {
-			lastErr = err
-		} else {
-			lastErr = fmt.Errorf("delete ssh helper pod: %s", trimmed)
-		}
+		lastErr = err
 		if attempt+1 == sshPodDeleteAttempts {
 			break
 		}
@@ -428,49 +398,16 @@ func deleteSSHPodUID(ctx context.Context, kubeconfig, uid string) error {
 		}
 	}
 	return lastErr
-}
-
-func writeSSHPodDeleteOptions(uid string) (string, error) {
-	options := struct {
-		APIVersion    string `json:"apiVersion"`
-		Kind          string `json:"kind"`
-		Preconditions struct {
-			UID string `json:"uid"`
-		} `json:"preconditions"`
-	}{APIVersion: "v1", Kind: "DeleteOptions"}
-	options.Preconditions.UID = uid
-	body, err := json.Marshal(options)
-	if err != nil {
-		return "", err
-	}
-	f, err := os.CreateTemp("", "ssh-pod-delete-*.json")
-	if err != nil {
-		return "", err
-	}
-	if _, err := f.Write(body); err != nil {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(f.Name())
-		return "", err
-	}
-	return f.Name(), nil
 }
 
 func deleteSSHPod(ctx context.Context, kubeconfig string) error {
 	var lastErr error
 	for attempt := 0; attempt < sshPodDeleteAttempts; attempt++ {
-		out, ok, err := runKubectl(ctx, kubeconfig, "delete", "pod", sshPodName, "-n", sshPodNS, "--wait=false", "--ignore-not-found")
-		if err == nil && ok {
+		err := clustercheck.DeletePod(ctx, kubeconfig, sshPodReference())
+		if err == nil {
 			return nil
 		}
-		if err != nil {
-			lastErr = err
-		} else {
-			lastErr = fmt.Errorf("delete ssh helper pod: %s", strings.TrimSpace(out))
-		}
+		lastErr = err
 		if attempt+1 == sshPodDeleteAttempts {
 			break
 		}
@@ -485,7 +422,7 @@ func deleteSSHPod(ctx context.Context, kubeconfig string) error {
 	return lastErr
 }
 
-// --- kubectl helpers ---------------------------------------------------------
+// Resource operations for the shared SSH helper.
 
 // kubeconfigOf returns the first non-empty "kubeconfig" param among trs. Empty
 // means "use the ambient KUBECONFIG / default", so no --kubeconfig flag is added.
@@ -498,108 +435,20 @@ func kubeconfigOf(trs []core.TestRequirement) string {
 	return ""
 }
 
-// runKubectl runs a kubectl command, returning combined stdout, exit-ok, and any
-// exec error. A non-zero exit is reported via ok=false, not err (err is reserved
-// for failing to launch kubectl at all).
-func runKubectl(ctx context.Context, kubeconfig string, args ...string) (out string, ok bool, err error) {
-	full := args
-	if kubeconfig != "" {
-		full = append([]string{"--kubeconfig", kubeconfig}, args...)
-	}
-	cmd := exec.CommandContext(ctx, "kubectl", full...) // #nosec G204 -- kubectl arguments are constructed by the harness.
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	runErr := cmd.Run()
-	if runErr == nil {
-		return buf.String(), true, nil
-	}
-	if _, isExit := runErr.(*exec.ExitError); isExit {
-		return buf.String(), false, nil
-	}
-	return buf.String(), false, runErr
+func sshPodReference() clustercheck.NamespacedName {
+	return clustercheck.NamespacedName{Name: sshPodName, Namespace: sshPodNS}
 }
 
-func kubectlAnnotatePod(ctx context.Context, kubeconfig string, annotations map[string]string) error {
-	if len(annotations) == 0 {
-		return nil
-	}
-	args := []string{"annotate", "pod", sshPodName, "-n", sshPodNS, "--overwrite"}
-	for _, key := range sortedMapKeys(annotations) {
-		args = append(args, key+"="+annotations[key])
-	}
-	out, ok, err := runKubectl(ctx, kubeconfig, args...)
+// createSSHPod creates the helper pod and returns its UID from the API response.
+func createSSHPod(ctx context.Context, kubeconfig, manifest string) (string, error) {
+	pod, err := clustercheck.CreatePod(ctx, kubeconfig, []byte(manifest))
 	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("kubectl annotate: %s", strings.TrimSpace(out))
-	}
-	return nil
-}
-
-func isKubectlAlreadyExists(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "AlreadyExists")
-}
-
-// kubectlCreateSSHPod creates the helper pod and returns its UID from the API response.
-func kubectlCreateSSHPod(ctx context.Context, kubeconfig, manifest string) (string, error) {
-	args := []string{"create", "-f", "-", "-o", "json"}
-	if kubeconfig != "" {
-		args = append([]string{"--kubeconfig", kubeconfig}, args...)
-	}
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	cmd.Stdin = strings.NewReader(manifest)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return "", fmt.Errorf("kubectl create: %w", ctxErr)
-		}
-		return "", fmt.Errorf("kubectl create: %v: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	var pod sshPodState
-	if err := json.Unmarshal(stdout.Bytes(), &pod); err != nil {
-		return "", fmt.Errorf("decode created ssh helper pod: %w", err)
+		return "", err
 	}
 	return strings.TrimSpace(pod.Metadata.UID), nil
 }
 
-// kubectlApply pipes a manifest to `kubectl apply -f -`.
-func kubectlApply(ctx context.Context, kubeconfig, manifest string) error {
-	args := []string{"apply", "-f", "-"}
-	if kubeconfig != "" {
-		args = append([]string{"--kubeconfig", kubeconfig}, args...)
-	}
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	cmd.Stdin = strings.NewReader(manifest)
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("kubectl apply: %v: %s", err, strings.TrimSpace(buf.String()))
-	}
-	return nil
-}
-
-type sshPodState struct {
-	Metadata struct {
-		UID               string            `json:"uid"`
-		DeletionTimestamp string            `json:"deletionTimestamp"`
-		Labels            map[string]string `json:"labels"`
-		Annotations       map[string]string `json:"annotations"`
-	} `json:"metadata"`
-	Status struct {
-		Phase string `json:"phase"`
-		PodIP string `json:"podIP"`
-	} `json:"status"`
-	Spec struct {
-		NodeName string `json:"nodeName"`
-	} `json:"spec"`
-}
-
-func sshPodOnNode(pod *sshPodState, avoidNodes map[string]struct{}) bool {
+func sshPodOnNode(pod *clustercheck.Pod, avoidNodes map[string]struct{}) bool {
 	if pod == nil || pod.Spec.NodeName == "" {
 		return false
 	}
@@ -607,64 +456,35 @@ func sshPodOnNode(pod *sshPodState, avoidNodes map[string]struct{}) bool {
 	return found
 }
 
-// getSSHPod distinguishes absence from API/auth failures; only absence permits
-// creation. A terminating or terminal pod must never pass the readiness check.
-func getSSHPod(ctx context.Context, kubeconfig string) (*sshPodState, error) {
-	out, ok, err := runKubectl(ctx, kubeconfig, "get", "pod", sshPodName, "-n", sshPodNS,
-		"--ignore-not-found", "-o", "json")
-	if err != nil {
-		return nil, fmt.Errorf("get ssh helper pod: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("get ssh helper pod: %w", err)
-	}
-	if !ok {
-		return nil, fmt.Errorf("get ssh helper pod %s/%s: %s", sshPodNS, sshPodName, strings.TrimSpace(out))
-	}
-	if strings.TrimSpace(out) == "" {
+// getSSHPod treats only absence as permission to create the helper.
+func getSSHPod(ctx context.Context, kubeconfig string) (*clustercheck.Pod, error) {
+	pod, err := clustercheck.GetPod(ctx, kubeconfig, sshPodReference())
+	if errors.Is(err, clustercheck.ErrNotFound) {
 		return nil, nil
 	}
-	var pod sshPodState
-	if err := json.Unmarshal([]byte(out), &pod); err != nil {
-		return nil, fmt.Errorf("decode ssh helper pod: %w", err)
+	if err != nil {
+		return nil, fmt.Errorf("get ssh helper pod: %w", err)
 	}
 	return &pod, nil
 }
 
-// sshpassReady checks that the helper image has sshpass on PATH (command -v; the
-// UBI image does not ship which).
+// sshpassReady checks that the helper image has sshpass on PATH.
 func sshpassReady(ctx context.Context, kubeconfig string) bool {
-	_, ok, _ := runKubectl(ctx, kubeconfig, "exec", "-n", sshPodNS, sshPodName, "--",
+	_, err := clustercheck.ExecPod(ctx, kubeconfig, sshPodReference(),
 		"/bin/bash", "-c", "command -v sshpass >/dev/null")
-	return ok
+	return err == nil
 }
 
-// listNamespacesByPrefix returns namespaces whose name starts with prefix.
 func listNamespacesByPrefix(ctx context.Context, kubeconfig, prefix string) ([]string, error) {
-	out, ok, err := runKubectl(ctx, kubeconfig, "get", "ns", "-o", "name")
+	namespaces, err := clustercheck.ListNamespaces(ctx, kubeconfig)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, fmt.Errorf("kubectl get ns failed: %s", strings.TrimSpace(out))
-	}
 	var names []string
-	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
-		name := strings.TrimPrefix(strings.TrimSpace(line), "namespace/")
-		if name != "" && strings.HasPrefix(name, prefix) {
-			names = append(names, name)
+	for _, namespace := range namespaces {
+		if strings.HasPrefix(namespace.Name, prefix) {
+			names = append(names, namespace.Name)
 		}
 	}
 	return names, nil
-}
-
-func deleteNamespace(ctx context.Context, kubeconfig, ns string) error {
-	out, ok, err := runKubectl(ctx, kubeconfig, "delete", "ns", ns, "--wait=false", "--ignore-not-found")
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("kubectl delete ns %s: %s", ns, strings.TrimSpace(out))
-	}
-	return nil
 }

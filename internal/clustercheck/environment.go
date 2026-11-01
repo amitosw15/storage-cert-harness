@@ -26,27 +26,14 @@ func CollectEnvironment(ctx context.Context, cli, scUnderTest string) core.Envir
 
 func collectHardware(ctx context.Context, cli string) core.Hardware {
 	hw := core.Hardware{}
-	var nl struct {
-		Items []struct {
-			Metadata struct {
-				Labels map[string]string `json:"labels"`
-			} `json:"metadata"`
-			Status struct {
-				Capacity map[string]string `json:"capacity"`
-				NodeInfo struct {
-					Architecture string `json:"architecture"`
-					OSImage      string `json:"osImage"`
-				} `json:"nodeInfo"`
-			} `json:"status"`
-		} `json:"items"`
-	}
-	if err := runJSON(ctx, cli, &nl, "get", "nodes", "-o", "json"); err != nil {
+	nodes, err := listNodesWithCLI(ctx, cli)
+	if err != nil {
 		return hw
 	}
-	hw.Nodes = len(nl.Items)
+	hw.Nodes = len(nodes)
 	var arch, osImage, cpu, ram distinct
 	roles := map[string]int{}
-	for _, n := range nl.Items {
+	for _, n := range nodes {
 		arch.add(n.Status.NodeInfo.Architecture)
 		osImage.add(n.Status.NodeInfo.OSImage)
 		cpu.add(n.Status.Capacity["cpu"])

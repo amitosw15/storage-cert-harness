@@ -193,7 +193,7 @@ case "$1 $2" in
  'apply -f') printf '\n---\n' >> "$APPLIED"; /bin/cat >> "$APPLIED" ;;
  'get namespace') ;;
  'create -f') /bin/cat >/dev/null; echo '{"metadata":{"name":"namespace"}}' ;;
- 'get vmi') printf 'Running' ;;
+ 'get vmi') printf '%s\n' '{"status":{"phase":"Running"}}' ;;
  *) exit 1 ;;
 esac
 `
