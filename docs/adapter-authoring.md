@@ -107,8 +107,9 @@ User-supplied template paths remain external inputs.
 ## Kube-burner workload templates
 
 Kube-burner keeps native rendering. `manifest.Native` passes source bytes through
-unchanged, while `snapshotJobInputs` supplies job values as JSON in `SNAPSHOT_JOBS`.
-The config template uses `fromJson` and `range` to construct legacy or batched
+unchanged. Workload definitions select the source directory for `stageConfig`;
+parameter resolution supplies scalar counts and the legacy-mode flag. The native
+config template uses `untilStep` and `range` to construct legacy or batched
 snapshot jobs, including a final partial batch. Raw template YAML is excluded
 from yamllint; tests validate rendered configuration and preserve native sources.
 
