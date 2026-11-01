@@ -118,7 +118,7 @@ func snapshotTemplate(tr core.TestRequirement) ([]byte, error) {
 		return safefs.ReadFile(path)
 	}
 	if tr.ID == "TR-VIRT-018" {
-		return []byte(twoDiskVMTemplate), nil
+		return templates.ReadFile(twoDiskVMTemplatePath)
 	}
 	for _, root := range []string{os.Getenv("VIRTBENCH_REPO"), "/opt/virtbench-runtime", "."} {
 		if root == "" {

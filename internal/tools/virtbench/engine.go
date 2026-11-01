@@ -779,7 +779,11 @@ func stageFIOTemplate(resultsRoot string, tr core.TestRequirement) (string, erro
 	}
 	if template == "" {
 		dst := filepath.Join(resultsRoot, fioVMTemplateFile)
-		if err := safefs.WriteFile(dst, []byte(fioVMTemplate), 0o600); err != nil {
+		source, err := templates.ReadFile(fioVMTemplatePath)
+		if err != nil {
+			return "", err
+		}
+		if err := safefs.WriteFile(dst, source, 0o600); err != nil {
 			return "", fmt.Errorf("stage embedded fio vm template: %w", err)
 		}
 		return filepath.Abs(dst)
