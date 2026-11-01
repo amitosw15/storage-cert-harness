@@ -1,12 +1,25 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: ssh-test-pod
-  namespace: default
+  name: {{ .NAME | quote }}
+  namespace: {{ .NAMESPACE | quote }}
+  {{ if .ANNOTATIONS }}
+  annotations: {{ .ANNOTATIONS | toJson }}
+  {{ end }}
   labels:
     app: kubevirt-perf-test
     managed-by: storage-cert-harness
 spec:
+  {{ if .AVOID_NODES }}
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: NotIn
+                values: {{ .AVOID_NODES | toJson }}
+  {{ end }}
   securityContext:
     runAsNonRoot: true
     runAsUser: 65532

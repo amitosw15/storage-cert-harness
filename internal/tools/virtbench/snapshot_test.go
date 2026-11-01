@@ -2,17 +2,18 @@ package virtbench
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 )
 
 func cloneSnapshotCLI(t *testing.T) string {
@@ -42,6 +43,59 @@ esac
 	return dir
 }
 
+func TestSnapshotTemplatePreservesCustomFieldsAndOriginal(t *testing.T) {
+	source := []byte(`apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: custom
+  annotations: {custom: retained}
+spec:
+  runStrategy: Always
+  template:
+    spec:
+      nodeSelector: {custom: retained}
+  dataVolumeTemplates:
+    - metadata: {name: disk, labels: {custom: retained}}
+      spec:
+        sourceRef: {kind: DataSource, name: original, namespace: images}
+        storage: {storageClassName: fast, resources: {requests: {storage: 30Gi}}}
+    - metadata: {name: blank}
+      spec:
+        source: {blank: {}}
+        storage: {storageClassName: fast}
+`)
+	docs, err := manifest.Documents(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &snapshotClone{Template: docs[0], Snapshots: map[string]cloneSource{"0": {Name: "existing", Namespace: "images"}}}
+	path, err := c.prepare(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := manifest.Documents(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := manifest.Documents(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(c.Template, expected[0]) {
+		t.Fatal("snapshot conversion mutated original VM")
+	}
+	volume := expected[0]["spec"].(map[string]any)["dataVolumeTemplates"].([]any)[0].(map[string]any)["spec"].(map[string]any)
+	delete(volume, "sourceRef")
+	volume["source"] = map[string]any{"snapshot": map[string]any{"name": "existing", "namespace": "images"}}
+	if !reflect.DeepEqual(got[0], expected[0]) {
+		t.Fatalf("conversion changed unrelated fields: %s", data)
+	}
+}
+
 func TestSnapshotCloneUsesExplicitClassAndPreservesBlankDisk(t *testing.T) {
 	dir := cloneSnapshotCLI(t)
 	rc := &core.RunCtx{Backend: &core.ResolvedBackend{StorageClass: "backend", SnapshotClass: "nondefault"}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
@@ -69,13 +123,13 @@ func TestSnapshotCloneUsesExplicitClassAndPreservesBlankDisk(t *testing.T) {
 	}
 	var snapshot struct {
 		Spec struct {
-			Class  string `json:"volumeSnapshotClassName"`
+			Class  string `yaml:"volumeSnapshotClassName"`
 			Source struct {
-				PVC string `json:"persistentVolumeClaimName"`
+				PVC string `yaml:"persistentVolumeClaimName"`
 			} `json:"source"`
 		} `json:"spec"`
 	}
-	if err := json.Unmarshal(data, &snapshot); err != nil {
+	if err := yaml.Unmarshal(data, &snapshot); err != nil {
 		t.Fatal(err)
 	}
 	if snapshot.Spec.Class != "nondefault" || snapshot.Spec.Source.PVC != "source-pvc" {

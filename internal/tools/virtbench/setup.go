@@ -9,12 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
@@ -248,39 +248,19 @@ func sshHelperAvoidNodes(ctx context.Context, kubeconfig string, trs []core.Test
 }
 
 func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[string]string) (string, error) {
-	source, err := templates.ReadFile(sshPodManifestPath)
-	if err != nil {
-		return "", err
-	}
-	manifest := string(source)
-	if len(annotations) > 0 {
-		var ann strings.Builder
-		ann.WriteString("  annotations:\n")
-		for _, key := range sortedMapKeys(annotations) {
-			ann.WriteString("    ")
-			ann.WriteString(key)
-			ann.WriteString(": ")
-			ann.WriteString(strconv.Quote(annotations[key]))
-			ann.WriteByte('\n')
-		}
-		manifest = strings.Replace(manifest, "    managed-by: storage-cert-harness\n", "    managed-by: storage-cert-harness\n"+ann.String(), 1)
-	}
-	if len(avoidNodes) == 0 {
-		return manifest, nil
-	}
 	values := make([]string, 0, len(avoidNodes))
 	for node := range avoidNodes {
 		values = append(values, node)
 	}
 	slices.Sort(values)
-	var affinity strings.Builder
-	affinity.WriteString("  affinity:\n    nodeAffinity:\n      requiredDuringSchedulingIgnoredDuringExecution:\n        nodeSelectorTerms:\n        - matchExpressions:\n          - key: kubernetes.io/hostname\n            operator: NotIn\n            values:\n")
-	for _, node := range values {
-		affinity.WriteString("            - ")
-		affinity.WriteString(strconv.Quote(node))
-		affinity.WriteByte('\n')
+	templateSource, err := templates.ReadFile(sshPodManifestPath)
+	if err != nil {
+		return "", err
 	}
-	return strings.Replace(manifest, "spec:\n", "spec:\n"+affinity.String(), 1), nil
+	rendered, err := manifest.Render(vmRenderer, "ssh-pod.yaml", templateSource, map[string]any{
+		"NAME": sshPodName, "NAMESPACE": sshPodNS, "ANNOTATIONS": annotations, "AVOID_NODES": values,
+	})
+	return string(rendered), err
 }
 
 func sortedMapKeys(m map[string]string) []string {
@@ -451,12 +431,23 @@ func deleteSSHPodUID(ctx context.Context, kubeconfig, uid string) error {
 }
 
 func writeSSHPodDeleteOptions(uid string) (string, error) {
-	body := fmt.Sprintf(`{"apiVersion":"v1","kind":"DeleteOptions","preconditions":{"uid":"%s"}}`, uid)
+	options := struct {
+		APIVersion    string `json:"apiVersion"`
+		Kind          string `json:"kind"`
+		Preconditions struct {
+			UID string `json:"uid"`
+		} `json:"preconditions"`
+	}{APIVersion: "v1", Kind: "DeleteOptions"}
+	options.Preconditions.UID = uid
+	body, err := json.Marshal(options)
+	if err != nil {
+		return "", err
+	}
 	f, err := os.CreateTemp("", "ssh-pod-delete-*.json")
 	if err != nil {
 		return "", err
 	}
-	if _, err := f.WriteString(body); err != nil {
+	if _, err := f.Write(body); err != nil {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
 		return "", err
