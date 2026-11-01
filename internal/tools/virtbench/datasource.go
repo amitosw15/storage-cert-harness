@@ -2,7 +2,6 @@ package virtbench
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -87,27 +86,19 @@ func checkDataSource(ctx context.Context, kubeconfig string, ref cloneSource) er
 		}
 		switch kind {
 		case "pvc":
-			var pvc struct {
-				Status struct {
-					Phase string `json:"phase"`
-				} `json:"status"`
-			}
-			if err := getCloneObject(ctx, kubeconfig, &pvc, "pvc", source); err != nil {
+			pvc, err := clustercheck.GetPVC(ctx, kubeconfig, source)
+			if err != nil {
 				return err
 			}
 			if pvc.Status.Phase != "Bound" {
 				return fmt.Errorf("DataSource PVC %s/%s is not Bound", source.Namespace, source.Name)
 			}
 		case "snapshot":
-			var snap struct {
-				Status struct {
-					Ready bool `json:"readyToUse"`
-				} `json:"status"`
-			}
-			if err := getCloneObject(ctx, kubeconfig, &snap, "volumesnapshot", source); err != nil {
+			snap, err := clustercheck.GetVolumeSnapshot(ctx, kubeconfig, source)
+			if err != nil {
 				return err
 			}
-			if !snap.Status.Ready {
+			if !snap.Status.ReadyToUse {
 				return fmt.Errorf("DataSource snapshot %s/%s is not readyToUse", source.Namespace, source.Name)
 			}
 		default:
@@ -129,32 +120,9 @@ func validDNSName(value string, max int, dots bool) bool {
 	return regexp.MustCompile(pattern).MatchString(value)
 }
 
-type dataSource struct {
-	Spec struct {
-		Source map[string]cloneSource `json:"source"`
-	} `json:"spec"`
-	Status struct {
-		Conditions []struct {
-			Type   string `json:"type"`
-			Status string `json:"status"`
-		} `json:"conditions"`
-	} `json:"status"`
-}
-
-func getCloneObject(ctx context.Context, kubeconfig string, obj any, kind string, source cloneSource) error {
-	if source.Name == "" || source.Namespace == "" {
-		return fmt.Errorf("%s source requires name and namespace", kind)
-	}
-	out, err := clustercheck.SnapshotCommand(ctx, kubeconfig, nil, "get", kind, source.Name, "-n", source.Namespace, "-o", "json")
+func loadDataSource(ctx context.Context, kubeconfig string, ref cloneSource) (clustercheck.DataSource, error) {
+	ds, err := clustercheck.GetDataSource(ctx, kubeconfig, ref)
 	if err != nil {
-		return err
-	}
-	return json.Unmarshal(out, obj)
-}
-
-func loadDataSource(ctx context.Context, kubeconfig string, ref cloneSource) (dataSource, error) {
-	var ds dataSource
-	if err := getCloneObject(ctx, kubeconfig, &ds, "datasource", ref); err != nil {
 		return ds, err
 	}
 	for kind, source := range ds.Spec.Source {

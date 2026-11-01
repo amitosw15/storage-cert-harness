@@ -30,7 +30,7 @@ func TestStorageProfileWaitsForEffectiveDefaults(t *testing.T) {
 				t.Fatal(err)
 			}
 			for line := range strings.Lines(string(commands)) {
-				if strings.TrimSpace(line) != "--kubeconfig /test/kubeconfig get storageprofile storage-cert-snapshot-test -o json" {
+				if strings.TrimSpace(line) != "--kubeconfig /test/kubeconfig get storageprofile storage-cert-snapshot-test -o json --ignore-not-found" {
 					t.Fatalf("readiness check used an unexpected command: %s", line)
 				}
 			}

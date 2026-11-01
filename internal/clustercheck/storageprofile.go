@@ -3,18 +3,21 @@ package clustercheck
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
 
-type storageProfile struct {
-	Status storageProfileStatus `json:"status"`
+// StorageProfile is the effective status projection used by selection and setup.
+type StorageProfile struct {
+	Status StorageProfileStatus `json:"status"`
 }
 
-type storageProfileStatus struct {
-	SnapshotClass     string             `json:"snapshotClass"`
-	ClaimPropertySets []claimPropertySet `json:"claimPropertySets"`
+// StorageProfileStatus retains raw claim sets for lossless copying.
+type StorageProfileStatus struct {
+	SnapshotClass     string            `json:"snapshotClass"`
+	ClaimPropertySets []json.RawMessage `json:"claimPropertySets"`
 }
 
 type claimPropertySet struct {
@@ -31,16 +34,14 @@ func WaitForStorageProfile(ctx context.Context, s SnapshotSelection, name string
 		return fmt.Errorf("StorageProfile %q (source StorageClass %q) is not ready: %s; check the source StorageProfile's claimPropertySets and CDI reconciliation: %w", name, s.StorageClass, strings.Join(issues, "; "), ctx.Err())
 	}
 	for {
-		data, err := SnapshotCommand(ctx, s.Kubeconfig, nil, "get", "storageprofile", name, "-o", "json")
+		profile, err := GetStorageProfile(ctx, s.Kubeconfig, name)
 		if err != nil {
 			if ctx.Err() != nil {
 				return notReady()
 			}
-			return fmt.Errorf("read StorageProfile %q: %w", name, err)
-		}
-		var profile storageProfile
-		if err := json.Unmarshal(data, &profile); err != nil {
-			return fmt.Errorf("decode StorageProfile %q: %w", name, err)
+			if !errors.Is(err, ErrNotFound) {
+				return err
+			}
 		}
 		issues = nil
 		if profile.Status.SnapshotClass != s.SnapshotClass {
@@ -49,7 +50,11 @@ func WaitForStorageProfile(ctx context.Context, s SnapshotSelection, name string
 		if len(profile.Status.ClaimPropertySets) == 0 {
 			issues = append(issues, "missing status.claimPropertySets with volumeMode and accessModes")
 		}
-		for i, properties := range profile.Status.ClaimPropertySets {
+		for i, raw := range profile.Status.ClaimPropertySets {
+			var properties claimPropertySet
+			if err := json.Unmarshal(raw, &properties); err != nil {
+				return fmt.Errorf("decode StorageProfile %q claimPropertySets[%d]: %w", name, i, err)
+			}
 			if properties.VolumeMode == "" {
 				issues = append(issues, fmt.Sprintf("missing status.claimPropertySets[%d].volumeMode", i))
 			}
