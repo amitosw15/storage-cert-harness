@@ -112,6 +112,11 @@ Kube-burner uses `manifest.Native` to preserve workload template bytes for its o
 Its harness-owned StorageClass and StorageProfile setup uses `manifest.GoTemplate`
 with sources under `templates/shared/setup/`; these are applied by the harness
 and are not staged as native kube-burner workload templates.
+
+Storage setup waits for the private StorageProfile to expose the requested
+snapshot class and complete effective volume/access modes. Readiness checks live
+in `clustercheck`; the KB adapter owns creation, patching, deadlines, logging,
+and cleanup. Incomplete profiles produce a provisioning error in the report.
 Kube-burner-ocp owns its templates inside the released CLI and needs no harness
 rendering call; any future local templates use the same native renderer.
 Workload definitions select the template directory for KB's generic `stageConfig`.

@@ -93,6 +93,9 @@ func (provisioner) Provision(ctx context.Context, rc *core.RunCtx, bag *core.Bag
 		created, err := prepareVMStorage(ctx, selection)
 		bag.Set("snapshot_storage_class", created)
 		if err != nil {
+			if rc.Logger != nil {
+				rc.Logger.Error("kube-burner: storage setup failed", "storage_class", selection.StorageClass, "storage_profile", created, "err", err)
+			}
 			return fmt.Errorf("prepare snapshot storage: %w", err)
 		}
 	}
