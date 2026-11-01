@@ -113,6 +113,24 @@ config template uses `untilStep` and `range` to construct legacy or batched
 snapshot jobs, including a final partial batch. Raw template YAML is excluded
 from yamllint; tests validate rendered configuration and preserve native sources.
 
+## Kube-burner storage setup
+
+Private StorageClass and StorageProfile setup is owned by the harness and uses
+`manifest.GoTemplate`, independently of kube-burner's native workload rendering.
+Templates live under `templates/shared/setup/`. They preserve provisioning
+fields and claim defaults while replacing metadata and omitting copied status.
+The created StorageClass name is retained on later failure so cleanup can remove
+it without modifying the backend's original resources. Tests cover preservation,
+omitted defaults, and cleanup after partial failure.
+
+Before creating VM disks, setup calls `clustercheck.WaitForStorageProfile` to
+wait for the private StorageProfile to report
+the selected snapshot class and complete claim properties with `volumeMode` and
+nonempty `accessModes`. Incomplete effective defaults are allowed to reconcile
+within the setup deadline. A timeout logs the source class, private profile and
+missing fields, and returns a provisioning error for the normal report reason.
+The generated class remains available to teardown for cleanup.
+
 ## Multi-scenario tools = a scenario table
 
 Some tools expose several subcommands, each mapping to a different TR and (often)

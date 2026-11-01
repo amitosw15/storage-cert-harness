@@ -1,0 +1,5 @@
+{{ omit .STORAGE_CLASS "metadata" "status" | toYaml }}
+metadata:
+  generateName: storage-cert-snapshot-
+  labels:
+    app.kubernetes.io/managed-by: storage-cert-harness
