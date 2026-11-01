@@ -1,0 +1,8 @@
+{
+  "spec": {
+    "snapshotClass": {{ .SNAPSHOT_CLASS | mustToJson }}
+    {{ with .CLAIM_PROPERTY_SETS }},
+    "claimPropertySets": {{ . | mustToJson }}
+    {{ end }}
+  }
+}

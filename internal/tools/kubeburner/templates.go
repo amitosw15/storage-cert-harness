@@ -6,5 +6,7 @@ import "embed"
 var templates embed.FS
 
 const (
-	workloadTemplatesDir = "templates/shared"
+	workloadTemplatesDir            = "templates/shared"
+	storageClassTemplatePath        = "templates/shared/setup/storageclass.yaml"
+	storageProfilePatchTemplatePath = "templates/shared/setup/storageprofile-patch.yaml"
 )
