@@ -105,6 +105,11 @@ func TestDataSourceSelection(t *testing.T) {
 	}{
 		{"fedora-nas", imageNamespace, "fedora-nas", false},
 		{"images/rhel9-nas", "images", "rhel9-nas", false},
+		{"images/rhel9.nas", "images", "rhel9.nas", false},
+		{strings.Repeat("a", 253), imageNamespace, strings.Repeat("a", 253), false},
+		{strings.Repeat("a", 254), "", "", true},
+		{strings.Repeat("n", 64) + "/name", "", "", true},
+		{"invalid.namespace/name", "", "", true},
 		{"a..b", "", "", true}, {"a.-b", "", "", true}, {"/name", "", "", true}, {"ns/", "", "", true}, {"ns/a/b", "", "", true}, {"Upper", "", "", true}, {"bad_ns/name", "", "", true},
 	} {
 		t.Run(tt.value, func(t *testing.T) {

@@ -3,8 +3,9 @@ package virtbench
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
@@ -24,7 +25,7 @@ func parseDataSource(value string) (cloneSource, error) {
 	default:
 		return ref, fmt.Errorf("datasource %q: use name or namespace/name", value)
 	}
-	if !validDNSName(ref.Name, 253, true) || !validDNSName(ref.Namespace, 63, false) {
+	if len(validation.IsDNS1123Subdomain(ref.Name)) != 0 || len(validation.IsDNS1123Label(ref.Namespace)) != 0 {
 		return ref, fmt.Errorf("datasource %q: invalid Kubernetes name or namespace; use name or namespace/name", value)
 	}
 	return ref, nil
@@ -107,17 +108,6 @@ func checkDataSource(ctx context.Context, kubeconfig string, ref cloneSource) er
 		return nil
 	}
 	return fmt.Errorf("DataSource %s/%s has no PVC or snapshot source", ref.Namespace, ref.Name)
-}
-
-func validDNSName(value string, max int, dots bool) bool {
-	if len(value) == 0 || len(value) > max {
-		return false
-	}
-	pattern := `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	if dots {
-		pattern = `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
-	}
-	return regexp.MustCompile(pattern).MatchString(value)
 }
 
 func loadDataSource(ctx context.Context, kubeconfig string, ref cloneSource) (clustercheck.DataSource, error) {
