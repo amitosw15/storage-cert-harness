@@ -20,7 +20,11 @@ func prepareVMStorage(ctx context.Context, s clustercheck.SnapshotSelection) (cr
 	if err := json.Unmarshal(sourceData, &sc); err != nil {
 		return "", err
 	}
-	data, err := manifest.Render(manifest.GoTemplate{}, "storageclass.yaml", []byte(storageClassTemplate), map[string]any{"STORAGE_CLASS": sc})
+	templateSource, err := templates.ReadFile(storageClassTemplatePath)
+	if err != nil {
+		return "", err
+	}
+	data, err := manifest.Render(manifest.GoTemplate{}, "storageclass.yaml", templateSource, map[string]any{"STORAGE_CLASS": sc})
 	if err != nil {
 		return "", err
 	}
@@ -58,7 +62,11 @@ func prepareVMStorage(ctx context.Context, s clustercheck.SnapshotSelection) (cr
 	if err := json.Unmarshal(sourceData, &source); err != nil {
 		return created, err
 	}
-	patch, err := manifest.Render(manifest.GoTemplate{}, "storageprofile-patch.yaml", []byte(storageProfilePatchTemplate), map[string]any{
+	templateSource, err = templates.ReadFile(storageProfilePatchTemplatePath)
+	if err != nil {
+		return created, err
+	}
+	patch, err := manifest.Render(manifest.GoTemplate{}, "storageprofile-patch.yaml", templateSource, map[string]any{
 		"SNAPSHOT_CLASS": s.SnapshotClass, "CLAIM_PROPERTY_SETS": source.Status.ClaimPropertySets,
 	})
 	if err != nil {

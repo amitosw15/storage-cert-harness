@@ -395,8 +395,9 @@ func vmSourceTemplate(ctx context.Context, tr core.TestRequirement) ([]byte, boo
 		data, err := safefs.ReadFile(path)
 		return data, false, err
 	}
-	if sc.Template.Source != "" {
-		return []byte(sc.Template.Source), true, nil
+	if sc.Template.Embedded != "" {
+		data, err := templates.ReadFile(sc.Template.Embedded)
+		return data, true, err
 	}
 	data, err := runtimeTemplate(ctx, sc.Template.Upstream)
 	return data, true, err

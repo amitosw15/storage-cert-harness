@@ -180,7 +180,11 @@ func (c *snapshotClone) prepare(ctx context.Context, root string) (string, error
 		if !ok {
 			continue
 		}
-		data, err := manifest.Render(vmRenderer, "volume-snapshot.yaml", []byte(volumeSnapshotTemplate), map[string]any{
+		templateSource, err := templates.ReadFile(volumeSnapshotTemplatePath)
+		if err != nil {
+			return "", err
+		}
+		data, err := manifest.Render(vmRenderer, "volume-snapshot.yaml", templateSource, map[string]any{
 			"NAMESPACE": source.Namespace, "PVC_NAME": source.Name, "SNAPSHOT_CLASS": c.Selection.SnapshotClass,
 		})
 		if err != nil {
@@ -202,7 +206,11 @@ func (c *snapshotClone) prepare(ctx context.Context, root string) (string, error
 		}
 		c.Snapshots[strconv.Itoa(i)] = made.Metadata
 	}
-	data, err := manifest.Render(vmRenderer, "snapshot-vm.yaml", []byte(snapshotVMTemplate), map[string]any{"VM": c.Template, "SNAPSHOTS": c.Snapshots})
+	templateSource, err := templates.ReadFile(snapshotVMTemplatePath)
+	if err != nil {
+		return "", err
+	}
+	data, err := manifest.Render(vmRenderer, "snapshot-vm.yaml", templateSource, map[string]any{"VM": c.Template, "SNAPSHOTS": c.Snapshots})
 	if err != nil {
 		return "", err
 	}

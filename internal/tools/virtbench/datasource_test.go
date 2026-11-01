@@ -88,7 +88,7 @@ func TestDataSourceAppliedAtEveryCLIProvisioningBoundary(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(twoDiskVMTemplate), 0o600); err != nil {
+		if err := os.WriteFile(path, []byte(embeddedTemplateForTest(t, twoDiskVMTemplatePath)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -171,7 +171,7 @@ func TestManifestRejectsOverwritingCustomSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := filepath.Join(dir, "datasource-clone-vm.yaml")
-	if err := os.WriteFile(source, []byte(twoDiskVMTemplate), 0o600); err != nil {
+	if err := os.WriteFile(source, []byte(embeddedTemplateForTest(t, twoDiskVMTemplatePath)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := prepareManifest(t.Context(), manifestRequest{Directory: root, Args: []string{"datasource-clone", "--storage-class", "fast", "--vm-template", source}})
@@ -179,7 +179,7 @@ func TestManifestRejectsOverwritingCustomSource(t *testing.T) {
 		t.Fatal("source overwrite accepted", err)
 	}
 	original, err := os.ReadFile(source)
-	if err != nil || string(original) != twoDiskVMTemplate {
+	if err != nil || string(original) != embeddedTemplateForTest(t, twoDiskVMTemplatePath) {
 		t.Fatal("source changed", err)
 	}
 }
@@ -199,7 +199,7 @@ esac
 		t.Fatal(err)
 	}
 	source := filepath.Join(root, "custom.yaml")
-	original := failureRecoveryVMTemplate
+	original := embeddedTemplateForTest(t, failureRecoveryVMTemplatePath)
 	if err := os.WriteFile(source, []byte(original), 0o600); err != nil {
 		t.Fatal(err)
 	}

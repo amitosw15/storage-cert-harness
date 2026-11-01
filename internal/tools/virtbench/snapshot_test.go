@@ -240,7 +240,7 @@ func TestSnapshotCloneLocalDataSourceNamespaces(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := cloneSnapshotCLI(t)
 			t.Setenv("TEST_DATASOURCE", `{"spec":{"source":`+tt.backing+`}}`)
-			template := strings.Replace(twoDiskVMTemplate, "namespace: openshift-virtualization-os-images", "", 1)
+			template := strings.Replace(embeddedTemplateForTest(t, twoDiskVMTemplatePath), "namespace: openshift-virtualization-os-images", "", 1)
 			path := filepath.Join(dir, "local.yaml")
 			if err := os.WriteFile(path, []byte(template), 0600); err != nil {
 				t.Fatal(err)

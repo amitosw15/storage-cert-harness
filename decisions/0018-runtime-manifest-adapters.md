@@ -58,5 +58,5 @@ final artifact directly to execution validation. CLI argument builders perform
 no staging IO.
 
 KB storage setup is harness-owned and uses the shared Go renderer with templates
-under `templates/TR-VIRT-010/setup/`. Runtime YAML decoding uses
+under `templates/shared/setup/`. Runtime YAML decoding uses
 `manifest.Documents`; typed JSON API requests use standard JSON encoding.
