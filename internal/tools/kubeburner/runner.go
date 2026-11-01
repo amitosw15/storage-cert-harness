@@ -62,7 +62,11 @@ func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []cor
 	if err := safefs.MkdirAll(subdir, 0o755); err != nil {
 		return stages.RunHandle{}, err
 	}
-	if _, err := writeConfig(subdir, p); err != nil {
+	config, err := stageConfig(subdir, scenarioFor(tr.ID).TemplateDir)
+	if err != nil {
+		return stages.RunHandle{}, err
+	}
+	if err := prepareSnapshotConfig(filepath.Join(subdir, config), p); err != nil {
 		return stages.RunHandle{}, err
 	}
 	cmd, err := buildRunCmd(ctx, rc, buildEnv(p, sc), resultsDir, tr.ID)

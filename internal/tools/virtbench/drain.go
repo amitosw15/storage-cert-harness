@@ -12,7 +12,6 @@ package virtbench
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -25,14 +24,15 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 )
 
-//go:embed templates/rhel9-vm-drain.yaml
-var drainVMTemplate string
-
 // renderDrainVMTemplate injects the drain target node into the embedded
 // template's soft nodeAffinity. virtbench substitutes {{STORAGE_CLASS_NAME}}
 // itself, but never sees the target node, so the harness fills it in here.
-func renderDrainVMTemplate(target string) string {
-	return strings.ReplaceAll(drainVMTemplate, "{{TARGET_NODE}}", target)
+func renderDrainVMTemplate(target string) (string, error) {
+	source, err := templates.ReadFile(drainVMTemplatePath)
+	if err != nil {
+		return "", err
+	}
+	return strings.ReplaceAll(string(source), "{{TARGET_NODE}}", target), nil
 }
 
 const (
@@ -102,8 +102,14 @@ func drainProvision(ctx context.Context, rc *core.RunCtx, _ *core.Bag, tr core.T
 	tmplPath := filepath.Join(resultsRoot, drainTemplateFile)
 	if custom := strParamOr(tr, "vm_template", ""); custom != "" {
 		tmplPath = custom
-	} else if err := safefs.WriteFile(tmplPath, []byte(renderDrainVMTemplate(target)), 0o600); err != nil {
-		return fmt.Errorf("virtbench: drain: write vm template: %w", err)
+	} else {
+		source, err := renderDrainVMTemplate(target)
+		if err != nil {
+			return err
+		}
+		if err := safefs.WriteFile(tmplPath, []byte(source), 0o600); err != nil {
+			return fmt.Errorf("virtbench: drain: write vm template: %w", err)
+		}
 	}
 
 	args, err := drainCloneArgs(rc, tr, resultsRoot, tmplPath, nsPrefix)

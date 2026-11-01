@@ -12,7 +12,6 @@
 package virtbench
 
 import (
-	_ "embed"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -28,9 +27,6 @@ const (
 	// TestCloneAtScaleArgsStagedTemplateHasTwoDataVolumes).
 	cloneAtScaleDefaultDisks = 2
 )
-
-//go:embed templates/rhel9-vm-2disk.yaml
-var twoDiskVMTemplate string
 
 // cloneAtScaleArgs is TR-VIRT-018's BuildArgs: the same shape as
 // datasourceCloneArgs (start/end, storage class, namespace-prefix,
@@ -76,7 +72,11 @@ func stageCloneAtScaleTemplate(resultsRoot string, tr core.TestRequirement) (str
 		return stageTemplate(resultsRoot, tmpl)
 	}
 	dst := filepath.Join(resultsRoot, twoDiskVMTemplateFile)
-	if err := safefs.WriteFile(dst, []byte(twoDiskVMTemplate), 0o600); err != nil {
+	source, err := templates.ReadFile(twoDiskVMTemplatePath)
+	if err != nil {
+		return "", err
+	}
+	if err := safefs.WriteFile(dst, source, 0o600); err != nil {
 		return "", fmt.Errorf("stage embedded 2-disk vm template: %w", err)
 	}
 	return filepath.Abs(dst)

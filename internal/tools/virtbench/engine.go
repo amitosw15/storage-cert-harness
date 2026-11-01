@@ -25,7 +25,6 @@ package virtbench
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -58,13 +57,6 @@ const (
 )
 
 const fioVMTemplateFile = "fio-vm-template.yaml"
-
-// fioVMTemplate is compiled into the harness so live FIO runs do not depend on
-// the source repository being mounted or on a plan knowing an internal path.
-// A plan may still provide fio_vm_template to use a custom VM definition.
-//
-//go:embed assets/fio-vm-template.yaml
-var fioVMTemplate string
 
 // teardownBudget bounds the best-effort cleanup, which runs on a fresh context so
 // it still happens when the run ctx was cancelled.
@@ -787,7 +779,11 @@ func stageFIOTemplate(resultsRoot string, tr core.TestRequirement) (string, erro
 	}
 	if template == "" {
 		dst := filepath.Join(resultsRoot, fioVMTemplateFile)
-		if err := safefs.WriteFile(dst, []byte(fioVMTemplate), 0o600); err != nil {
+		source, err := templates.ReadFile(fioVMTemplatePath)
+		if err != nil {
+			return "", err
+		}
+		if err := safefs.WriteFile(dst, source, 0o600); err != nil {
 			return "", fmt.Errorf("stage embedded fio vm template: %w", err)
 		}
 		return filepath.Abs(dst)
