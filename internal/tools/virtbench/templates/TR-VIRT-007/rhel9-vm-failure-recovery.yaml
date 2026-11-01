@@ -1,15 +1,15 @@
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: {{VM_NAME}}
-  namespace: {{NAMESPACE}}
+  name: {{ .VM_NAME | quote }}
+  namespace: {{ .NAMESPACE | quote }}
   labels:
     app: kubevirt-perf-test
     managed-by: storage-cert-harness
 spec:
   dataVolumeTemplates:
     - metadata:
-        name: "{{VM_NAME}}-volume"
+        name: {{ printf "%s-volume" .VM_NAME | quote }}
       spec:
         sourceRef:
           kind: DataSource
@@ -21,7 +21,7 @@ spec:
           resources:
             requests:
               storage: 30Gi
-          storageClassName: {{STORAGE_CLASS_NAME}}
+          storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
           volumeMode: Block
   runStrategy: Always
   template:
@@ -37,7 +37,7 @@ spec:
       # Required at scheduling so VMs land on the target node. The custom
       # virtbench FAR mode removes this selector before fencing.
       nodeSelector:
-        kubernetes.io/hostname: {{HOSTNAME_LABEL}}
+        kubernetes.io/hostname: {{ .HOSTNAME_LABEL | quote }}
       domain:
         cpu:
           cores: 1
@@ -69,7 +69,7 @@ spec:
       volumes:
         - name: rootdisk
           dataVolume:
-            name: "{{VM_NAME}}-volume"
+            name: {{ printf "%s-volume" .VM_NAME | quote }}
         - name: cloudinitdisk
           cloudInitNoCloud:
             userData: |

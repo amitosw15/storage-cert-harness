@@ -11,4 +11,7 @@ const (
 	twoDiskVMTemplatePath         = "templates/TR-VIRT-018/rhel9-vm-2disk.yaml"
 	failureRecoveryVMTemplatePath = "templates/TR-VIRT-007/rhel9-vm-failure-recovery.yaml"
 	sshPodManifestPath            = "templates/shared/ssh-pod.yaml"
+	namespaceTemplatePath         = "templates/shared/namespace.yaml"
+	volumeSnapshotTemplatePath    = "templates/shared/volume-snapshot.yaml"
+	snapshotVMTemplatePath        = "templates/shared/snapshot-vm.yaml"
 )
