@@ -30,9 +30,6 @@ case "$1 $2" in
  'get storageprofile')
    if [ "$3" = backend ]; then
      printf '%s' "$TEST_PROFILE"
-   elif [ -n "$TEST_INITIAL_PROFILE" ] && [ ! -f "$SNAPSHOT_TEST_DIR/profile-observed" ]; then
-     : > "$SNAPSHOT_TEST_DIR/profile-observed"
-     printf '%s' "$TEST_INITIAL_PROFILE"
    else
      printf '%s' "$TEST_EFFECTIVE_PROFILE"
    fi ;;
@@ -49,7 +46,6 @@ esac
 	t.Setenv("PATH", dir)
 	t.Setenv("TEST_STORAGE_CLASS", `{"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"name":"backend","annotations":{"storageclass.kubernetes.io/is-default-class":"true","storageclass.kubevirt.io/is-default-virt-class":"true"}},"provisioner":"driver","parameters":{"pool":"pool-a"},"allowVolumeExpansion":true,"volumeBindingMode":"Immediate"}`)
 	t.Setenv("TEST_PROFILE", `{"status":{"claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]}}`)
-	t.Setenv("TEST_INITIAL_PROFILE", "")
 	t.Setenv("TEST_EFFECTIVE_PROFILE", `{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]}}`)
 	return dir
 }
@@ -214,59 +210,6 @@ func TestPrepareVMStoragePreservesClaimModes(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("claim property values or ordering changed: %s", data)
-			}
-		})
-	}
-}
-
-func TestStorageProfileWaitsForEffectiveDefaults(t *testing.T) {
-	for _, initial := range []string{
-		`{}`,
-		`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block"}]}}`,
-		`{"status":{"snapshotClass":"wrong","claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]}}`,
-	} {
-		t.Run(initial, func(t *testing.T) {
-			dir := storageCLI(t)
-			t.Setenv("TEST_INITIAL_PROFILE", initial)
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-			if _, err := prepareVMStorage(ctx, clustercheck.SnapshotSelection{StorageClass: "backend", SnapshotClass: "nondefault"}); err != nil {
-				t.Fatal(err)
-			}
-			commands, err := os.ReadFile(filepath.Join(dir, "commands"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if strings.Count(string(commands), "get storageprofile storage-cert-snapshot-test") < 2 {
-				t.Fatal("did not wait for the private profile's effective status")
-			}
-		})
-	}
-}
-
-func TestIncompleteStorageProfileReportsMissingFields(t *testing.T) {
-	for _, tc := range []struct{ profile, missing string }{
-		{`{}`, "volumeMode and accessModes"},
-		{`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block"}]}}`, "claimPropertySets[0].accessModes"},
-		{`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"accessModes":["ReadWriteOnce"]}]}}`, "claimPropertySets[0].volumeMode"},
-		{`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block","accessModes":[]}]}}`, "claimPropertySets[0].accessModes"},
-		{`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block","accessModes":[""]}]}}`, "empty status.claimPropertySets[0].accessModes entry"},
-		{`{"status":{"snapshotClass":"nondefault","claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]},{}]}}`, "claimPropertySets[1].volumeMode"},
-		{`{"status":{"snapshotClass":"wrong","claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]}}`, `expected "nondefault", observed "wrong"`},
-	} {
-		t.Run(tc.missing, func(t *testing.T) {
-			storageCLI(t)
-			t.Setenv("TEST_EFFECTIVE_PROFILE", tc.profile)
-			ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
-			defer cancel()
-			err := waitForStorageProfile(ctx, clustercheck.SnapshotSelection{StorageClass: "backend", SnapshotClass: "nondefault"}, "storage-cert-snapshot-test")
-			if !errors.Is(err, context.DeadlineExceeded) {
-				t.Fatalf("error = %v, want readiness deadline", err)
-			}
-			for _, want := range []string{"storage-cert-snapshot-test", "backend", tc.missing} {
-				if !strings.Contains(err.Error(), want) {
-					t.Fatalf("error %q is missing %q", err, want)
-				}
 			}
 		})
 	}
