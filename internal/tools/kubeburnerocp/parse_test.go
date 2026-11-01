@@ -9,6 +9,7 @@ import (
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/registry"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/report"
 )
 
 func readFixtures(t *testing.T, workload string, names ...string) map[string][]byte {
@@ -209,5 +210,35 @@ func TestPVCDensityRequiresVerifiedWait(t *testing.T) {
 	}
 	if res.Checks[pvcBoundCheck] != core.OutcomeFail {
 		t.Fatal("unchecked readiness must not pass")
+	}
+}
+
+func TestPVCDensityUncoveredScaleBlocksCertification(t *testing.T) {
+	data := readFixtures(t, "pvc-density", "jobSummary.json", "pvcLatencyQuantilesMeasurement-pvc-density.json")
+	result, err := ParseResults(WorkloadPVCDensity, "TR-STOR-006", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := 30.0
+	tr := core.TestRequirement{
+		ID: "TR-STOR-006", Params: map[string]any{"iterations": 5},
+		SLAs:   []core.SLA{{Metric: "pvc_bind_latency", Percentile: "p99", Unit: "s"}},
+		Bars:   []core.SLA{{Metric: "pvc_bind_latency", Percentile: "p99", Unit: "s", Operator: "<=", Value: &gate, When: map[string]any{"iterations": 1000}}},
+		Checks: []core.Check{{ID: pvcBoundCheck, Kind: "suite"}},
+	}
+	tool, _ := registry.Get("kube-burner-ocp")
+	verdicts, err := tool.Evaluators[tr.ID].Evaluate(context.Background(), tr, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(verdicts) != 2 || verdicts[0].Outcome != core.OutcomeSkip || !verdicts[0].BlocksCertification || verdicts[1].Outcome != core.OutcomePass {
+		t.Fatalf("expected a blocking SLA skip and passing bound check: %+v", verdicts)
+	}
+	for i := range verdicts {
+		verdicts[i].Level = 3
+	}
+	r := report.Build("uncovered-scale", "2.0", core.Provenance{}, verdicts)
+	if r.Certifiable || r.Summary.CertifiedLevel != 0 {
+		t.Fatalf("an uncovered scale must not earn certification: %+v", r)
 	}
 }
