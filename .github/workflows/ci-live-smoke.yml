@@ -37,6 +37,7 @@ jobs:
       github.repository == 'openshift-storage-cert/storage-cert-harness' &&
       github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       run: ${{ steps.resolve.outputs.run }}
       matrix: ${{ steps.resolve.outputs.matrix }}
@@ -102,6 +103,7 @@ jobs:
       needs.resolve-schedule.result == 'success' &&
       needs.resolve-schedule.outputs.run == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       max-parallel: 1
       matrix:
@@ -195,6 +197,7 @@ jobs:
       contains(fromJSON('["MEMBER","OWNER","COLLABORATOR","MAINTAINER"]'),
         github.event.comment.author_association)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       head_sha: ${{ steps.resolve.outputs.head_sha }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}
@@ -234,6 +237,7 @@ jobs:
     needs: resolve-comment
     if: needs.resolve-comment.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       src_artifact: ${{ steps.meta.outputs.name }}
     steps:
@@ -316,6 +320,7 @@ jobs:
       github.repository == 'openshift-storage-cert/storage-cert-harness' &&
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       head_sha: ${{ steps.resolve.outputs.head_sha }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}
@@ -360,6 +365,7 @@ jobs:
     needs: resolve-dispatch
     if: needs.resolve-dispatch.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       src_artifact: ${{ steps.meta.outputs.name }}
     steps:
