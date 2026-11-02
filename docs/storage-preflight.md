@@ -60,21 +60,26 @@ the source, target, configuration, and storage capabilities. A matching class
 does not prove that a storage-assisted clone will be used, and a mismatch does
 not prove an operation will fail.
 
-When the original source PVC still exists, preflight compares its PV's CSI
-volume identity with the bound snapshot content before using its class. For
-CDI-managed image imports, it can instead infer the class from the
-DataImportCron's recorded import-class annotation, after checking that related
-snapshot and import metadata agree. This is an inference, not proof of physical
-placement; other configurations and sources are possible. Missing,
-inaccessible, or inconsistent provenance leaves the class unknown and produces
-a warning. A ready snapshot can remain usable after its original PVC is deleted.
+For a PVC source, preflight reads the StorageClass directly from the bound PVC.
+For a snapshot source, when the original PVC still exists, it compares that
+PVC's PV CSI volume identity with the bound snapshot content before using its
+class. If that does not establish the class, preflight can infer it for
+CDI-managed image imports from the DataImportCron's recorded import-class
+annotation, after checking that related snapshot and import metadata agree.
+This is an inference, not proof of physical placement; other configurations and
+sources are possible. Missing, inaccessible, or inconsistent provenance leaves
+the class unknown and produces a warning. A ready snapshot can remain usable
+after its original PVC is deleted.
 
-Preflight checks snapshot driver and source volume mode from bound snapshot
-content, and checks cross-namespace CDI clone permissions using the current
-identity. Denied clone authorization blocks the run; an unavailable authorization
-decision produces a warning. For registry imports and uploads requiring scratch,
-preflight checks the resolved scratch class and reports the required Filesystem
-and ReadWriteOnce properties. It does not infer provisioning support from a
+When available, preflight compares the snapshot driver from bound snapshot
+content with the target provisioner: a mismatch is an error for a direct
+snapshot restore and a warning for CDI. It reports the source volume mode, but
+does not validate its compatibility with the target. Preflight also checks
+cross-namespace CDI clone permissions using the current identity. Denied clone
+authorization blocks the run; an unavailable authorization decision produces a
+warning. For registry imports and uploads requiring scratch, preflight checks
+the resolved scratch class and reports the required Filesystem and
+ReadWriteOnce properties. It does not infer provisioning support from a
 StorageProfile alone.
 
 These checks do not prove that provisioning, capacity, backend connectivity,
