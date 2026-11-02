@@ -1,88 +1,131 @@
 # Storage placement and preflight
 
-VM image operations can use storage in three roles: the target disk, an
-existing boot source, and temporary scratch space. These roles can use different
-StorageClasses. Before a certification run, check their effective placement
-against the requirements of the selected scenario. Setting the backend's
-`storage_class` does not automatically move an existing image or configure CDI
-scratch space.
+A VM workload can use three StorageClasses: one for its target disk, one for
+its existing boot image, and one for CDI scratch space. Set the harness
+backend's `storage_class` to the target under test; this does not move the boot
+image or configure scratch storage.
 
-## Select and inspect storage
+## Before a run
 
-| Role | StorageClass selection | What to verify |
-| --- | --- | --- |
-| Target disk | The workload can specify a class. If it does not, the applicable virtualization or Kubernetes default can be used. | The effective target class must be the selected backend's `storage_class`, for the storage under test. |
-| Boot source | A DataSource refers to an existing PVC or snapshot. Its storage was selected when that image was created, potentially using the default at the time. | Inspect the source and select or prepare an image on suitable storage. Changing today's default does not move an existing source. |
-| CDI scratch | Some image imports and uploads need a temporary scratch PVC. CDI selects its class independently, using its configured scratch class or a fallback. | When scratch is required, confirm the effective class can provision a PVC with `Filesystem` volume mode and `ReadWriteOnce` access. Check placement against the scenario. |
+| Storage | What to configure and check |
+| --- | --- |
+| Target | Set the backend `storage_class` to the intended class. If a workload omits a class, OpenShift Virtualization or Kubernetes defaults can apply. |
+| Boot image | Select a ready DataSource backed by a PVC or snapshot suitable for the workload. Its storage was chosen when the image was created, possibly using an earlier default. |
+| CDI scratch | If an import or upload needs scratch space, ensure the selected scratch class supports `Filesystem` and `ReadWriteOnce`. CDI chooses scratch independently of the boot image and target. |
 
-The default virtualization class takes precedence over the Kubernetes default
-when creating a VM disk image. CDI's scratch-class selection has its own
-fallback order. See [KubeVirt's default storage class guidance](https://kubevirt.io/monitoring/runbooks/CDIDefaultStorageClassDegraded.html)
-and the [CDI configuration reference](https://kubevirt.io/cdi-api-reference/v1.59.0/definitions.html).
-The [cluster setup guide](cluster-setup-guide.md#step-3--install-the-csi-driver-and-define-required-storageclasses)
-shows how to configure storage and scratch space.
+Source and scratch storage do not always need to be on the target array, but
+placement can affect both compatibility and results. Confirm the scenario's
+requirements with your storage administrator; matching StorageClass names or
+CSI drivers do not prove that volumes share a backend.
 
-For example, inspect the configured classes and a DataSource with:
+Inspect the relevant configuration:
 
 ```bash
 oc get storageclass
 oc get cdiconfig config -o yaml
-oc get datasource <name> -n <namespace> -o yaml
+oc get datasource <image-name> -n <image-namespace> -o yaml
+oc get storageprofile <target-storage-class> -o yaml
 ```
 
-Follow the DataSource reference to its PVC or snapshot and inspect its storage.
-For a snapshot, the original PVC may no longer exist; inspect the available
-snapshot and snapshot content as well. The effective scratch class is reported
-in `CDIConfig.status.scratchSpaceStorageClass`; CDI can fall back to the
-DataVolume's class when no scratch class is resolved.
+Follow the DataSource to its backing PVC or snapshot. The effective scratch
+class appears in `CDIConfig.status.scratchSpaceStorageClass`; if no scratch
+class is resolved, CDI can fall back to the DataVolume's class. See the
+[cluster setup guide](cluster-setup-guide.md#step-3--install-the-csi-driver-and-define-required-storageclasses),
+[default storage class guidance](https://kubevirt.io/monitoring/runbooks/CDIDefaultStorageClassDegraded.html),
+and [CDI configuration reference](https://kubevirt.io/cdi-api-reference/v1.59.0/definitions.html).
 
-The target must use the intended storage under test. Source and scratch do not
-universally have to use the same physical array as the target, but their
-placement can affect the operation and what a scenario measures. Check the
-scenario's requirements and the storage vendor's configuration. A StorageClass
-name or shared CSI driver alone does not establish which physical array backs a
-volume: different classes can use the same array, and a class can be configured
-to provision from multiple backends.
+### StorageProfile defaults
+
+When a DataVolume omits access modes or volume mode, CDI uses the target
+StorageProfile. Check `status.claimPropertySets` for a combination supported
+by the driver and workload. If it is missing or unsuitable, the administrator
+can set `spec.claimPropertySets`, for example:
+
+```yaml
+spec:
+  claimPropertySets:
+    - accessModes: [ReadWriteMany]
+      volumeMode: Filesystem
+```
+
+This example is not suitable for every driver. Check the reconciled status
+after a change. Deleting a profile does not guarantee CDI will fill in missing
+values when it recreates it.
+
+### NetApp Trident NAS Economy
+
+For an Economy target where snapshot cloning is unsupported, one tested image
+clone configuration is a **PVC source on regular `ontap-nas`** and a target
+StorageProfile with host-assisted copying:
+
+```yaml
+spec:
+  cloneStrategy: copy
+```
+
+Set this on the Economy target's StorageProfile, and select a DataSource whose
+`spec.source.pvc` points to the regular NAS image PVC:
+
+```yaml
+spec:
+  source:
+    pvc:
+      name: <regular-nas-image-pvc>
+      namespace: <image-namespace>
+```
+
+A DataSource backed by a
+snapshot is a different source; choosing it alone does not establish that CDI
+will use a host-assisted PVC copy. The setting applies to other workloads using
+that StorageProfile, so coordinate it with the administrator. Copying can take
+longer than storage-assisted cloning and affect measured VM startup times.
+Validate the full workload: a successful copy does not prove snapshot-based
+operations will work. See the [CDI clone strategy reference](https://github.com/kubevirt/containerized-data-importer/blob/main/doc/storageprofile.md).
+
+For Trident 26.06, the `ontap-nas-economy` snapshot path requires snapshot
+directory access; a disabled setting can produce `snapshots cannot be taken if
+snapdir access is disabled`. Inspect the backend default and the effective
+setting on an existing volume:
+
+```bash
+oc get tridentbackendconfig <backend-name> -n trident -o yaml
+oc get tridentvolume <pv-name> -n trident -o yaml
+```
+
+The backend field is `spec.defaults.snapshotDir`; the Trident volume field is
+`config.snapshotDirectory`. Configure new volumes according to the [Trident
+ONTAP NAS documentation](https://docs.netapp.com/us-en/trident-2606/trident-use/ontap-nas-examples.html).
+Changing the default does not update existing volumes. Economy qtrees can share
+a FlexVol, so coordinate changes to existing pools with the administrator.
+Standard `ontap-nas` uses a different snapshot path. `.snapshot` access is
+vendor-specific, not a Kubernetes PVC or VolumeSnapshot property, and the
+harness does not inspect it. Snapshot creation alone does not establish that
+writable cloning or restore is supported.
 
 ## What preflight checks
 
-Storage preflight inspects the prepared VM, DataVolume, and PVC manifests. It
-checks whether each resolved target class exists and matches the selected
-backend, reporting an error when it does not. For DataVolume `spec.storage`, it
-reports effective defaults from the class's CDI StorageProfile. It does not
-reject explicit settings solely because they differ from profile recommendations.
+- **Target:** checks that each resolved target class exists and matches the
+  backend, reporting an error otherwise. It reports StorageProfile defaults and
+  does not reject explicit settings solely for differing from them.
+- **Source:** checks that the image exists and is ready. It logs a matching
+  source class and warns on a mismatch or unknown class; these findings do not
+  block execution. A different source class may be intentional.
+- **Snapshot compatibility:** compares the bound snapshot's driver with the
+  target provisioner when available. A mismatch is an error for a direct
+  snapshot restore and a warning for CDI. It reports source volume mode but
+  does not validate target compatibility.
+- **Permissions and scratch:** checks cross-namespace clone authorization;
+  denial blocks the run and an unavailable decision produces a warning. For
+  imports or uploads needing scratch, it reports the resolved class and the
+  required `Filesystem` and `ReadWriteOnce` properties.
 
-Source images must exist and be ready. Preflight also investigates their
-original StorageClass: it logs a match as information, and logs a mismatch or
-unknown class as a warning. These source-class findings do not block execution;
-an administrator may intentionally use another class. Clone behavior depends on
-the source, target, configuration, and storage capabilities. A matching class
-does not prove that a storage-assisted clone will be used, and a mismatch does
-not prove an operation will fail.
+For a PVC source, preflight reads its StorageClass directly. For a snapshot,
+it first checks whether the original PVC and bound snapshot content identify
+the same volume. Otherwise, for CDI-managed imports it may infer the class
+from consistent DataImportCron and snapshot metadata. Unknown or inconsistent
+provenance produces a warning; an inference does not prove physical placement.
+A ready snapshot can outlive its source PVC.
 
-For a PVC source, preflight reads the StorageClass directly from the bound PVC.
-For a snapshot source, when the original PVC still exists, it compares that
-PVC's PV CSI volume identity with the bound snapshot content before using its
-class. If that does not establish the class, preflight can infer it for
-CDI-managed image imports from the DataImportCron's recorded import-class
-annotation, after checking that related snapshot and import metadata agree.
-This is an inference, not proof of physical placement; other configurations and
-sources are possible. Missing, inaccessible, or inconsistent provenance leaves
-the class unknown and produces a warning. A ready snapshot can remain usable
-after its original PVC is deleted.
-
-When available, preflight compares the snapshot driver from bound snapshot
-content with the target provisioner: a mismatch is an error for a direct
-snapshot restore and a warning for CDI. It reports the source volume mode, but
-does not validate its compatibility with the target. Preflight also checks
-cross-namespace CDI clone permissions using the current identity. Denied clone
-authorization blocks the run; an unavailable authorization decision produces a
-warning. For registry imports and uploads requiring scratch, preflight checks
-the resolved scratch class and reports the required Filesystem and
-ReadWriteOnce properties. It does not infer provisioning support from a
-StorageProfile alone.
-
-These checks do not prove that provisioning, capacity, backend connectivity,
-admission policies, or a particular clone strategy will work. Validate the actual
-workload and consult the storage vendor when placement or compatibility is in
-question.
+Preflight cannot prove that provisioning, capacity, connectivity, admission, or
+a chosen clone strategy will work. Validate the actual workload with the
+storage configuration and consult the vendor where needed.
