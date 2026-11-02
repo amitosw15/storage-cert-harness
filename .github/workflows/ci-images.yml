@@ -20,6 +20,7 @@ jobs:
     # Report Containerfile policy issues without blocking image publication yet.
     continue-on-error: true
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
       - uses: actions/checkout@v7
       - env:
@@ -28,6 +29,7 @@ jobs:
 
   image-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 4
     needs: [image-lint]
     outputs:
       success: ${{ steps.report-success.outputs.success }}
@@ -61,6 +63,7 @@ jobs:
     # Run on every image build, but do not make the workflow fail.
     continue-on-error: true
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     needs: [image-build]
     steps:
       - uses: actions/checkout@v7
@@ -103,6 +106,7 @@ jobs:
     # Run on every image build, but do not make the workflow fail.
     continue-on-error: true
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     needs: [image-build]
     steps:
       - uses: actions/checkout@v7

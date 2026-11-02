@@ -21,6 +21,7 @@ jobs:
   image-push:
     if: inputs.publish == true
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -46,6 +47,7 @@ jobs:
     if: inputs.publish == true
     needs: [image-push]
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     permissions:
       contents: write
       pull-requests: write
