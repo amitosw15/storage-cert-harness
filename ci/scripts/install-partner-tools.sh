@@ -6,13 +6,16 @@
 #   ./ci/scripts/install-partner-tools.sh          # install missing tools where possible
 #   ./ci/scripts/install-partner-tools.sh --check  # report status only (exit 1 if required tools missing)
 #
+# This is a best-effort installer for the current user. For more control over
+# installation and package management, see "Manual installation by platform"
+# in PARTNER-CERTIFICATION-GUIDE.md.
 # If installation fails, install packages manually for your OS (see PARTNER-CERTIFICATION-GUIDE.md).
 # For Red Hat developer CI tooling (Go, linters, scanners), use ./ci/scripts/install-tools.sh instead.
 #
 # Package management used by this script:
 #   yq, jq     — curl download into ~/.local/bin only (per user; not shared across OS users or shells until PATH is set)
-#   podman     — dnf on Fedora/RHEL; apt on Debian/Ubuntu; brew on macOS
-#   git, make  — not installed automatically; suggests dnf / apt / brew
+#   make, tar, curl, podman — best-effort install via dnf / apt / brew
+#   git        — checked, but must be installed before cloning this repository
 #   oc         — not installed; OpenShift client from Red Hat only
 # Partner yq/jq live under ~/.local/bin only; remove with rm when testing locally.
 set -euo pipefail
@@ -130,6 +133,112 @@ partner_local_jq_ok() {
 	[[ -x "${USER_BIN}/jq" ]] && "${USER_BIN}/jq" --version >/dev/null 2>&1
 }
 
+run_as_admin() {
+	if [[ "$(id -u)" -eq 0 ]]; then
+		"$@"
+	elif have sudo; then
+		sudo "$@"
+	else
+		echo "error: installing system packages requires root or sudo" >&2
+		return 1
+	fi
+}
+
+install_system_package() {
+	local tool="$1"
+	local fam
+	fam="$(os_family)"
+
+	if [[ "${fam}" == "linux" ]] && have dnf; then
+		echo "best-effort: attempting to install ${tool} with dnf (may prompt for sudo)"
+		if run_as_admin dnf install -y "${tool}"; then
+			return 0
+		fi
+	elif [[ "${fam}" == "linux" ]] && have apt-get; then
+		echo "best-effort: attempting to install ${tool} with apt (may prompt for sudo)"
+		local attempt
+		for attempt in 1 2 3 4 5; do
+			if run_as_admin apt-get update -qq && run_as_admin apt-get install -y "${tool}"; then
+				return 0
+			fi
+			if have "${tool}"; then
+				echo "ok  ${tool}  $(command -v "${tool}") (available after apt attempt)"
+				return 0
+			fi
+			if [[ "${attempt}" -lt 5 ]]; then
+				echo "warning: apt operation failed; checking for a concurrent install and retrying shortly." >&2
+				sleep 3
+			fi
+		done
+	elif [[ "${fam}" == "macos" ]] && have brew; then
+		echo "best-effort: attempting to install ${tool} with brew"
+		if brew install "${tool}"; then
+			return 0
+		fi
+	else
+		echo "best-effort automatic installation unavailable for ${tool} on this platform."
+	fi
+
+	if have "${tool}"; then
+		echo "ok  ${tool}  $(command -v "${tool}") (available after package-install attempt)"
+		return 0
+	fi
+	echo "warning: automatic installation of ${tool} did not succeed." >&2
+	suggest_pkg "${tool}"
+	return 1
+}
+
+expose_homebrew_make() {
+	local make_link
+	[[ "$(os_family)" == "macos" ]] && have gmake || return 1
+	ensure_path
+	make_link="${USER_BIN}/make"
+	if [[ -e "${make_link}" || -L "${make_link}" ]]; then
+		have make && return 0
+		return 1
+	fi
+	if ! ln -s "$(command -v gmake)" "${make_link}"; then
+		have make && return 0
+		return 1
+	fi
+	hash -r
+	if have make; then
+		echo "configured make via Homebrew gmake at ${make_link}"
+		return 0
+	fi
+	return 1
+}
+
+ensure_system_tool() {
+	local tool="$1"
+	if have "${tool}"; then
+		echo "ok  ${tool}  $(command -v "${tool}")"
+		return 0
+	fi
+	if [[ "${check_only}" -eq 1 ]]; then
+		echo "missing  ${tool}"
+		return 1
+	fi
+	if [[ "${tool}" == "make" ]] && expose_homebrew_make; then
+		echo "ok  make  $(command -v make)"
+		return 0
+	fi
+	echo "${tool} is not installed."
+	if ! install_system_package "${tool}"; then
+		echo "warning: checking whether ${tool} became available during the failed install attempt." >&2
+	fi
+	if [[ "${tool}" == "make" ]] && expose_homebrew_make; then
+		echo "ok  make  $(command -v make)"
+		return 0
+	fi
+	if have "${tool}"; then
+		echo "ok  ${tool}  $(command -v "${tool}")"
+		return 0
+	fi
+	echo "error: install ${tool} manually, then re-run this script." >&2
+	return 1
+}
+
 install_yq() {
 	local dest="${USER_BIN}/yq"
 	if partner_local_yq_ok; then
@@ -141,7 +250,7 @@ install_yq() {
 		echo "missing  yq  (${dest}; re-run without --check to download)"
 		return 1
 	fi
-	have curl || die "curl is required to download yq"
+	ensure_system_tool curl || return 1
 	local os arch asset url
 	os="$(os_family)"
 	[[ "${os}" == "macos" ]] || [[ "${os}" == "linux" ]] || die "cannot auto-install yq on this OS"
@@ -172,7 +281,7 @@ install_jq() {
 		echo "optional-missing  jq  (${dest}; re-run without --check to download)"
 		return 0
 	fi
-	have curl || die "curl is required to download jq"
+	ensure_system_tool curl || return 1
 	local os mach name url
 	os="$(os_family)"
 	[[ "${os}" == "macos" ]] || [[ "${os}" == "linux" ]] || die "cannot auto-install jq on this OS"
@@ -199,6 +308,24 @@ install_jq() {
 	echo "ok  jq  ${dest}"
 }
 
+ensure_git() {
+	if have git; then
+		echo "ok  git  $(command -v git)"
+		return 0
+	fi
+	echo "missing  git (required to clone this repository)"
+	echo "Install git before cloning; see Manual installation by platform in PARTNER-CERTIFICATION-GUIDE.md."
+	return 1
+}
+
+ensure_make() {
+	ensure_system_tool make
+}
+
+ensure_tar() {
+	ensure_system_tool tar
+}
+
 suggest_pkg() {
 	local tool="$1"
 	local fam
@@ -212,34 +339,6 @@ suggest_pkg() {
 	else
 		echo "  install ${tool} using your OS package manager or vendor documentation"
 	fi
-}
-
-ensure_git() {
-	if have git; then
-		echo "ok  git  $(command -v git)"
-		return 0
-	fi
-	if [[ "${check_only}" -eq 1 ]]; then
-		echo "missing  git"
-		return 1
-	fi
-	echo "git is not installed."
-	suggest_pkg git
-	die "install git, then re-run this script"
-}
-
-ensure_make() {
-	if have make; then
-		echo "ok  make  $(command -v make)"
-		return 0
-	fi
-	if [[ "${check_only}" -eq 1 ]]; then
-		echo "missing  make"
-		return 1
-	fi
-	echo "make is not installed."
-	suggest_pkg make
-	die "install make, then re-run this script"
 }
 
 ensure_python3() {
@@ -265,34 +364,15 @@ ensure_podman() {
 		echo "missing  podman"
 		return 1
 	fi
-	local fam
-	fam="$(os_family)"
-	if [[ "${fam}" == "linux" ]] && have dnf; then
-		echo "installing podman (dnf)"
-		if have sudo; then
-			sudo dnf install -y podman
-		else
-			dnf install -y podman
+	if install_system_package podman && have podman; then
+		echo "ok  podman  $(command -v podman)"
+		if [[ "$(os_family)" == "macos" ]]; then
+			echo "note: you may need: podman machine init && podman machine start"
 		fi
-		echo "ok  podman  $(command -v podman)"
-		return 0
-	fi
-	if [[ "${fam}" == "linux" ]] && have apt-get; then
-		echo "installing podman (apt)"
-		sudo apt-get update -qq
-		sudo apt-get install -y podman
-		echo "ok  podman  $(command -v podman)"
-		return 0
-	fi
-	if [[ "${fam}" == "macos" ]] && have brew; then
-		echo "installing podman (brew); you may need: podman machine init && podman machine start"
-		brew install podman
-		echo "ok  podman  $(command -v podman)"
 		return 0
 	fi
 	echo "podman is required but could not be installed automatically."
-	suggest_pkg podman
-	die "install podman, then re-run this script"
+	return 1
 }
 
 # Run a smoke command for each tool; used after install and with --check.
@@ -398,12 +478,15 @@ print_oc_guidance() {
 }
 
 echo "==> partner host tools  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "notice: best-effort setup; yq/jq go in ~/.local/bin, while make/tar/curl/Podman may use the OS package manager."
+echo "        For more control over installation and package management, see PARTNER-CERTIFICATION-GUIDE.md#manual-installation-by-platform."
 check_platform
 ensure_path
 
 missing_required=0
 ensure_git || missing_required=1
 ensure_make || missing_required=1
+ensure_tar || missing_required=1
 ensure_podman || missing_required=1
 install_yq || missing_required=1
 install_jq || true

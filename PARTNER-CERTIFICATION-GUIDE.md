@@ -135,6 +135,17 @@ you clone the repository or run `make partner-*`.
 | **macOS** (Apple Silicon or Intel) | **Partial** | `oc`, `yq`, and `jq` work; Podman typically needs [Podman Machine](https://podman.io/docs/installation#macos). Not validated for every certification workload. |
 | **Windows** (native, CMD, PowerShell) | **Not supported** | Use a supported Linux VM or bare-metal host instead. WSL2 is not validated for partner runs. |
 
+### Supported OpenShift Container Platform versions
+
+| OCP release | Supported z-streams tested | Notes |
+| --- | --- | --- |
+| **4.22** | `4.22.18`, `4.22.11` | Current 4.22 z-stream releases; 4.22 is in Maintenance. |
+| **4.21** | `4.21.17` | 4.21 z-stream. |
+
+The harness is expected to work with other OCP releases, including the 5.0
+stream, but those releases have not yet been verified for partner
+certification.
+
 ### Tools required by partner Makefile targets
 
 The wrappers `./ci/scripts/run-partner-*.sh` (invoked by `make`) check host
@@ -164,6 +175,10 @@ certification runs must keep host `oc` checks enabled.
 
 ### Obtain the repository
 
+Install Git before cloning; the partner installer checks for Git but does not
+install it. See [Manual installation by platform](#manual-installation-by-platform)
+for package-manager commands.
+
 ```bash
 git clone <your-certification-git-url>/storage-cert-harness.git
 cd storage-cert-harness
@@ -188,17 +203,27 @@ export PATH="${HOME}/.local/bin:${PATH}"
 ./ci/scripts/install-partner-tools.sh --check
 ```
 
-The script can install or verify **git**, **make**, **podman**, **yq**, and
-**jq** (into `~/.local/bin` when needed). It prints guidance for **oc**, which
-you must install from Red Hat (see below). It may use **python3** only to
-report status; partner runs do not require Python.
+The script checks that **git** is present (it must be installed before cloning)
+and makes a best-effort attempt to install or verify **make**, **tar**,
+**curl** (when needed), **podman**, **yq**, and **jq**. It downloads `yq` and
+`jq` into `~/.local/bin` when needed and may use your OS package manager for
+the other tools. It prints guidance for **oc**, which you must install from
+Red Hat (see below). It may use **python3** only to report status; partner
+runs do not require Python.
 
-Package management inside the installer: **podman** via **dnf** (Fedora/RHEL),
-**apt** (Debian/Ubuntu), or **brew** (macOS); **yq** and **jq** via **curl**
-into **`~/.local/bin` only** (per Linux/macOS user, not system-wide). The
-installer **always** (re)downloads **yq** and **jq** there when those files are
-missing, even if `/usr/bin/jq` or an old `yq` exists. Other users or shells do
-not see them until you `export PATH` or run
+> **Notice:** This is a best-effort installer for the current user. It installs
+> `yq` and `jq` under that user's `~/.local/bin` and may use the OS package
+> manager for tools such as `make`, `tar`, `curl`, and Podman. Git must be
+> installed before cloning. For more control over installation and package
+> management, use
+> [Manual installation by platform](#manual-installation-by-platform).
+
+The installer uses **dnf** (Fedora/RHEL), **apt** (Debian/Ubuntu), or **brew**
+(macOS) for system packages; **yq** and **jq** are downloaded via **curl** into
+**`~/.local/bin` only** (per Linux/macOS user, not system-wide). The installer
+downloads **yq** and **jq** there when its partner copies are missing, even if
+`/usr/bin/jq` or an old `yq` exists. Other users or shells do not see them
+until you `export PATH` or run
 `source ./ci/scripts/partner-host-env.sh` in that shell. To remove only the
 partner copies, delete `~/.local/bin/yq` and `~/.local/bin/jq`, then run
 `./ci/scripts/install-partner-tools.sh` again to restore them.
@@ -345,6 +370,18 @@ send both the host log in `logs/` and that profile’s `report/run.log`.
 Use this sequence after the cluster and CSI driver are ready. Mermaid diagrams
 for the full workflow are in **[Workflow overview](#workflow-overview)** at the
 top of this guide. Details for each step are in the numbered sections below.
+
+> **Important: Run certification targets as a non-root user.** Run
+> `make partner-*` as a regular user with rootless Podman, not as `root`.
+> The harness wrappers use Podman's `keep-id` user namespace; when invoked as
+> root this can fail during container setup (for example, `crun` may deny the
+> `sysfs` mount) before certification starts. Use an account with a valid
+> `/etc/subuid` and `/etc/subgid` range, Podman usable by that account, and
+> ownership or explicit access to the repository checkout, kubeconfig,
+> backend configuration, result directories, and required cluster
+> credentials. The account needs the Kubernetes permissions required by the
+> certification plan, but should not need host administrator privileges.
+> Avoid mixing root-owned result directories with rootless runs.
 
 | Step | Command | Success signal |
 | --- | --- | --- |
