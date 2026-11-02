@@ -37,8 +37,9 @@ func TestPreflightSuccessfulSnapshot(t *testing.T) {
 	script := `#!/bin/sh
 case "$2" in
   volumepopulator) echo '{"items":[]}' ;;
-  storageclass) echo '{"provisioner":"test-driver"}' ;;
-  storageprofile) echo '{"status":{"snapshotClass":"test-snapshot"}}' ;;
+  storageclass) echo '{"provisioner":"test-driver","items":[{"metadata":{"name":"test-sc"},"provisioner":"test-driver"}]}' ;;
+  storageprofile) echo '{"status":{"snapshotClass":"test-snapshot","claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]}}' ;;
+  cdiconfig) echo '{"status":{}}' ;;
   volumesnapshotclass) echo '{"driver":"test-driver"}' ;;
 esac
 exit 0
@@ -55,7 +56,7 @@ exit 0
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 10 {
+	if len(got) != 13 {
 		t.Fatalf("findings = %+v, want parameters, storage config, binary, 3 CRDs, storage existence, snapshot class, wait --for=create support, populator", got)
 	}
 	for _, f := range got {

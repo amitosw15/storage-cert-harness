@@ -102,7 +102,7 @@ Annotate a default storage class for OCP/CNV:
 
 ```bash
 oc annotate storageclass <your-storage-class> \
-  storageclass.kubevirt.io/is-default-virt-storageclass="true"
+  storageclass.kubevirt.io/is-default-virt-class="true"
 ```
 
 ### VolumeSnapshotClass
@@ -268,3 +268,60 @@ submission archive described in
 [`PARTNER-CERTIFICATION-GUIDE.md`](../PARTNER-CERTIFICATION-GUIDE.md).
 
 ---
+
+### Storage preflight findings
+
+Storage preflight inspects target disks in prepared VM, DataVolume, and PVC
+manifests. It compares each resolved target StorageClass with the selected
+backend, and reports an error if the disk would use another class or a missing
+class. For DataVolume `spec.storage`, it reports the effective defaults from the
+selected class's CDI StorageProfile. Explicit disk settings are not rejected
+merely because they differ from the profile's recommendations.
+
+Source images must exist and be ready. Investigating their original StorageClass
+is advisory: a match is logged as information; a mismatch or an unknown class is
+logged as a warning and does not block execution. The administrator may intend
+cross-class cloning, which can require host-assisted copying and may affect
+performance. Matching classes do not prove acceleration.
+
+A ready snapshot remains a valid source after its original PVC is deleted.
+When a source PVC survives, preflight checks its PV's CSI volume identity against
+the bound snapshot content before using its class. For CDI-managed image imports,
+it can instead infer the class from the DataImportCron's recorded import-class
+annotation. The snapshot label, current import, last imported PVC, and managed
+DataSource must agree; the snapshot identity and readiness are checked again.
+The finding identifies this as CDI metadata inference. Missing, inaccessible, or
+inconsistent optional provenance leaves the class unknown and produces a warning.
+No storage-vendor resources or opaque volume-handle parsing are used.
+
+Snapshot driver and source volume mode are read from bound snapshot content.
+A shared CSI driver does not establish compatibility across backend types.
+Cross-namespace CDI cloning is checked using the current kubeconfig identity
+and CDI's source permission rules. Permission checks use non-persisted
+SelfSubjectAccessReview requests. Denied clone authorization blocks the run;
+an unavailable authorization decision produces a warning. These checks do not
+prove that all admission policies or subsequent controller operations will pass.
+
+CDI scratch storage may use a different class from source and target storage.
+For registry imports and uploads that require scratch space, preflight reads
+`CDIConfig.status.scratchSpaceStorageClass`, falling back to the target class
+when unset. It checks that the class exists and reports the required Filesystem
+and ReadWriteOnce properties. It does not infer provisioning support from the
+StorageProfile alone. Preflight is read-only; actual provisioning, capacity,
+backend connectivity, and clone acceleration still require a workload test.
+
+Live checks are opt-in tests in `internal/clustercheck`. Set
+`STORAGE_PREFLIGHT_LIVE_KUBECONFIG`, `STORAGE_PREFLIGHT_LIVE_NAS_CLASS`,
+`STORAGE_PREFLIGHT_LIVE_ECONOMY_CLASS`, `STORAGE_PREFLIGHT_LIVE_NAS_SOURCE`, and
+`STORAGE_PREFLIGHT_LIVE_ECONOMY_SOURCE` to run `TestStoragePreflightLive` against
+existing resources. Source values use `namespace/name`.
+
+`TestStoragePreflightPatchedLive` additionally requires
+`STORAGE_PREFLIGHT_LIVE_MUTATIONS=true` and
+`STORAGE_PREFLIGHT_LIVE_SNAPSHOT_CLASS`. It creates disposable namespaces,
+classes, profiles, sources, a small PVC/snapshot, and temporary reader RBAC. It
+covers the source/target/scratch class combinations and patches those fixtures
+to check failures and recovery. Cleanup removes the fixtures even after a test
+failure. Existing defaults, CDI scratch configuration, classes, profiles, and
+boot sources are not modified. These tests validate preflight behavior; they do
+not claim that every class combination can boot an OS or use accelerated clones.

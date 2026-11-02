@@ -110,6 +110,10 @@ func (p preflight) Check(ctx context.Context, rc *core.RunCtx, bag *core.Bag, tr
 			}
 		}
 
+		if dir == "" && storageClass(rc, tr) != "" {
+			findings = append(findings, vmStoragePreflight(ctx, rc, tr)...)
+		}
+
 		if dir == "" && usesSnapshot(tr) && strings.HasPrefix(p.sc.AutomationTool, "virtbench datasource-clone") {
 			clone, err := snapshotClonePreflight(ctx, rc, tr)
 			if err != nil {

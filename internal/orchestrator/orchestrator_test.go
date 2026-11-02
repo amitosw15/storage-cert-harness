@@ -188,3 +188,33 @@ func TestApplyOverridesDoesNotMutateCatalog(t *testing.T) {
 		t.Fatalf("shared catalog params were mutated: %+v", orig)
 	}
 }
+
+type storageFindingProbe struct{ level string }
+
+func (p storageFindingProbe) Check(context.Context, *core.RunCtx, *core.Bag, []core.TestRequirement) ([]core.Finding, error) {
+	return []core.Finding{{Level: p.level, Message: "source and target StorageClasses differ"}}, nil
+}
+
+func TestPreflightStorageFindingsAreLogged(t *testing.T) {
+	for _, level := range []string{"warn", "error"} {
+		t.Run(level, func(t *testing.T) {
+			name := "storage-finding-" + level
+			rec := &recorder{}
+			registry.Register(stages.ToolIntegration{Name: name, Preflight: storageFindingProbe{level: level}, Runner: recRunner{name: name, rec: rec}})
+			var output strings.Builder
+			rc := &core.RunCtx{Logger: slog.New(slog.NewTextHandler(&output, nil)), SetStage: func(string, []core.TestRequirement) {}}
+			tr := core.TestRequirement{ID: "storage-test", AutomationTool: name}
+			runJob(t.Context(), job{tool: name, trs: []core.TestRequirement{tr}}, rc, nil)
+			if !strings.Contains(output.String(), "level="+strings.ToUpper(level)) || !strings.Contains(output.String(), "source and target StorageClasses differ") {
+				t.Fatalf("missing finding: %s", output.String())
+			}
+			wantRuns := 1
+			if level == "error" {
+				wantRuns = 0
+			}
+			if rec.count("job:"+name) != wantRuns {
+				t.Fatalf("runner count=%d; want %d", rec.count("job:"+name), wantRuns)
+			}
+		})
+	}
+}

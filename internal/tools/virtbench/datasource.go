@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
@@ -25,7 +26,7 @@ func parseDataSource(value string) (cloneSource, error) {
 	default:
 		return ref, fmt.Errorf("datasource %q: use name or namespace/name", value)
 	}
-	if !validDNSName(ref.Name, 253, true) || !validDNSName(ref.Namespace, 63, false) {
+	if len(validation.IsDNS1123Subdomain(ref.Name)) != 0 || len(validation.IsDNS1123Label(ref.Namespace)) != 0 {
 		return ref, fmt.Errorf("datasource %q: invalid Kubernetes name or namespace; use name or namespace/name", value)
 	}
 	return ref, nil
@@ -118,17 +119,6 @@ func checkDataSource(ctx context.Context, kubeconfig string, ref cloneSource) er
 	return fmt.Errorf("DataSource %s/%s has no PVC or snapshot source", ref.Namespace, ref.Name)
 }
 
-func validDNSName(value string, max int, dots bool) bool {
-	if len(value) == 0 || len(value) > max {
-		return false
-	}
-	pattern := `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	if dots {
-		pattern = `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
-	}
-	return regexp.MustCompile(pattern).MatchString(value)
-}
-
 type dataSource struct {
 	Spec struct {
 		Source map[string]cloneSource `json:"source"`
@@ -218,7 +208,12 @@ func selectVMSource(data []byte, selection string, defaults bool) ([]byte, []clo
 	return rendered, refs, err
 }
 
-func datasourcePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRequirement) ([]cloneSource, error) {
+type preflightVMTemplate struct {
+	Namespace string
+	Data      []byte
+}
+
+func preflightVMTemplates(ctx context.Context, rc *core.RunCtx, tr core.TestRequirement) ([]preflightVMTemplate, error) {
 	source, defaults, err := vmSourceTemplate(ctx, tr)
 	if err != nil {
 		return nil, err
@@ -241,20 +236,36 @@ func datasourcePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRequi
 	values["TARGET_NODE"] = strParamOr(tr, "target_node", "")
 	values["NODE_NAME"] = strParamOr(tr, "node", "")
 	values["HOSTNAME_LABEL"] = strParamOr(tr, "node_hostname_label", "")
-	var refs []cloneSource
+	var prepared []preflightVMTemplate
 	for _, ns := range namespaces {
 		values["NAMESPACE"] = ns
 		rendered, err := renderVMTemplate("datasource-preflight.yaml", source, values)
 		if err != nil {
 			return nil, err
 		}
-		_, found, err := selectVMSource(rendered, strParamOr(tr, "datasource", ""), defaults)
+		rendered, _, err = selectVMSource(rendered, strParamOr(tr, "datasource", ""), defaults)
+		if err != nil {
+			return nil, err
+		}
+		prepared = append(prepared, preflightVMTemplate{Namespace: ns, Data: rendered})
+	}
+	return prepared, nil
+}
+
+func datasourcePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRequirement) ([]cloneSource, error) {
+	prepared, err := preflightVMTemplates(ctx, rc, tr)
+	if err != nil {
+		return nil, err
+	}
+	var refs []cloneSource
+	for _, vm := range prepared {
+		_, found, err := selectVMSource(vm.Data, "", false)
 		if err != nil {
 			return nil, err
 		}
 		for _, ref := range found {
 			if ref.Namespace == "" {
-				ref.Namespace = ns
+				ref.Namespace = vm.Namespace
 			}
 			refs = append(refs, ref)
 		}
@@ -275,4 +286,21 @@ func datasourcePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRequi
 		unique = append(unique, ref)
 	}
 	return unique, nil
+}
+
+func vmStoragePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRequirement) []core.Finding {
+	prepared, err := preflightVMTemplates(ctx, rc, tr)
+	if err != nil {
+		return nil
+	}
+	var requests []clustercheck.StorageRequest
+	for _, vm := range prepared {
+		disks, err := clustercheck.StorageRequests(vm.Data, storageClass(rc, tr), vm.Namespace)
+		if err != nil {
+			return []core.Finding{{Level: "error", Message: tr.ID + " storage: " + err.Error()}}
+		}
+		requests = append(requests, disks...)
+	}
+	clustercheck.LabelStorageRequests(requests, tr)
+	return clustercheck.CheckStorage(ctx, strParamOr(tr, "kubeconfig", ""), requests)
 }
