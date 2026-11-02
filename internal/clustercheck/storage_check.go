@@ -30,7 +30,7 @@ func CheckStorage(ctx context.Context, kubeconfig string, requests []StorageRequ
 		byName[class.Metadata.Name] = class
 	}
 	var findings []core.Finding
-	profiles := map[string]preflightStorageProfile{}
+	profiles := map[string]StorageProfile{}
 	profileErrors := map[string]error{}
 	sourceClasses := map[string]storageSource{}
 	authorizations := map[string]core.Finding{}
@@ -79,7 +79,7 @@ func CheckStorage(ctx context.Context, kubeconfig string, requests []StorageRequ
 			profile, loaded := profiles[target]
 			profileErr, failed := profileErrors[target]
 			if !loaded && !failed {
-				profile, profileErr = readPreflightStorageProfile(ctx, kubeconfig, target)
+				profile, profileErr = GetStorageProfile(ctx, kubeconfig, target)
 				if profileErr == nil {
 					profiles[target] = profile
 				} else {
@@ -89,7 +89,7 @@ func CheckStorage(ctx context.Context, kubeconfig string, requests []StorageRequ
 			if profileErr != nil {
 				claimResolved = false
 				level := "warn"
-				if errors.Is(profileErr, errPreflightNotFound) {
+				if errors.Is(profileErr, ErrNotFound) {
 					level = "error"
 				}
 				emit(level, "cannot resolve omitted disk properties: "+profileErr.Error())
@@ -120,7 +120,7 @@ func CheckStorage(ctx context.Context, kubeconfig string, requests []StorageRequ
 			}
 			if sourceErr != nil {
 				level := "warn"
-				if errors.Is(sourceErr, errPreflightNotFound) || errors.Is(sourceErr, errStorageSourceNotReady) {
+				if errors.Is(sourceErr, ErrNotFound) || errors.Is(sourceErr, errStorageSourceNotReady) {
 					level = "error"
 				}
 				emit(level, "boot source validation failed: "+sourceErr.Error())
@@ -227,7 +227,7 @@ func storageTarget(request StorageRequest, classes []StorageClass) (string, stri
 }
 
 // defaultStorageClaim follows CDI's ordered profile matching and Filesystem fallback.
-func defaultStorageClaim(claim StorageClaim, profile preflightStorageProfile) (StorageClaim, error) {
+func defaultStorageClaim(claim StorageClaim, profile StorageProfile) (StorageClaim, error) {
 	var sets []claimPropertySet
 	for _, raw := range profile.Status.ClaimPropertySets {
 		var set claimPropertySet

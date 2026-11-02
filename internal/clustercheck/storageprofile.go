@@ -10,8 +10,6 @@ import (
 )
 
 // StorageProfile is the effective status projection used by selection and setup.
-type storageProfile = StorageProfile
-
 type StorageProfile struct {
 	Status StorageProfileStatus `json:"status"`
 }

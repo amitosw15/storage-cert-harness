@@ -7,8 +7,8 @@ import (
 
 // StorageClass contains selection metadata without discarding the full-object getter used for copying.
 type StorageClass struct {
-	Metadata    storageMetadata `json:"metadata"`
-	Provisioner string          `json:"provisioner"`
+	Metadata    ResourceMetadata `json:"metadata"`
+	Provisioner string           `json:"provisioner"`
 }
 
 // CDIConfig contains the effective scratch configuration reconciled by CDI.
@@ -22,7 +22,7 @@ func ListStorageClasses(ctx context.Context, kubeconfig string) ([]StorageClass,
 	var list struct {
 		Items []StorageClass `json:"items"`
 	}
-	data, err := SnapshotCommand(ctx, kubeconfig, nil, "get", "storageclass", "-o", "json")
+	data, err := runKubeCommand(ctx, kubeconfig, nil, "get", "storageclass", "-o", "json")
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func ListStorageClasses(ctx context.Context, kubeconfig string) ([]StorageClass,
 
 func GetCDIConfig(ctx context.Context, kubeconfig string) (CDIConfig, error) {
 	var config CDIConfig
-	err := readPreflightResource(ctx, kubeconfig, "cdiconfig", "config", "", &config)
+	err := getResource(ctx, kubeconfig, "cdiconfig", "config", "", &config)
 	return config, err
 }
 
@@ -44,7 +44,7 @@ type VolumeSnapshotContent struct {
 		Source           struct {
 			VolumeHandle string `json:"volumeHandle"`
 		} `json:"source"`
-		VolumeSnapshotRef storageMetadata `json:"volumeSnapshotRef"`
+		VolumeSnapshotRef ResourceMetadata `json:"volumeSnapshotRef"`
 	} `json:"spec"`
 }
 
@@ -59,21 +59,21 @@ type PersistentVolume struct {
 	} `json:"spec"`
 }
 
-func readPreflightSnapshotContent(ctx context.Context, kubeconfig, name string) (VolumeSnapshotContent, error) {
+func GetVolumeSnapshotContent(ctx context.Context, kubeconfig, name string) (VolumeSnapshotContent, error) {
 	var content VolumeSnapshotContent
-	err := readPreflightResource(ctx, kubeconfig, "volumesnapshotcontent", name, "", &content)
+	err := getResource(ctx, kubeconfig, "volumesnapshotcontent", name, "", &content)
 	return content, err
 }
 
-func readPreflightPV(ctx context.Context, kubeconfig, name string) (PersistentVolume, error) {
+func GetPersistentVolume(ctx context.Context, kubeconfig, name string) (PersistentVolume, error) {
 	var volume PersistentVolume
-	err := readPreflightResource(ctx, kubeconfig, "pv", name, "", &volume)
+	err := getResource(ctx, kubeconfig, "pv", name, "", &volume)
 	return volume, err
 }
 
 // DataImportCron records the current CDI image import and its storage provenance.
 type DataImportCron struct {
-	Metadata storageMetadata      `json:"metadata"`
+	Metadata ResourceMetadata     `json:"metadata"`
 	Spec     DataImportCronSpec   `json:"spec"`
 	Status   DataImportCronStatus `json:"status"`
 }
@@ -84,7 +84,7 @@ type DataImportCronSpec struct {
 
 type DataImportCronStatus struct {
 	CurrentImports  []DataImportCronImport `json:"currentImports"`
-	LastImportedPVC storageReference       `json:"lastImportedPVC"`
+	LastImportedPVC NamespacedName         `json:"lastImportedPVC"`
 	SourceFormat    string                 `json:"sourceFormat"`
 }
 
@@ -93,11 +93,11 @@ type DataImportCronImport struct {
 }
 
 // GetDataImportCron reads an existing CDI import in an explicit namespace.
-func readPreflightDataImportCron(ctx context.Context, kubeconfig string, ref storageReference) (DataImportCron, error) {
+func GetDataImportCron(ctx context.Context, kubeconfig string, ref NamespacedName) (DataImportCron, error) {
 	var value DataImportCron
-	if err := validatePreflightReference("dataimportcron", ref); err != nil {
+	if err := validateReference("dataimportcron", ref); err != nil {
 		return value, err
 	}
-	err := readPreflightResource(ctx, kubeconfig, "dataimportcron", ref.Name, ref.Namespace, &value)
+	err := getResource(ctx, kubeconfig, "dataimportcron", ref.Name, ref.Namespace, &value)
 	return value, err
 }

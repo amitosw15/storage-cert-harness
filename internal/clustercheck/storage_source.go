@@ -11,15 +11,15 @@ type storageSource struct {
 	Driver     string
 	VolumeMode string
 	Kind       string
-	Reference  storageReference
+	Reference  NamespacedName
 	Notes      []string
 }
 
-func inspectStorageSource(ctx context.Context, kubeconfig, kind string, ref storageReference) (storageSource, error) {
+func inspectStorageSource(ctx context.Context, kubeconfig, kind string, ref NamespacedName) (storageSource, error) {
 	result := storageSource{Reference: ref}
 	switch kind {
 	case "DataSource":
-		ds, err := readPreflightDataSource(ctx, kubeconfig, ref)
+		ds, err := GetDataSource(ctx, kubeconfig, ref)
 		if err != nil {
 			return result, err
 		}
@@ -45,7 +45,7 @@ func inspectStorageSource(ctx context.Context, kubeconfig, kind string, ref stor
 		return result, fmt.Errorf("DataSource %s/%s has no resolved PVC or snapshot source: %w", ref.Namespace, ref.Name, errStorageSourceNotReady)
 	case "pvc", "PersistentVolumeClaim":
 		result.Kind = "pvc"
-		pvc, err := readPreflightPVC(ctx, kubeconfig, ref)
+		pvc, err := GetPVC(ctx, kubeconfig, ref)
 		if err != nil {
 			return result, err
 		}
@@ -60,7 +60,7 @@ func inspectStorageSource(ctx context.Context, kubeconfig, kind string, ref stor
 		return result, nil
 	case "snapshot", "VolumeSnapshot":
 		result.Kind = "snapshot"
-		snapshot, err := readPreflightSnapshot(ctx, kubeconfig, ref)
+		snapshot, err := GetVolumeSnapshot(ctx, kubeconfig, ref)
 		if err != nil {
 			return result, err
 		}
@@ -84,14 +84,14 @@ func inspectStorageSource(ctx context.Context, kubeconfig, kind string, ref stor
 	}
 }
 
-func inspectSnapshotVolume(ctx context.Context, kubeconfig string, ref storageReference, snapshot preflightSnapshot) (storageSource, error) {
+func inspectSnapshotVolume(ctx context.Context, kubeconfig string, ref NamespacedName, snapshot VolumeSnapshot) (storageSource, error) {
 	result := storageSource{Kind: "snapshot", Reference: ref}
 	contentName := snapshot.Status.BoundVolumeSnapshotContentName
 	if contentName == "" {
 		result.Notes = append(result.Notes, "ready snapshot has no bound content reference; snapshot-content provenance is unavailable")
 		return result, nil
 	}
-	content, err := readPreflightSnapshotContent(ctx, kubeconfig, contentName)
+	content, err := GetVolumeSnapshotContent(ctx, kubeconfig, contentName)
 	if err != nil {
 		result.Notes = append(result.Notes, "snapshot is ready; snapshot-content provenance could not be read: "+err.Error())
 		return result, nil
@@ -106,8 +106,8 @@ func inspectSnapshotVolume(ctx context.Context, kubeconfig string, ref storageRe
 	if name == "" || content.Spec.Source.VolumeHandle == "" {
 		return result, nil
 	}
-	pvc, err := readPreflightPVC(ctx, kubeconfig, storageReference{Name: name, Namespace: ref.Namespace})
-	if errors.Is(err, errPreflightNotFound) {
+	pvc, err := GetPVC(ctx, kubeconfig, NamespacedName{Name: name, Namespace: ref.Namespace})
+	if errors.Is(err, ErrNotFound) {
 		return result, nil
 	}
 	if err != nil {
@@ -117,7 +117,7 @@ func inspectSnapshotVolume(ctx context.Context, kubeconfig string, ref storageRe
 	if pvc.Spec.VolumeName == "" {
 		return result, nil
 	}
-	pv, err := readPreflightPV(ctx, kubeconfig, pvc.Spec.VolumeName)
+	pv, err := GetPersistentVolume(ctx, kubeconfig, pvc.Spec.VolumeName)
 	if err != nil {
 		result.Notes = append(result.Notes, "snapshot is ready; original PV provenance could not be read")
 		return result, nil

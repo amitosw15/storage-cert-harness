@@ -14,7 +14,7 @@ func ReviewOwnAccess(ctx context.Context, kubeconfig string, attributes Resource
 	if err != nil {
 		return false, err
 	}
-	data, err := SnapshotCommand(ctx, kubeconfig, input, "create", "--raw", "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews", "-f", "-")
+	data, err := runKubeCommand(ctx, kubeconfig, input, "create", "--raw", "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews", "-f", "-")
 	if err != nil {
 		return false, err
 	}

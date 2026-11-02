@@ -27,7 +27,7 @@ func (c storageLiveCluster) run(t *testing.T, input any, args ...string) []byte 
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	out, err := SnapshotCommand(ctx, c.kubeconfig, data, args...)
+	out, err := runKubeCommand(ctx, c.kubeconfig, data, args...)
 	if err != nil {
 		t.Fatalf("%s: %v", strings.Join(args, " "), err)
 	}
@@ -80,7 +80,7 @@ func (c storageLiveCluster) await(t *testing.T, kind, name, namespace string, pr
 }
 
 func readySource(data []byte) bool {
-	var ds preflightDataSource
+	var ds DataSource
 	if json.Unmarshal(data, &ds) != nil {
 		return false
 	}
@@ -132,7 +132,7 @@ func TestStoragePreflightPatchedLive(t *testing.T) {
 			{"delete", "clusterrole", role, "--ignore-not-found"},
 		} {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
-			_, err := SnapshotCommand(ctx, c.kubeconfig, nil, args...)
+			_, err := runKubeCommand(ctx, c.kubeconfig, nil, args...)
 			cancel()
 			if err != nil {
 				t.Errorf("fixture cleanup failed: %v", err)
@@ -142,7 +142,7 @@ func TestStoragePreflightPatchedLive(t *testing.T) {
 	for _, ns := range []string{sourceNS, targetNS} {
 		c.create(t, map[string]any{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": ns}})
 	}
-	sc, err := readPreflightStorageClass(t.Context(), c.kubeconfig, nas)
+	sc, err := GetStorageClass(t.Context(), c.kubeconfig, nas)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestStoragePreflightPatchedLive(t *testing.T) {
 		if len(parts) != 2 {
 			t.Fatal("live source must be namespace/name")
 		}
-		ds, err := readPreflightDataSource(t.Context(), c.kubeconfig, storageReference{Namespace: parts[0], Name: parts[1]})
+		ds, err := GetDataSource(t.Context(), c.kubeconfig, NamespacedName{Namespace: parts[0], Name: parts[1]})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -216,7 +216,7 @@ spec:
 		patchProfile := func(properties string) {
 			c.run(t, nil, "patch", "storageprofile", temporaryClass, "--type=merge", "-p", `{"spec":{"claimPropertySets":`+properties+`}}`)
 			c.await(t, "storageprofile", temporaryClass, "", func(data []byte) bool {
-				var profile preflightStorageProfile
+				var profile StorageProfile
 				if json.Unmarshal(data, &profile) != nil {
 					return false
 				}
@@ -239,7 +239,7 @@ spec:
 		c.check(t, request(StorageClaim{VolumeMode: "Filesystem"}), true, false)
 		c.check(t, request(StorageClaim{VolumeMode: "Filesystem", AccessModes: []string{"ReadWriteOnce"}}), false, false)
 
-		_, patchErr := SnapshotCommand(t.Context(), c.kubeconfig, nil, "patch", "storageprofile", temporaryClass, "--type=merge", "-p", `{"spec":{"claimPropertySets":[{"volumeMode":"Block"}]}}`)
+		_, patchErr := runKubeCommand(t.Context(), c.kubeconfig, nil, "patch", "storageprofile", temporaryClass, "--type=merge", "-p", `{"spec":{"claimPropertySets":[{"volumeMode":"Block"}]}}`)
 		if patchErr == nil {
 			t.Fatal("cluster admitted a StorageProfile property set without required accessModes")
 		}
@@ -270,7 +270,7 @@ spec:
 				expected = snapshotClass
 			}
 			c.await(t, "storageprofile", temporaryClass, "", func(data []byte) bool {
-				var profile preflightStorageProfile
+				var profile StorageProfile
 				return json.Unmarshal(data, &profile) == nil && profile.Status.SnapshotClass == expected
 			})
 			selection, err := ResolveSnapshot(t.Context(), temporaryClass, "", c.kubeconfig, true)
@@ -301,7 +301,7 @@ spec:
 	t.Run("pending and missing PVC", func(t *testing.T) {
 		request := requestsFor(scratch, scratch)[:1]
 		request[0].SourceKind = "pvc"
-		request[0].Source = storageReference{Name: pending, Namespace: sourceNS}
+		request[0].Source = NamespacedName{Name: pending, Namespace: sourceNS}
 		c.check(t, request, true, false)
 		c.run(t, nil, "delete", "pvc", pending, "-n", sourceNS, "--wait=true", "--timeout=60s")
 		c.check(t, request, true, false)
@@ -352,7 +352,7 @@ spec:
 		c.run(t, nil, "wait", "--for=jsonpath={.status.readyToUse}=true", "volumesnapshot/"+snap, "-n", sourceNS, "--timeout=90s")
 		request := requestsFor(scratch, scratch)[:1]
 		request[0].SourceKind = "snapshot"
-		request[0].Source = storageReference{Name: snap, Namespace: sourceNS}
+		request[0].Source = NamespacedName{Name: snap, Namespace: sourceNS}
 		c.check(t, request, false, false)
 		c.run(t, nil, "delete", "pvc", scratchPVC, "-n", sourceNS, "--wait=true", "--timeout=60s")
 		c.check(t, request, false, true)

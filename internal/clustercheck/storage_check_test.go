@@ -98,7 +98,7 @@ func TestStoragePreflight(t *testing.T) {
 			request := StorageRequest{Identity: "vm/root", ExpectedClass: tc.expected, CDIStorage: true, Claim: StorageClaim{StorageClassName: tc.class, AccessModes: []string{"ReadWriteMany"}}, ScratchRequired: tc.scratch}
 			if tc.source {
 				request.SourceKind = "DataSource"
-				request.Source = storageReference{Name: "image", Namespace: "images"}
+				request.Source = NamespacedName{Name: "image", Namespace: "images"}
 			}
 			got := CheckStorage(t.Context(), "/chosen", []StorageRequest{request})
 			if !findingContains(got, tc.wantLevel, tc.want) {
@@ -127,7 +127,7 @@ func TestStoragePreflight(t *testing.T) {
 func stringPointer(s string) *string { return &s }
 
 func TestStorageProfileDefaulting(t *testing.T) {
-	profile := preflightStorageProfile{Status: preflightStorageProfileStatus{ClaimPropertySets: []json.RawMessage{
+	profile := StorageProfile{Status: StorageProfileStatus{ClaimPropertySets: []json.RawMessage{
 		json.RawMessage(`{"volumeMode":"Block","accessModes":["ReadWriteMany"]}`),
 		json.RawMessage(`{"volumeMode":"Filesystem","accessModes":["ReadWriteOnce"]}`),
 	}}}
@@ -149,11 +149,11 @@ func TestStorageProfileDefaulting(t *testing.T) {
 			}
 		})
 	}
-	_, err := defaultStorageClaim(StorageClaim{}, preflightStorageProfile{})
+	_, err := defaultStorageClaim(StorageClaim{}, StorageProfile{})
 	if err == nil {
 		t.Fatal("missing accessModes defaults accepted")
 	}
-	_, err = defaultStorageClaim(StorageClaim{VolumeMode: "Block"}, preflightStorageProfile{Status: preflightStorageProfileStatus{ClaimPropertySets: profile.Status.ClaimPropertySets[1:]}})
+	_, err = defaultStorageClaim(StorageClaim{VolumeMode: "Block"}, StorageProfile{Status: StorageProfileStatus{ClaimPropertySets: profile.Status.ClaimPropertySets[1:]}})
 	if err == nil {
 		t.Fatal("incompatible accessModes defaults accepted")
 	}
@@ -163,7 +163,7 @@ func TestStorageDefaultPrecedence(t *testing.T) {
 	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	newer := older.Add(time.Hour)
 	makeClass := func(name, annotation string, created time.Time) StorageClass {
-		return StorageClass{Metadata: storageMetadata{Name: name, CreationTimestamp: created, Annotations: map[string]string{annotation: "true"}}}
+		return StorageClass{Metadata: ResourceMetadata{Name: name, CreationTimestamp: created, Annotations: map[string]string{annotation: "true"}}}
 	}
 	kube := makeClass("kube", kubeDefaultAnnotation, newer)
 	virt := makeClass("virt", virtDefaultAnnotation, older)
@@ -197,7 +197,7 @@ func TestMultipleDefaultClassesStillValidateTargetAndSource(t *testing.T) {
 	storageCLI(t)
 	t.Setenv("STORAGE_CLASSES", `{"items":[{"metadata":{"name":"nas","creationTimestamp":"2026-01-01T00:00:00Z","annotations":{"storageclass.kubevirt.io/is-default-virt-class":"true"}}},{"metadata":{"name":"economy","creationTimestamp":"2026-02-01T00:00:00Z","annotations":{"storageclass.kubevirt.io/is-default-virt-class":"true"}}}]}`)
 	t.Setenv("AUTH_RAW", `{"status":{"allowed":false}}`)
-	request := StorageRequest{Identity: "root", Namespace: "workloads", ExpectedClass: "nas", CDIStorage: true, CDI: true, Claim: StorageClaim{AccessModes: []string{"ReadWriteMany"}, VolumeMode: "Filesystem"}, SourceKind: "DataSource", Source: storageReference{Name: "image", Namespace: "images"}}
+	request := StorageRequest{Identity: "root", Namespace: "workloads", ExpectedClass: "nas", CDIStorage: true, CDI: true, Claim: StorageClaim{AccessModes: []string{"ReadWriteMany"}, VolumeMode: "Filesystem"}, SourceKind: "DataSource", Source: NamespacedName{Name: "image", Namespace: "images"}}
 	findings := CheckStorage(t.Context(), "", []StorageRequest{request})
 	if !findingContains(findings, "error", `target StorageClass "economy"`) || !findingContains(findings, "error", "lacks CDI clone authorization") {
 		t.Fatalf("selected target or source authorization validation was skipped: %+v", findings)
@@ -211,7 +211,7 @@ func TestMultipleDefaultClassesStillValidateTargetAndSource(t *testing.T) {
 
 func TestSnapshotOriginalClassUnavailable(t *testing.T) {
 	storageCLI(t)
-	source, err := inspectStorageSource(t.Context(), "", "snapshot", storageReference{Name: "retained", Namespace: "images"})
+	source, err := inspectStorageSource(t.Context(), "", "snapshot", NamespacedName{Name: "retained", Namespace: "images"})
 	if err != nil || source.Class != "" {
 		t.Fatalf("got %+v %v", source, err)
 	}

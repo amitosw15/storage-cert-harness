@@ -13,10 +13,7 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 )
 
-type cloneSource struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-}
+type cloneSource = clustercheck.NamespacedName
 
 type snapshotClone struct {
 	Target    core.TestRequirement
@@ -87,29 +84,21 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 		}
 		cloned++
 		if pvc, ok := source["pvc"]; ok {
-			var obj struct {
-				Spec struct {
-					StorageClass string `json:"storageClassName"`
-				} `json:"spec"`
-			}
-			if err := c.get(ctx, &obj, "pvc", pvc); err != nil {
+			obj, err := clustercheck.GetPVC(ctx, selection.Kubeconfig, pvc)
+			if err != nil {
 				return nil, err
 			}
-			if _, err := clustercheck.ResolveSnapshot(ctx, obj.Spec.StorageClass, selection.SnapshotClass, selection.Kubeconfig, false); err != nil {
+			if _, err := clustercheck.ResolveSnapshot(ctx, obj.Spec.StorageClassName, selection.SnapshotClass, selection.Kubeconfig, false); err != nil {
 				return nil, fmt.Errorf("source PVC %s/%s: %w", pvc.Namespace, pvc.Name, err)
 			}
 			c.Sources[i] = pvc
 		} else if snapshot, ok := source["snapshot"]; ok {
-			var obj struct {
-				Spec struct {
-					Class string `json:"volumeSnapshotClassName"`
-				} `json:"spec"`
-			}
-			if err := c.get(ctx, &obj, "volumesnapshot", snapshot); err != nil {
+			obj, err := clustercheck.GetVolumeSnapshot(ctx, selection.Kubeconfig, snapshot)
+			if err != nil {
 				return nil, err
 			}
-			if obj.Spec.Class != selection.SnapshotClass {
-				return nil, fmt.Errorf("source snapshot %s/%s uses snapshot class %q, requested %q", snapshot.Namespace, snapshot.Name, obj.Spec.Class, selection.SnapshotClass)
+			if obj.Spec.VolumeSnapshotClassName != selection.SnapshotClass {
+				return nil, fmt.Errorf("source snapshot %s/%s uses snapshot class %q, requested %q", snapshot.Namespace, snapshot.Name, obj.Spec.VolumeSnapshotClassName, selection.SnapshotClass)
 			}
 			c.Snapshots[strconv.Itoa(i)] = snapshot
 		} else {
@@ -120,10 +109,6 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 		return nil, fmt.Errorf("use_snapshot requires at least one PVC or snapshot clone source in dataVolumeTemplates")
 	}
 	return c, nil
-}
-
-func (c *snapshotClone) get(ctx context.Context, obj any, kind string, source cloneSource) error {
-	return getCloneObject(ctx, c.Selection.Kubeconfig, obj, kind, source)
 }
 
 func (c *snapshotClone) resolveSource(ctx context.Context, v map[string]any) (map[string]cloneSource, error) {
@@ -186,21 +171,16 @@ func (c *snapshotClone) prepare(ctx context.Context, root string) (string, error
 		if err != nil {
 			return "", err
 		}
-		out, err := clustercheck.SnapshotCommand(ctx, c.Selection.Kubeconfig, data, "create", "-f", "-", "-o", "json")
+		made, err := clustercheck.CreateVolumeSnapshot(ctx, c.Selection.Kubeconfig, data)
 		if err != nil {
 			return "", err
 		}
-		var made struct {
-			Metadata cloneSource `json:"metadata"`
-		}
-		if err := json.Unmarshal(out, &made); err != nil {
+		madeRef := cloneSource{Name: made.Metadata.Name, Namespace: made.Metadata.Namespace}
+		c.Created = append(c.Created, madeRef)
+		if err := clustercheck.WaitForVolumeSnapshotReady(ctx, c.Selection.Kubeconfig, madeRef, 5*time.Minute); err != nil {
 			return "", err
 		}
-		c.Created = append(c.Created, made.Metadata)
-		if _, err := clustercheck.SnapshotCommand(ctx, c.Selection.Kubeconfig, nil, "wait", "volumesnapshot/"+made.Metadata.Name, "-n", made.Metadata.Namespace, "--for=jsonpath={.status.readyToUse}=true", "--timeout=5m"); err != nil {
-			return "", err
-		}
-		c.Snapshots[strconv.Itoa(i)] = made.Metadata
+		c.Snapshots[strconv.Itoa(i)] = madeRef
 	}
 	templateSource, err := templates.ReadFile(snapshotVMTemplatePath)
 	if err != nil {
@@ -217,7 +197,7 @@ func (c *snapshotClone) cleanup(ctx context.Context, rc *core.RunCtx) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	for _, source := range c.Created {
-		if _, err := clustercheck.SnapshotCommand(ctx, c.Selection.Kubeconfig, nil, "delete", "volumesnapshot", source.Name, "-n", source.Namespace, "--ignore-not-found", "--wait=false"); err != nil {
+		if err := clustercheck.DeleteVolumeSnapshot(ctx, c.Selection.Kubeconfig, source); err != nil {
 			rc.Logger.Warn("virtbench: delete source snapshot", "name", source.Name, "err", err)
 		}
 	}

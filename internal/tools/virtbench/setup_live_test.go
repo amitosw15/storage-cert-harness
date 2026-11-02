@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -51,10 +50,11 @@ func TestSSHHelperAfterNodeDrain(t *testing.T) {
 			t.Errorf("shared teardown: %v", err)
 		}
 	})
-	node, ok, err := runKubectl(ctx, "", "get", "pod", sshPodName, "-n", sshPodNS, "-o", "jsonpath={.spec.nodeName}")
-	if err != nil || !ok {
-		t.Fatalf("get helper node: %v: %s", err, node)
+	pod, err := getSSHPod(ctx, "")
+	if err != nil || pod == nil {
+		t.Fatalf("get helper node: pod=%v err=%v", pod, err)
 	}
+	node := pod.Spec.NodeName
 	workers, all, err := listWorkers(ctx, "")
 	if err != nil || len(workers) < 2 || len(workers) != len(all) || !slices.Contains(workers, node) {
 		t.Fatalf("requires >=2 uncordoned workers and helper on a worker: node=%s workers=%v all=%v err=%v", node, workers, all, err)
@@ -96,9 +96,9 @@ func TestSSHHelperAfterNodeDrain(t *testing.T) {
 			}
 		})
 		if tr.ID == "TR-VIRT-008" {
-			out, ok, err := runKubectl(ctx, "", "get", "pod", sshPodName, "-n", sshPodNS, "--ignore-not-found", "-o", "name")
-			if err != nil || !ok || strings.TrimSpace(out) != "" {
-				t.Fatalf("drain must remove the helper to exercise recovery: ok=%v err=%v output=%s", ok, err, out)
+			pod, err := getSSHPod(ctx, "")
+			if err != nil || pod != nil {
+				t.Fatalf("drain must remove the helper to exercise recovery: pod=%v err=%v", pod, err)
 			}
 			t.Log("confirmed: drain removed shared SSH helper before TR-VIRT-018 and TR-VIRT-001")
 		}

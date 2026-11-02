@@ -24,7 +24,7 @@ type StorageRequest struct {
 	CDIStorage      bool
 	CDI             bool
 	SourceKind      string
-	Source          storageReference
+	Source          NamespacedName
 	ScratchRequired bool
 	ContentType     string
 }

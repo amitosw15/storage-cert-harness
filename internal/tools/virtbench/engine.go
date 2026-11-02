@@ -38,6 +38,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
@@ -462,7 +463,7 @@ func (t teardown) Teardown(_ context.Context, rc *core.RunCtx, bag *core.Bag) er
 	}
 	rc.Logger.Warn("virtbench: cleaning up leftover namespaces", "namespaces", leftovers)
 	for _, ns := range leftovers {
-		if err := deleteNamespace(ctx, kubeconfig, ns); err != nil {
+		if err := clustercheck.DeleteNamespace(ctx, kubeconfig, ns); err != nil {
 			rc.Logger.Warn("virtbench: failed to delete leftover namespace", "namespace", ns, "err", err)
 		}
 	}

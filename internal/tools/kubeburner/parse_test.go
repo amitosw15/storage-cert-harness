@@ -435,7 +435,7 @@ func TestTeardown_DeletesNamespaceAfterCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read oc args: %v", err)
 	}
-	if string(got) != "delete ns storage-cert-smoke --wait=false --ignore-not-found" {
+	if string(got) != "delete namespace storage-cert-smoke --ignore-not-found --wait=false" {
 		t.Errorf("oc args = %q, want delete after cancellation", got)
 	}
 }

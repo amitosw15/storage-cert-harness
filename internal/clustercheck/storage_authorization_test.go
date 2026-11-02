@@ -37,7 +37,7 @@ func TestCDICloneAuthorization(t *testing.T) {
 			if tc.same {
 				target = "images"
 			}
-			source := storageSource{Kind: tc.kind, Reference: storageReference{Name: "image", Namespace: "images"}}
+			source := storageSource{Kind: tc.kind, Reference: NamespacedName{Name: "image", Namespace: "images"}}
 			allowed, err := checkCDICloneAccess(t.Context(), "/chosen", target, source)
 			if err != nil || allowed != tc.allow {
 				t.Fatalf("allowed=%t err=%v", allowed, err)
@@ -81,7 +81,7 @@ func TestStorageAuthorizationFindings(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			storageCLI(t)
 			t.Setenv("AUTH_RAW", tc.response)
-			request := StorageRequest{Identity: "root", Namespace: "tenant", CDI: true, ExpectedClass: "nas", Claim: StorageClaim{StorageClassName: stringPointer("nas"), AccessModes: []string{"ReadWriteMany"}, VolumeMode: "Filesystem"}, SourceKind: "pvc", Source: storageReference{Name: "image", Namespace: "images"}}
+			request := StorageRequest{Identity: "root", Namespace: "tenant", CDI: true, ExpectedClass: "nas", Claim: StorageClaim{StorageClassName: stringPointer("nas"), AccessModes: []string{"ReadWriteMany"}, VolumeMode: "Filesystem"}, SourceKind: "pvc", Source: NamespacedName{Name: "image", Namespace: "images"}}
 			findings := CheckStorage(t.Context(), "", []StorageRequest{request})
 			if !findingContains(findings, tc.level, tc.fragment) {
 				t.Fatalf("unexpected findings: %+v", findings)

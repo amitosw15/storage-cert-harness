@@ -49,7 +49,7 @@ func TestCDISnapshotClassInvestigation(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(t)
 			}
-			ref := storageReference{Name: "image", Namespace: "images"}
+			ref := NamespacedName{Name: "image", Namespace: "images"}
 			source, err := inspectStorageSource(t.Context(), "", "snapshot", ref)
 			if err != nil || source.Class != tc.class {
 				t.Fatalf("source=%+v err=%v; want class %q", source, err, tc.class)
@@ -73,12 +73,12 @@ func TestCDISnapshotClassInvestigation(t *testing.T) {
 
 func TestCDISnapshotInferenceRejectsRecreatedSnapshot(t *testing.T) {
 	cdiSnapshotCLI(t)
-	var snapshot preflightSnapshot
+	var snapshot VolumeSnapshot
 	if err := json.Unmarshal([]byte(os.Getenv("STORAGE_SNAPSHOT")), &snapshot); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("STORAGE_SNAPSHOT", strings.ReplaceAll(os.Getenv("STORAGE_SNAPSHOT"), "snapshot-uid", "replacement-uid"))
-	class, note := inferCDISnapshotClass(t.Context(), "", storageReference{Name: "image", Namespace: "images"}, snapshot)
+	class, note := inferCDISnapshotClass(t.Context(), "", NamespacedName{Name: "image", Namespace: "images"}, snapshot)
 	if class != "" || !strings.Contains(note, "identity or readiness changed") {
 		t.Fatalf("class=%q note=%q", class, note)
 	}
@@ -96,7 +96,7 @@ func TestCDISnapshotClassLive(t *testing.T) {
 	if len(parts) != 2 {
 		t.Fatal("snapshot DataSource must be namespace/name")
 	}
-	ref := storageReference{Name: parts[1], Namespace: parts[0]}
+	ref := NamespacedName{Name: parts[1], Namespace: parts[0]}
 	source, err := inspectStorageSource(t.Context(), kubeconfig, "DataSource", ref)
 	if err != nil || source.Class != target {
 		t.Fatalf("source=%+v err=%v; want class %q", source, err, target)

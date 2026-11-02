@@ -15,7 +15,7 @@ func storageSnapshotCLI(t *testing.T) {
 func TestSnapshotSurvivesDeletedSourcePVC(t *testing.T) {
 	storageSnapshotCLI(t)
 	t.Setenv("STORAGE_PVC", "")
-	source, err := inspectStorageSource(t.Context(), "", "snapshot", storageReference{Name: "image", Namespace: "images"})
+	source, err := inspectStorageSource(t.Context(), "", "snapshot", NamespacedName{Name: "image", Namespace: "images"})
 	if err != nil || source.Class != "" || source.Driver != "driver" || source.VolumeMode != "Filesystem" {
 		t.Fatalf("got %+v %v", source, err)
 	}
@@ -27,7 +27,7 @@ func TestSnapshotProvenanceUsesVolumeIdentity(t *testing.T) {
 			storageSnapshotCLI(t)
 			t.Setenv("STORAGE_PVC", `{"spec":{"storageClassName":"nas","volumeName":"original-pv"},"status":{"phase":"Bound"}}`)
 			t.Setenv("STORAGE_PV", `{"spec":{"storageClassName":"nas","csi":{"driver":"driver","volumeHandle":"`+handle+`"}}}`)
-			source, err := inspectStorageSource(t.Context(), "", "snapshot", storageReference{Name: "image", Namespace: "images"})
+			source, err := inspectStorageSource(t.Context(), "", "snapshot", NamespacedName{Name: "image", Namespace: "images"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -47,16 +47,16 @@ func TestMissingAndUnreadyBootSources(t *testing.T) {
 		kind, key, value string
 		want             error
 	}{
-		{"DataSource", "STORAGE_SOURCE", "", errPreflightNotFound},
-		{"pvc", "STORAGE_PVC", "", errPreflightNotFound},
+		{"DataSource", "STORAGE_SOURCE", "", ErrNotFound},
+		{"pvc", "STORAGE_PVC", "", ErrNotFound},
 		{"pvc", "STORAGE_PVC", `{"status":{"phase":"Pending"}}`, errStorageSourceNotReady},
-		{"snapshot", "STORAGE_SNAPSHOT", "", errPreflightNotFound},
+		{"snapshot", "STORAGE_SNAPSHOT", "", ErrNotFound},
 		{"snapshot", "STORAGE_SNAPSHOT", `{"status":{"readyToUse":false}}`, errStorageSourceNotReady},
 	} {
 		t.Run(tc.kind+tc.value, func(t *testing.T) {
 			storageCLI(t)
 			t.Setenv(tc.key, tc.value)
-			_, err := inspectStorageSource(t.Context(), "", tc.kind, storageReference{Name: "image", Namespace: "images"})
+			_, err := inspectStorageSource(t.Context(), "", tc.kind, NamespacedName{Name: "image", Namespace: "images"})
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("got %v; want %v", err, tc.want)
 			}
@@ -72,7 +72,7 @@ func TestSourceClassInvestigationIsAdvisory(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			storageCLI(t)
-			request := StorageRequest{Identity: "root", CDI: true, Namespace: "workloads", ExpectedClass: tc.target, Claim: StorageClaim{StorageClassName: stringPointer(tc.target), AccessModes: []string{"ReadWriteMany"}, VolumeMode: "Filesystem"}, SourceKind: tc.kind, Source: storageReference{Name: "image", Namespace: "images"}}
+			request := StorageRequest{Identity: "root", CDI: true, Namespace: "workloads", ExpectedClass: tc.target, Claim: StorageClaim{StorageClassName: stringPointer(tc.target), AccessModes: []string{"ReadWriteMany"}, VolumeMode: "Filesystem"}, SourceKind: tc.kind, Source: NamespacedName{Name: "image", Namespace: "images"}}
 			got := CheckStorage(t.Context(), "", []StorageRequest{request})
 			for _, finding := range got {
 				if finding.Level == "error" {
@@ -90,7 +90,7 @@ func TestSnapshotDataSourceSurvivesDeletedOriginalVolume(t *testing.T) {
 	storageSnapshotCLI(t)
 	t.Setenv("STORAGE_SOURCE", `{"spec":{"source":{"snapshot":{"name":"image","namespace":"images"}}},"status":{"conditions":[{"type":"Ready","status":"True"}]}}`)
 	t.Setenv("STORAGE_PVC", "")
-	source, err := inspectStorageSource(t.Context(), "", "DataSource", storageReference{Name: "golden", Namespace: "images"})
+	source, err := inspectStorageSource(t.Context(), "", "DataSource", NamespacedName{Name: "golden", Namespace: "images"})
 	if err != nil || source.Kind != "snapshot" || source.Class != "" || source.Driver != "driver" {
 		t.Fatalf("ready snapshot DataSource with deleted original PVC: source=%+v err=%v", source, err)
 	}
@@ -99,7 +99,7 @@ func TestSnapshotDataSourceSurvivesDeletedOriginalVolume(t *testing.T) {
 func TestReadySnapshotWithoutContentProvenanceDoesNotBlock(t *testing.T) {
 	storageSnapshotCLI(t)
 	t.Setenv("STORAGE_CONTENT", "")
-	ref := storageReference{Name: "image", Namespace: "images"}
+	ref := NamespacedName{Name: "image", Namespace: "images"}
 	requests := []StorageRequest{{Identity: "root", Namespace: "images", CDI: true, ExpectedClass: "nas", SourceKind: "snapshot", Source: ref, Claim: StorageClaim{StorageClassName: stringPointer("nas"), AccessModes: []string{"ReadWriteMany"}, VolumeMode: "Filesystem"}}}
 	findings := CheckStorage(t.Context(), "", requests)
 	if !findingContains(findings, "warn", "original StorageClass is unavailable") {

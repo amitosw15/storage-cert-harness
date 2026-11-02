@@ -8,13 +8,13 @@ import (
 const dataImportCronLabel = "cdi.kubevirt.io/dataImportCron"
 const importStorageClassAnnotation = "cdi.kubevirt.io/storage.import.storageClass"
 
-func inferCDISnapshotClass(ctx context.Context, kubeconfig string, ref storageReference, snapshot preflightSnapshot) (string, string) {
+func inferCDISnapshotClass(ctx context.Context, kubeconfig string, ref NamespacedName, snapshot VolumeSnapshot) (string, string) {
 	name := snapshot.Metadata.Labels[dataImportCronLabel]
 	if name == "" {
 		return "", ""
 	}
-	cronRef := storageReference{Name: name, Namespace: ref.Namespace}
-	cron, err := readPreflightDataImportCron(ctx, kubeconfig, cronRef)
+	cronRef := NamespacedName{Name: name, Namespace: ref.Namespace}
+	cron, err := GetDataImportCron(ctx, kubeconfig, cronRef)
 	if err != nil {
 		return "", fmt.Sprintf("CDI import StorageClass could not be investigated: %v", err)
 	}
@@ -34,7 +34,7 @@ func inferCDISnapshotClass(ctx context.Context, kubeconfig string, ref storageRe
 	if class == "" || cron.Spec.ManagedDataSource == "" {
 		return "", "CDI import has no recorded StorageClass or managed DataSource"
 	}
-	ds, err := readPreflightDataSource(ctx, kubeconfig, storageReference{Name: cron.Spec.ManagedDataSource, Namespace: ref.Namespace})
+	ds, err := GetDataSource(ctx, kubeconfig, NamespacedName{Name: cron.Spec.ManagedDataSource, Namespace: ref.Namespace})
 	if err != nil {
 		return "", fmt.Sprintf("CDI managed DataSource could not be investigated: %v", err)
 	}
@@ -50,7 +50,7 @@ func inferCDISnapshotClass(ctx context.Context, kubeconfig string, ref storageRe
 		return "", "CDI import StorageClass was not inferred because its managed DataSource does not reference this ready snapshot"
 	}
 	// A recreated snapshot must not inherit provenance from an earlier read.
-	currentSnapshot, err := readPreflightSnapshot(ctx, kubeconfig, ref)
+	currentSnapshot, err := GetVolumeSnapshot(ctx, kubeconfig, ref)
 	if err != nil || snapshot.Metadata.UID == "" || currentSnapshot.Metadata.UID != snapshot.Metadata.UID ||
 		currentSnapshot.Metadata.DeletionTimestamp != "" || !currentSnapshot.Status.ReadyToUse ||
 		currentSnapshot.Metadata.Labels[dataImportCronLabel] != name {
