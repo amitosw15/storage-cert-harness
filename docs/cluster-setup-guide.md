@@ -22,7 +22,7 @@ verifies most of these automatically.
 - [ ] CSI driver installed and **all driver pods are Running/Ready**
 - [ ] `StorageClass` for the storage under test exists in the cluster
 - [ ] `VolumeSnapshotClass` created and exists in the cluster
-- [ ] CDI scratch space `StorageClass` (filesystem-mode, backed by the storage under test) created and configured (VM / CDI test plans)
+- [ ] CDI scratch space supports Filesystem and ReadWriteOnce when required (VM / CDI test plans)
 - [ ] `thresholds.json` present with the repository certification inputs
 - [ ] `backends.yaml` prepared with your array's details (copy `backends.example.yaml`)
 - [ ] A test-plan YAML chosen from `plans/` (or a custom plan)
@@ -116,10 +116,12 @@ oc get volumesnapshotclass
 
 ### CDI scratch space (VM / CDI test plans only)
 
-CDI requires a filesystem-mode `StorageClass` for scratch volumes during import
-— block-mode classes are not usable. Create a filesystem-mode `StorageClass`
-backed by the storage under test, then set it via `CDIConfig` or through the
-`HyperConverged` CR if OpenShift Virtualization is installed:
+Some CDI image operations require scratch volumes with Filesystem volume mode
+and ReadWriteOnce access. Ensure the selected `StorageClass` can provision
+these volumes and that its backend placement meets the scenario's requirements.
+Configure it via `CDIConfig` or through the `HyperConverged` CR if OpenShift
+Virtualization is installed. See [storage placement and preflight](storage-preflight.md)
+for source, target, and scratch selection and checks.
 
 ```bash
 # Via CDIConfig directly
