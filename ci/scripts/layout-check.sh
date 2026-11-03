@@ -35,7 +35,7 @@ for f in golangci.yml yamllint.yaml markdownlint-cli2.jsonc trivyignore \
 done
 
 echo "==> layout-check: ci/config/smoke/"
-for f in README.md backends.local.yaml thresholds-smoke.json thresholds.json \
+for f in README.md backends.local.yaml thresholds-smoke.json \
 	cluster-smoke-lease.yaml.template; do
 	[[ -f "${REPO_ROOT}/ci/config/smoke/${f}" ]] || fail "missing ci/config/smoke/${f}"
 done

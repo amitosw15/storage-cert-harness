@@ -9,6 +9,7 @@ source "${_run_harness_dir}/../ci-utils.sh"
 source "${_run_harness_dir}/smoke-cluster-lease.sh"
 repo_root="${REPO_ROOT}"
 acquire_smoke_run_lock
+stage_smoke_work_config
 ci_log_init_temp "run-image-tests"
 
 command -v podman >/dev/null 2>&1 || {

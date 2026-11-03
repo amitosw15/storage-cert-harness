@@ -38,6 +38,7 @@ source "${_run_harness_dir}/../partner-harness-common.sh"
 source "${_run_harness_dir}/smoke-cluster-lease.sh"
 archive_partner_log "run-quay-image-tests"
 ci_log_init "run-quay-image-tests"
+stage_smoke_work_config
 
 command -v podman >/dev/null 2>&1 || {
 	echo "error: podman is required" >&2

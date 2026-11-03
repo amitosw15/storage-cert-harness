@@ -454,7 +454,8 @@ harness execution per cluster is documented as partner responsibility.
 
 Contributor smoke against a **local** image uses `make smoke-ci` or
 `make prepare-smoke-env` then `make run-harness-smoke` (`run-image-tests.sh`,
-`work/local-image-ref`). Pulling the registry image for lab checks uses
+`clean-smoke-env.sh`). See **[smoke-testing.md](smoke-testing.md)** for the full
+prepare / validate / run / troubleshoot flow. Pulling the registry image for lab checks uses
 `make run-quay-image-tests` (`ci/scripts/run-harness/run-quay-image-tests.sh`),
 which archives `logs/run-quay-image-tests.log` before each run.
 

@@ -223,17 +223,18 @@ If your change touches paths that **trigger** CI live smoke (`cmd/`, `internal/`
 **dedicated lab cluster you control** (not the CI edge cluster) before you rely on
 upstream CI:
 
+Full guide: [`docs/smoke-testing.md`](docs/smoke-testing.md).
+
 ```sh
-# kubeconfig + backends for your lab — see docs/cluster-setup-guide.md
 make build
 make image-build-local
-KUBECONFIG=/path/to/kubeconfig \
-  BACKEND=oc-edge-112 \
-  make run-harness-smoke
+cp /path/to/kubeconfig work/kubeconfig
+make smoke-ci KUBECONFIG=work/kubeconfig
 ```
 
-Use the same plan as CI: `plans/harness-smoke-plan.yaml` (`backend: oc-edge-112` —
-your `work/backends.local.yaml` must define that name). When CI live smoke is
+Use the same plan as CI: `plans/harness-smoke-plan.yaml`. Staged backends come
+from `ci/config/smoke/` unless you keep a gitignored `work/backends.local.yaml`.
+Set `BACKEND=` to match your backend name. When CI live smoke is
 enabled, see [`docs/contributing.md`](docs/contributing.md) for on-demand re-runs
 (`/run-live-smoke`, GitHub Actions UI, or `gh pr comment`).
 

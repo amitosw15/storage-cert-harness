@@ -11,7 +11,7 @@ clean_harness_smoke_artifacts
 clean_smoke_run_logs
 
 work="${REPO_ROOT}/work"
-for f in harness-run-thresholds.json thresholds.json catalog.json; do
+for f in harness-run-thresholds.json thresholds-smoke.json thresholds.json catalog.json; do
 	path="${work}/${f}"
 	if [[ -f "${path}" ]]; then
 		echo "clean-smoke-env: removing staged ${path}"

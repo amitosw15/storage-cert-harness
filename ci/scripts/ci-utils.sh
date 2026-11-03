@@ -398,6 +398,37 @@ clean_harness_smoke_artifacts() {
 	fi
 }
 
+smoke_config_dir() {
+	echo "${CI_CONFIG_DIR}/smoke"
+}
+
+require_smoke_bundle_file() {
+	local name="$1"
+	local smoke_config
+	smoke_config="$(smoke_config_dir)"
+	[[ -f "${smoke_config}/${name}" ]] || die "missing smoke bundle file: ${smoke_config}/${name}"
+}
+
+# Copy tracked smoke bundle into work/ (always overwrites staged thresholds + catalog).
+stage_smoke_work_config() {
+	local smoke_config work src dest bytes
+	smoke_config="$(smoke_config_dir)"
+	work="${REPO_ROOT}/work"
+	src="${smoke_config}/thresholds-smoke.json"
+	dest="${work}/harness-run-thresholds.json"
+	require_smoke_bundle_file thresholds-smoke.json
+	[[ -f "${REPO_ROOT}/catalog.json" ]] || die "missing repo catalog.json"
+	mkdir -p "${work}"
+	cp -f "${src}" "${dest}"
+	cp -f "${src}" "${work}/thresholds-smoke.json"
+	if ! cmp -s "${src}" "${dest}"; then
+		die "failed to stage ${src} -> ${dest} (content mismatch after copy)"
+	fi
+	bytes="$(wc -c < "${dest}" | tr -d '[:space:]')"
+	cp -f "${REPO_ROOT}/catalog.json" "${work}/catalog.json"
+	echo "smoke staging: copied thresholds-smoke.json -> work/harness-run-thresholds.json and work/thresholds-smoke.json (${bytes} bytes)"
+}
+
 # Remove local harness image tarball, tags, and engine build cache. Caller must
 # already hold acquire_local_image_lock (or run via clean-image-cache.sh).
 clean_local_image_cache() {

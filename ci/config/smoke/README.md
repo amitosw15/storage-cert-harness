@@ -10,6 +10,21 @@ belong in gitignored `work/backends.local.yaml` (preserved by prepare) or local
 secret files per `backends.example.yaml`. Changes require maintainer review
 below; this is not the generic fake-value example at repo root.
 
+## Thresholds: one smoke file (not repo `thresholds.json`)
+
+| File | Purpose |
+| --- | --- |
+| **`thresholds-smoke.json` (here)** | SLA bars for **harness smoke** only — staged to `work/harness-run-thresholds.json` |
+| **`thresholds.json` (repo root)** | **Level-3 / partner certification** runs (`make partner-cert-*`, etc.) — not part of this bundle |
+
+Smoke scripts (`run-image-tests.sh`, `run-quay-image-tests.sh`) pass
+`--thresholds /work/harness-run-thresholds.json` only. There is no separate
+smoke copy of full cert thresholds; edit **`thresholds-smoke.json` in this
+directory** when smoke SLA bars change (for example relaxed TR-STOR-002 latency
+at smoke scale).
+
+Do not maintain a second `thresholds-smoke.json` at the repository root.
+
 ## Change control
 
 **Do not edit these files without inspection and review** from harness smoke
@@ -19,8 +34,7 @@ changes can hide regressions or break shared lab clusters.
 | File | Staged to `work/` |
 | --- | --- |
 | `backends.local.yaml` | `backends.local.yaml` |
-| `thresholds-smoke.json` | `harness-run-thresholds.json` |
-| `thresholds.json` | `thresholds.json` (Quay / container-smoke path) |
+| `thresholds-smoke.json` | `harness-run-thresholds.json` **and** `thresholds-smoke.json` (same content; harness reads `harness-run-thresholds.json`) |
 | `cluster-smoke-lease.yaml.template` | (used by lease script, not copied) |
 
 Repo-root `catalog.json` is copied to `work/catalog.json` during prepare (not

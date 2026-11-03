@@ -1,5 +1,8 @@
 # Harness smoke (local cluster)
 
+**Contributor guide:** [docs/smoke-testing.md](../../../docs/smoke-testing.md)
+(prepare, validate, run, troubleshoot).
+
 Live smoke runs the harness image against a real cluster using
 `plans/harness-smoke-plan.yaml`. Configuration is **tracked** under
 [`ci/config/smoke/`](../../config/smoke/README.md) and staged into gitignored

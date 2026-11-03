@@ -64,20 +64,24 @@ those dependencies.
 Design and path rules:
 [`design/storage-cert-harness-ci-smoke-test.md`](design/storage-cert-harness-ci-smoke-test.md).
 
+**Step-by-step local smoke** (prepare, validate, run, troubleshooting):
+[`smoke-testing.md`](smoke-testing.md).
+
 ### How to run the smoke plan locally
 
-Prerequisites: [cluster-setup-guide.md](cluster-setup-guide.md),
-[cluster-requirements.md](cluster-requirements.md).
+See **[smoke-testing.md](smoke-testing.md)** for prerequisites, `make smoke-ci`,
+staging, backend/kubeconfig overrides, script map, and troubleshooting.
+
+Quick path after cluster setup ([cluster-setup-guide.md](cluster-setup-guide.md)):
 
 ```sh
 make build
 make image-build-local
-KUBECONFIG=/path/to/your/kubeconfig \
-  BACKEND=oc-edge-112 \
-  make run-harness-smoke
+cp /path/to/your/kubeconfig work/kubeconfig
+make smoke-ci KUBECONFIG=work/kubeconfig
 ```
 
-Optional: `KUBECTL_INSECURE_SKIP_TLS_VERIFY=true` for lab TLS. Reports land under
+Optional: `BACKEND=<name>`, `KUBECTL_INSECURE_SKIP_TLS_VERIFY=true`. Reports:
 `work/harness-smoke-report/`.
 
 ### After the PR is open — on-demand CI smoke

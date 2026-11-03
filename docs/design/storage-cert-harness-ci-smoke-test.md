@@ -76,8 +76,8 @@ flowchart LR
 **Building blocks:** smoke plan and thresholds (today:
 `plans/harness-smoke-plan.yaml`, `thresholds-smoke.json`; target bundle:
 `ci/config/smoke/` — §6.5), `ci/scripts/run-harness/run-image-tests.sh`,
-`ci/scripts/stage-smoke-config.sh` (to add — §6.6),
-`ci/scripts/run-harness/live-cluster-smoke.sh` (scaffold), offline `run-harness/replay-smoke.sh` (not a
+`ci/scripts/run-harness/prepare-smoke-env.sh` (§6.6),
+`ci/scripts/run-harness/live-cluster-smoke.sh` (lease wired; harness run pending ECOPROJECT-5406), offline `run-harness/replay-smoke.sh` (not a
 substitute for live smoke).
 
 ## Goals and non-goals
@@ -100,7 +100,7 @@ substitute for live smoke).
 ### ECOPROJECT-5536: skip live smoke on demand
 
 [Jira: ECOPROJECT-5536](https://redhat.atlassian.net/browse/ECOPROJECT-5536) —
-sub-task of [ECOPROJECT-5488](https://redhat.atlassian.net/browse/ECOPROJECT-5488).
+sub-task of [ECOPROJECT-5406](https://redhat.atlassian.net/browse/ECOPROJECT-5406).
 Long smoke should not block every `main` push (~2+ hours end-to-end when smoke
 runs). Documented in `storage-cert-harness/docs/ci.md` and
 `.github/pull_request_template.md`.
@@ -768,10 +768,9 @@ from `select.ids` (document in table below).
 ### 6.5 Local smoke configuration bundle (`ci/config/smoke/`)
 
 Smoke needs three **versioned, non-secret** inputs plus cluster-specific secrets
-that stay out of git. To avoid scattering paths (`plans/…`, repo-root
-`thresholds-smoke.json`, ad hoc `work/backends.local.yaml`), the repo will keep a
-**single ordered bundle** under `ci/config/smoke/` (alongside existing
-`ci/config/images.env`, `golangci.yml`, etc.).
+that stay out of git. Paths are centralized under `ci/config/smoke/` alongside
+`ci/config/images.env`, `golangci.yml`, etc. The smoke **plan** remains at
+`plans/harness-smoke-plan.yaml`.
 
 | File in bundle | Purpose | Secret? |
 | --- | --- | --- |
@@ -779,11 +778,10 @@ that stay out of git. To avoid scattering paths (`plans/…`, repo-root
 | `backends.yaml` | **Template** backends file: defines the plan’s `backend:` name (e.g. `oc-edge-112`), `storage_class`, `snapshot_class`, vendor params **without** credentials | No (no `inline` secrets) |
 | `thresholds-smoke.json` | SLA bars for smoke grading | No |
 
-**Migration:** Today the plan lives in `plans/harness-smoke-plan.yaml` and
-thresholds in repo-root `thresholds-smoke.json`. When `ci/config/smoke/` lands,
-those paths become the **canonical** smoke bundle (either move files or symlink
-from the old paths for one release — prefer **one** canonical tree). The plan
-`backend:` field must match a `backends[].name` entry in the staged backends file.
+**Migration:** Canonical smoke thresholds live only in
+`ci/config/smoke/thresholds-smoke.json` (repo-root `thresholds-smoke.json` removed).
+The plan remains `plans/harness-smoke-plan.yaml`. Full certification bars stay in
+repo-root **`thresholds.json`** (not staged for smoke).
 
 **Not in the bundle (remain under `work/`, gitignored):**
 
@@ -797,13 +795,15 @@ from the old paths for one release — prefer **one** canonical tree). The plan
 Optional later: `ci/config/smoke/README` listing env vars (`BACKEND`, `KUBECONFIG`,
 `HARNESS_SMOKE_KEEP_WORK`).
 
-### 6.6 Automatic staging to `work/` (`stage-smoke-config.sh`)
+### 6.6 Automatic staging to `work/` (`prepare-smoke-env.sh`)
 
-**Goal:** One helper invoked at the start of `run-image-tests.sh` (and eventually
-`live-cluster-smoke.sh`) so contributors do not manually copy plan, thresholds,
-or backends.
+**Status:** Implemented as `ci/scripts/run-harness/prepare-smoke-env.sh` (`make prepare-smoke-env`, `make smoke-ci`).
 
-**Proposed script:** `ci/scripts/stage-smoke-config.sh`
+**Goal:** One helper invoked before smoke (local `make smoke-ci`; eventually
+`live-cluster-smoke.sh`) so contributors do not manually copy thresholds or
+backends.
+
+**Script:** `ci/scripts/run-harness/prepare-smoke-env.sh`
 
 1. Source `ci-utils.sh`; resolve `REPO_ROOT`.
 2. Require `ci/config/smoke/harness-smoke-plan.yaml`,
@@ -819,11 +819,10 @@ or backends.
 4. Never overwrite `work/kubeconfig` or `work/local-image-ref`.
 5. Print which paths were staged (for log forensics).
 
-**`run-image-tests.sh` changes (target):**
+**`run-image-tests.sh`:**
 
-- Call `stage-smoke-config.sh` after `acquire_smoke_run_lock` / log archive, before validation.
-- Read plan from `work/smoke/harness-smoke-plan.yaml` (or `HARNESS_SMOKE_PLAN` override).
-- Mount staged plan and `work/harness-run-thresholds.json` into the harness container (same as today’s thresholds copy, but sourced from the bundle).
+- Expects staged `work/harness-run-thresholds.json`, `work/backends.local.yaml`, and `work/catalog.json` from `make prepare-smoke-env` (or `make smoke-ci`).
+- Uses repo-root `plans/harness-smoke-plan.yaml` for the harness `--plan` path.
 
 **`make run-harness-smoke`:** unchanged entry; inherits staging via `run-image-tests.sh`.
 
@@ -975,20 +974,37 @@ Log retention: keep smoke logs 14–30 days; no full cluster dumps.
 
 ## 11. Remaining open items
 
-| # | Item | Status |
-| --- | --- | --- |
-| 1 | **edge-112 sign-off** — smoke plan on lab cluster; §6.3/6.4 timings | Pending (8-TR plan passes locally without TR-STOR-002) |
-| 2 | **`live-cluster-smoke.sh`** — lease, secrets, podman run, janitor, timing artifact | Scaffold exits 0; TODO ECOPROJECT-5488 |
-| 3 | **Enable CI live smoke** — `CI_LIVE_SMOKE_ENABLED`, runner, `live-smoke` env secrets | Workflow scaffolded; disabled |
-| 4 | **Cluster lease** (§2) — Coordination Lease, fail-fast, release on trap | Not started (local `smoke-run.lock` only) |
-| 5 | **`ci/config/smoke/` + `stage-smoke-config.sh`** (§6.5–6.6) | Designed; not implemented |
-| 6 | **TR-STOR-002** back in `select.ids` after virtbench gather fix | Out — [ECOPROJECT-5566](https://redhat.atlassian.net/browse/ECOPROJECT-5566) |
-| 7 | **ECOPROJECT-5536** — skip token; check conclusion **Skipped** + summary audit | Docs done; verify in workflow |
-| 8 | **ECOPROJECT-5535** — `timeout-minutes` on GHA jobs (smoke ~240m) | Pending |
-| 9 | **Branch protection** — required `live-smoke` check on PRs to `main` | Pending |
-| 10 | **Contributor runbook** — backend/plan/thresholds, personal lab vs edge-112 | Partial (`README.md`); extend per §6.6 |
-| 11 | **Update ECOPROJECT-5406** — PR smoke model | Pending |
-| 12 | **Daily scheduled smoke** (24h open-PR activity gate) | Implemented in `ci-live-smoke.yml` schedule |
+Detailed checklist with IDs (A1–D3): [plan-based-test-suite-runbook.md — Action items](plan-based-test-suite-runbook.md#action-items--finish-local-smoke-and-cicd).
+
+**Single tracker:** edit open work only in the runbook (IDs **A1–D3**, Jira under [ECOPROJECT-5406](https://redhat.atlassian.net/browse/ECOPROJECT-5406)).
+This section mirrors that list for design readers.
+
+| ID | Jira | Summary | Status |
+| --- | --- | --- | --- |
+| A1 | [5582](https://redhat.atlassian.net/browse/ECOPROJECT-5582) | edge-112 sign-off — 8 TRs; record §6.3/§6.4 timings | Open |
+| A2 | [5583](https://redhat.atlassian.net/browse/ECOPROJECT-5583) | Re-enable TR-STOR-002 in smoke plan | Blocked — [5566](https://redhat.atlassian.net/browse/ECOPROJECT-5566) |
+| A3 | [5580](https://redhat.atlassian.net/browse/ECOPROJECT-5580) | Runbook + smoke docs aligned with `prepare-smoke-env` | Mostly done — [smoke-testing.md](../smoke-testing.md) |
+| B1 | [5584](https://redhat.atlassian.net/browse/ECOPROJECT-5584) | `CI_LIVE_SMOKE_ENABLED`, `live-smoke` env secrets, runner | Open |
+| B2 | [5585](https://redhat.atlassian.net/browse/ECOPROJECT-5585) | `live-cluster-smoke.sh` — podman run, secrets, janitor, timing artifact | Open |
+| B3 | [5535](https://redhat.atlassian.net/browse/ECOPROJECT-5535) | GHA `timeout-minutes` (~240m) on live-smoke jobs | **Done** in `ci-live-smoke.yml` |
+| B4 | [5586](https://redhat.atlassian.net/browse/ECOPROJECT-5586) | Branch protection — required `live-smoke` on PRs to `main` | Open |
+| C1 | [5536](https://redhat.atlassian.net/browse/ECOPROJECT-5536) | `[skip live-smoke]` — verify **Skipped** conclusion + summary | Open |
+| C2 | [5587](https://redhat.atlassian.net/browse/ECOPROJECT-5587) | Scheduled smoke — first green run after enablement | Enablement open |
+| C3 | [5588](https://redhat.atlassian.net/browse/ECOPROJECT-5588) | On-demand smoke — first green run after enablement | Enablement open |
+| C4 | [5589](https://redhat.atlassian.net/browse/ECOPROJECT-5589) | Fork PR guard — re-verify when CI enabled | Verify at enablement |
+| D1 | [5590](https://redhat.atlassian.net/browse/ECOPROJECT-5590) | Consolidate duplicate smoke scripts / doc naming | Open |
+| D2 | [5591](https://redhat.atlassian.net/browse/ECOPROJECT-5591) | Lease janitor + CI cancel (core lease: [5569](https://redhat.atlassian.net/browse/ECOPROJECT-5569) closed) | Partial |
+| D3 | [5592](https://redhat.atlassian.net/browse/ECOPROJECT-5592) | Update [5406](https://redhat.atlassian.net/browse/ECOPROJECT-5406) story text for PR smoke model | Open |
+
+### Delivered or out of scope (not open)
+
+| Topic | Resolution |
+| --- | --- |
+| **`ci/config/smoke/` + `prepare-smoke-env.sh`** (§6.5–6.6) | Done — `make prepare-smoke-env`, `make smoke-ci` |
+| **Daily scheduled smoke** (24h open-PR gate) | Done in `ci-live-smoke.yml`; enable with **B1** |
+| **On-demand triggers** (`/run-live-smoke`, `workflow_dispatch`) | Done in workflow; enable with **B1**–**B2** |
+| **Contributor execution runbook** | Done — [plan-based-test-suite-runbook.md](plan-based-test-suite-runbook.md) |
+| **[ECOPROJECT-5462](https://redhat.atlassian.net/browse/ECOPROJECT-5462)** hosted runners | **Optional** — skip when an existing self-hosted runner reaches the cluster (§5462) |
 
 **Closed team decisions (for reference):** **no** automatic smoke on PR open or
 push to `main`; on-demand + daily schedule (24h PR activity) only; **failed PR
@@ -999,68 +1015,70 @@ when lab unavailable.
 
 ## 12. Verification checklist (for story closure)
 
-- [ ] edge-112: full non-HA smoke plan passes with §6 overrides; timings recorded in §6.3/6.4.
-- [ ] No smoke on PR **open** or **push** to `main`; `/run-live-smoke`, `workflow_dispatch`, or daily schedule (24h PR activity) start runs.
-- [ ] `/run-live-smoke` comment or `workflow_dispatch` runs smoke on same-repo PR at current head.
-- [ ] Daily schedule skips when no open same-repo PR was updated in the last 24 hours.
-- [ ] Failed PR smoke blocks merge; passing on-demand re-run unblocks.
-- [ ] `[skip live-smoke]` in PR title/body skips smoke scheduling only (lab down); not used to bypass failures.
-- [ ] Second concurrent smoke **fails fast** (no queue); Lease shows holder annotations (plan, SHA, PR, API host).
-- [ ] Harness **error** or CI **cancel** still **releases** lease and runs janitor.
-- [ ] All catalog TRs except `TR-VIRT-007` (and §6.4 exclusions) execute on edge-112.
-- [ ] Per-TR and suite durations in workflow summary / `smoke-timing.json`.
-- [ ] Secrets never appear in artifacts.
-- [ ] **Fork** PR: no smoke, no kubeconfig.
-- [ ] Push to `main` does **not** auto-trigger smoke (default design).
-- [ ] Local `run-harness-smoke` parity with CI plan/overrides.
-- [ ] `ci/config/smoke/` staged to `work/` on every local smoke run (§6.6).
-- [ ] TR-STOR-002 included when ECOPROJECT-5566 is resolved.
+Legend: **[x]** satisfied in repo today; **[~]** partial or pending CI enablement; **[ ]** not done.
+
+- [ ] edge-112: full non-HA smoke plan passes with §6 overrides; timings recorded in §6.3/§6.4 (**A1**).
+- [x] No smoke on PR **open** or **push** to `main`; `/run-live-smoke`, `workflow_dispatch`, or daily schedule (24h PR activity) start runs when enabled.
+- [~] `/run-live-smoke` comment or `workflow_dispatch` runs smoke on same-repo PR at current head (**C3** — workflow present; **B2** execution).
+- [x] Daily schedule skips when no open same-repo PR was updated in the last 24 hours (**C2** — resolver job).
+- [ ] Failed PR smoke blocks merge; passing on-demand re-run unblocks (**B4** + live runs).
+- [~] `[skip live-smoke]` in PR title/body skips smoke scheduling only (lab down); not used to bypass failures (**C1** — verify check conclusion).
+- [~] Second concurrent smoke **fails fast** (no queue); Lease shows holder annotations (**D2** — local + CI acquire; janitor with **B2**).
+- [ ] Harness **error** or CI **cancel** still **releases** lease and runs janitor (**D2** + **B2**).
+- [~] All catalog TRs except `TR-VIRT-007` / `TR-VIRT-008` execute on edge-112 (8 TRs today; **A2** adds STOR-002).
+- [ ] Per-TR and suite durations in workflow summary / `smoke-timing.json` (**B2**).
+- [ ] Secrets never appear in artifacts (verify on first CI run).
+- [~] **Fork** PR: no smoke, no kubeconfig (**C4** — workflow guards; verify when enabled).
+- [x] Push to `main` does **not** auto-trigger smoke (default design).
+- [x] Local `run-harness-smoke` / `smoke-ci` parity with CI plan/overrides and staged thresholds.
+- [x] `ci/config/smoke/` staged to `work/` via `prepare-smoke-env` (§6.6).
+- [ ] TR-STOR-002 included when ECOPROJECT-5566 is resolved (**A2**).
 
 ---
 
 ## 13. Implementation progress
 
-Tracking branch work through **`smoke-plan-single`** (local image smoke); design
-targets in §1–§12 unchanged unless noted here.
+Open work is tracked in the runbook (**A1–D3**); this section is a snapshot only.
 
 ### Done (merged or on branch)
 
 | Area | Delivered |
 | --- | --- |
 | **Smoke plan** | Expanded `harness-smoke-plan.yaml`: 8 TRs (excludes TR-VIRT-007/008); TR-STOR-002 **commented out** until FIO gather reliable |
-| **Smoke thresholds** | `thresholds-smoke.json`; `run-image-tests.sh` copies → `work/harness-run-thresholds.json` |
+| **Smoke thresholds** | `thresholds-smoke.json`; staged → `work/harness-run-thresholds.json` |
 | **TR-STOR-002 FIO runner** | `engine.go`: deploy → `waitForFIOVMs` → `gather-results` with `fio_collect_*` (no harness guest SSH) |
-| **Local smoke hygiene** | `acquire_smoke_run_lock` (`work/smoke-run.lock`); archive prior `run-image-tests.log`; `clean_harness_smoke_artifacts` before run; `HARNESS_SMOKE_KEEP_WORK` |
+| **Local smoke hygiene** | `acquire_smoke_run_lock`; log archive; `clean_harness_smoke_artifacts`; `HARNESS_SMOKE_KEEP_WORK` |
 | **Build vs smoke lock** | `build.sh` no longer takes image lock; image lock separate from smoke (`docs/ci.md`) |
 | **Cert thresholds** | `when` scoping on selected VIRT bars in `thresholds.json` (full cert vs smoke bundle split) |
-| **CI workflow scaffold** | `ci-live-smoke.yml` (gated); `live-cluster-smoke.sh` stub on `main` |
-| **Docs / process** | Skip live-smoke token in `docs/ci.md` / contributing; reproduction notes in repo `Docs/Smoke/` (outside harness git) |
+| **Smoke config bundle** | `ci/config/smoke/` + `prepare-smoke-env.sh`, `clean-smoke-env.sh`, `make smoke-ci` |
+| **Cluster lease (core)** | `smoke-cluster-lease.sh` in `run-image-tests.sh` and start of `live-cluster-smoke.sh` |
+| **CI workflow** | `ci-live-smoke.yml`: schedule, comment, dispatch, fork guards, `timeout-minutes: 240`; gated on `CI_LIVE_SMOKE_ENABLED` |
+| **CI entry (incomplete)** | `live-cluster-smoke.sh` acquires lease then exits **5** until **B2** |
+| **Docs / process** | Skip live-smoke token in `docs/ci.md` / contributing; [smoke-testing.md](../smoke-testing.md); [plan-based-test-suite-runbook.md](plan-based-test-suite-runbook.md) |
 
 ### In progress / blocked
 
 | Area | State |
 | --- | --- |
-| **Full catalog smoke (10 TRs)** | Blocked on TR-STOR-002; TR-VIRT-008 intentionally excluded from plan |
-| **edge-112 CI sign-off** | Waiting on lease + `live-cluster-smoke.sh` + enablement |
-| **Per-TR timing table** | §6.4 still TBD |
+| **Full catalog smoke (9 TRs with STOR-002)** | Blocked on TR-STOR-002 (**A2** / ECOPROJECT-5566); TR-VIRT-008 excluded by policy |
+| **edge-112 sign-off + CI** | **A1** local; **B1**–**B2** for GitHub live runs |
+| **Per-TR timing table** | §6.3/§6.4 still TBD until **A1** |
 
-### Not started (see §11)
+### Remaining (see runbook § Action items)
 
-Cluster Coordination Lease; full `live-cluster-smoke.sh`; `ci/config/smoke/` bundle
-and `stage-smoke-config.sh`; branch protection; `smoke-timing.json` artifact;
-optional nightly smoke.
+**B2** harness execution in CI, **B1** secrets/enablement, **B4** branch protection, **C1** skip verification, **C2**–**C4** first/verified live runs, **D1** script cleanup, **D2** janitor/cancel, **D3** Jira story update.
 
 ---
 
 ## References
 
+- Contributor smoke guide: [smoke-testing.md](../smoke-testing.md)
 - Runbook: [plan-based-test-suite-runbook.md](plan-based-test-suite-runbook.md)
 - CI overview: `storage-cert-harness/docs/ci.md` (Dedicated CI cluster section)
 - Scripts: `ci/scripts/run-harness/` (`run-image-tests.sh`, `run-quay-image-tests.sh`,
-  `live-cluster-smoke.sh`, `smoke-cluster-lease.sh`, `replay-smoke.sh`),
-  `ci/scripts/stage-smoke-config.sh` (planned §6.6)
-- Smoke bundle (target): `ci/config/smoke/` — §6.5; today:
-  `plans/harness-smoke-plan.yaml`, `thresholds-smoke.json`
+  `live-cluster-smoke.sh`, `smoke-cluster-lease.sh`, `replay-smoke.sh`,
+  `prepare-smoke-env.sh`, `clean-smoke-env.sh`)
+- Smoke bundle: `ci/config/smoke/` — §6.5; plan: `plans/harness-smoke-plan.yaml`
 - Plans: `storage-cert-harness/plans/level3-internal-minimal.yaml` (override reference)
 - FIO gather issue: [ECOPROJECT-5566](https://redhat.atlassian.net/browse/ECOPROJECT-5566)
 - Catalog: `storage-cert-harness/catalog.json`

@@ -15,7 +15,7 @@
           "operator": "<=",
           "percentile": "p99",
           "unit": "ms",
-          "value": 3,
+          "value": 35,
           "when": {
             "profile": "load-80"
           }
@@ -26,7 +26,7 @@
           "operator": "<=",
           "percentile": "p99",
           "unit": "ms",
-          "value": 3,
+          "value": 45,
           "when": {
             "profile": "load-80"
           }

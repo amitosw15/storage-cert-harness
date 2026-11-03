@@ -33,6 +33,6 @@ smoke_cluster_lease_acquire "harness-smoke" "${plan_file}"
 smoke_cluster_lease_install_traps "_ci_log_flush"
 smoke_cluster_lease_start_renewal_loop
 
-echo "error: live-cluster harness execution is not implemented yet (ECOPROJECT-5488)" >&2
+echo "error: live-cluster harness execution is not implemented yet (see docs/design/storage-cert-harness-ci-smoke-test.md; ECOPROJECT-5406)" >&2
 echo "error: secrets materialization, image load, and podman run from pr-src are pending" >&2
 exit "${LIVE_SMOKE_EXIT_NOT_IMPLEMENTED}"

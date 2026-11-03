@@ -8,7 +8,7 @@ backend: oc-edge-112
 concurrency: 1
 select:
   ids:
-    # - TR-STOR-002  # FIO storage IO; virtbench
+    - TR-STOR-002  # FIO storage IO; virtbench
     - TR-STOR-006  # Provisioning density; kube-burner-ocp
     - TR-VIRT-001  # Boot storm; virtbench
     - TR-VIRT-004  # Live migration (minimal); kube-burner-ocp
