@@ -32,9 +32,10 @@ var vmRenderer manifest.ManifestRenderer = manifest.GoTemplate{Aliases: map[stri
 }}
 
 type templateInput struct {
-	key      string
-	flag     string
-	fallback any
+	key             string
+	flag            string
+	fallback        any
+	omitDefaultFlag bool
 }
 
 // Defaults are owned here and passed explicitly where execution also needs them.
@@ -47,18 +48,20 @@ func templateInputs(command string) []templateInput {
 		name = "disk-ops-vm"
 	}
 	inputs := []templateInput{
-		{"VM_NAME", "--vm-name", name},
-		{"STORAGE_CLASS_NAME", "--storage-class", ""},
-		{"VM_PASSWORD", "--vm-password", "changeme"},
+		{"VM_NAME", "--vm-name", name, false},
+		{"STORAGE_CLASS_NAME", "--storage-class", "", false},
+		{"VM_PASSWORD", "--vm-password", "changeme", true},
+		{"DATASOURCE_NAME", "--datasource-name", "", true},
+		{"DATASOURCE_NAMESPACE", "--datasource-namespace", imageNamespace, true},
 	}
 	if command == "fio" {
 		inputs = append(inputs,
-			templateInput{"FIO_RUNTIME", "--fio-runtime", defaultFIORuntime},
-			templateInput{"FIO_BS", "--fio-bs", "4k"},
-			templateInput{"FIO_RW", "--fio-rw", "randrw"},
-			templateInput{"FIO_IODEPTH", "--fio-iodepth", 64},
-			templateInput{"FIO_NUMJOBS", "--fio-numjobs", 4},
-			templateInput{"FIO_SIZE", "--fio-size", "10G"},
+			templateInput{"FIO_RUNTIME", "--fio-runtime", defaultFIORuntime, false},
+			templateInput{"FIO_BS", "--fio-bs", "4k", false},
+			templateInput{"FIO_RW", "--fio-rw", "randrw", false},
+			templateInput{"FIO_IODEPTH", "--fio-iodepth", 64, false},
+			templateInput{"FIO_NUMJOBS", "--fio-numjobs", 4, false},
+			templateInput{"FIO_SIZE", "--fio-size", "10G", false},
 		)
 	}
 	return inputs
@@ -101,7 +104,7 @@ func prepareManifest(ctx context.Context, request manifestRequest) ([]string, er
 		return nil, err
 	}
 	for _, input := range templateInputs(command) {
-		if input.key == "VM_PASSWORD" {
+		if input.omitDefaultFlag {
 			continue
 		}
 		if _, present := argument(args, input.flag); !present {
@@ -120,7 +123,6 @@ func prepareManifest(ctx context.Context, request manifestRequest) ([]string, er
 	}
 	path, custom := argument(args, "--vm-template")
 	var source []byte
-	defaults := !custom
 	if custom {
 		source, err = safefs.ReadFile(path)
 	} else {
@@ -134,7 +136,7 @@ func prepareManifest(ctx context.Context, request manifestRequest) ([]string, er
 				tr.ID = "TR-STOR-001"
 			}
 		}
-		source, defaults, err = vmSourceTemplate(ctx, tr)
+		source, _, err = vmSourceTemplate(ctx, tr)
 		path = tr.ID + "-vm.yaml"
 	}
 	if err != nil {
@@ -151,10 +153,6 @@ func prepareManifest(ctx context.Context, request manifestRequest) ([]string, er
 		}
 	} else {
 		rendered, err = renderVMTemplate(path, source, values)
-		if err != nil {
-			return nil, err
-		}
-		rendered, _, err = selectVMSource(rendered, strParamOr(request.TR, "datasource", ""), defaults)
 		if err != nil {
 			return nil, err
 		}

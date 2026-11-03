@@ -45,7 +45,7 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 	if err != nil {
 		return nil, err
 	}
-	data, defaults, err := vmSourceTemplate(ctx, tr)
+	data, _, err := vmSourceTemplate(ctx, tr)
 	if err != nil {
 		return nil, err
 	}
@@ -55,10 +55,6 @@ func snapshotClonePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRe
 		return nil, err
 	}
 	data, err = renderVMTemplate("snapshot-source.yaml", data, values)
-	if err != nil {
-		return nil, err
-	}
-	data, _, err = selectVMSource(data, strParamOr(tr, "datasource", ""), defaults)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +144,7 @@ func (c *snapshotClone) resolveSource(ctx context.Context, v map[string]any) (ma
 				return nil, err
 			}
 			if source != nil && !maps.Equal(source, ds.Spec.Source) {
-				return nil, fmt.Errorf("local DataSource %s resolves to different sources; specify datasource: namespace/name", name)
+				return nil, fmt.Errorf("local DataSource %s resolves to different sources; specify sourceRef.namespace in the template", name)
 			}
 			source = ds.Spec.Source
 		}

@@ -72,8 +72,7 @@ func TestManifestAdapterRendersFIOWithMatchingCLIValues(t *testing.T) {
 
 func TestManifestAdapterLoadsReleasedLegacyTemplates(t *testing.T) {
 	for command, relative := range map[string]string{
-		"datasource-clone": "examples/vm-templates/rhel9-vm-datasource.yaml",
-		"disk-ops":         "disk-ops-benchmark/vm-template.yaml",
+		"disk-ops": "disk-ops-benchmark/vm-template.yaml",
 	} {
 		t.Run(command, func(t *testing.T) {
 			root := t.TempDir()
@@ -175,6 +174,7 @@ func TestAllOwnedTemplatesRender(t *testing.T) {
 	for key, value := range map[string]any{
 		"NAME": "helper", "NAMESPACE": "test-ns", "TARGET_NODE": "worker-1",
 		"NODE_NAME": "worker-1", "HOSTNAME_LABEL": "worker-1",
+		"DATASOURCE_NAME": "rhel9", "DATASOURCE_NAMESPACE": "images",
 		"ANNOTATIONS": map[string]string{"run-id": "test"}, "AVOID_NODES": []string{"worker-2"},
 		"PVC_NAME": "source", "SNAPSHOT_CLASS": "snapshots",
 	} {

@@ -1,0 +1,77 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: {{ .VM_NAME | quote }}
+  labels:
+    app: kubevirt-perf-test
+spec:
+  dataVolumeTemplates:
+    - metadata:
+        name: {{ printf "%s-volume" .VM_NAME | quote }}
+      spec:
+        sourceRef:
+          kind: DataSource
+          name: {{ .DATASOURCE_NAME | default "rhel9" | quote }}
+          namespace: {{ .DATASOURCE_NAMESPACE | quote }}
+        storage:
+          resources:
+            requests:
+              storage: 30Gi
+          storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        app: kubevirt-perf-test
+    spec:
+      domain:
+        cpu:
+          cores: 1
+        devices:
+          disks:
+            - name: rootdisk
+              bootOrder: 1
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+        features:
+          acpi: {}
+          smm:
+            enabled: true
+        resources:
+          requests:
+            cpu: "1"
+            memory: 2Gi
+      networks:
+        - name: default
+          pod: {}
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: {{ printf "%s-volume" .VM_NAME | quote }}
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            userData: |
+              #cloud-config
+              user: cloud-user
+              password: changeme
+              chpasswd:
+                expire: false
+              ssh_pwauth: true
+              disable_root: false
+              packages:
+                - qemu-guest-agent
+              runcmd:
+                - systemctl enable --now qemu-guest-agent

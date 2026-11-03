@@ -20,8 +20,13 @@ func (r GoTemplate) Render(source []byte, values map[string]any) ([]byte, error)
 	const name = "manifest"
 	functions := sprig.TxtFuncMap()
 	functions["toYaml"] = func(value any) (string, error) {
-		data, err := yaml.Marshal(value)
-		return strings.TrimSuffix(string(data), "\n"), err
+		var output bytes.Buffer
+		encoder := yaml.NewEncoder(&output)
+		encoder.SetIndent(2)
+		if err := encoder.Encode(value); err != nil {
+			return "", err
+		}
+		return strings.TrimSuffix(output.String(), "\n"), encoder.Close()
 	}
 	for alias, key := range r.Aliases {
 		if _, exists := functions[alias]; exists {

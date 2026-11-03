@@ -14,8 +14,8 @@ spec:
       spec:
         sourceRef:
           kind: DataSource
-          name: fedora
-          namespace: openshift-virtualization-os-images
+          name: {{ .DATASOURCE_NAME | default "fedora" | quote }}
+          namespace: {{ .DATASOURCE_NAMESPACE | quote }}
         storage:
           resources:
             requests:

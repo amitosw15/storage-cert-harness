@@ -235,12 +235,11 @@ func TestSnapshotCloneLocalDataSourceNamespaces(t *testing.T) {
 		{name: "one local VM", count: 1, backing: `{"pvc":{"name":"source-pvc"}}`, wantNamespaces: []string{"local-1"}, wantSourceNamespace: "local-1"},
 		{name: "multiple locals share source", count: 2, backing: `{"pvc":{"name":"source-pvc","namespace":"shared"}}`, wantNamespaces: []string{"local-1", "local-2"}, wantSourceNamespace: "shared"},
 		{name: "different local sources", count: 2, backing: `{"pvc":{"name":"source-pvc"}}`, wantNamespaces: []string{"local-1", "local-2"}, wantError: "resolves to different sources"},
-		{name: "explicit override", count: 2, selection: "fedora-local", backing: `{"pvc":{"name":"source-pvc"}}`, wantNamespaces: []string{imageNamespace}, wantSourceNamespace: imageNamespace},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := cloneSnapshotCLI(t)
 			t.Setenv("TEST_DATASOURCE", `{"spec":{"source":`+tt.backing+`}}`)
-			template := strings.Replace(embeddedTemplateForTest(t, twoDiskVMTemplatePath), "namespace: openshift-virtualization-os-images", "", 1)
+			template := strings.Replace(embeddedTemplateForTest(t, twoDiskVMTemplatePath), "namespace: {{ .DATASOURCE_NAMESPACE | quote }}", "", 1)
 			path := filepath.Join(dir, "local.yaml")
 			if err := os.WriteFile(path, []byte(template), 0600); err != nil {
 				t.Fatal(err)
@@ -250,7 +249,7 @@ func TestSnapshotCloneLocalDataSourceNamespaces(t *testing.T) {
 			rc := &core.RunCtx{Backend: &core.ResolvedBackend{StorageClass: "backend", SnapshotClass: "nondefault"}}
 			clone, err := snapshotClonePreflight(context.Background(), rc, tr)
 			if tt.wantError != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantError) || !strings.Contains(err.Error(), "datasource: namespace/name") {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) || !strings.Contains(err.Error(), "sourceRef.namespace") {
 					t.Fatalf("want actionable error %q, got %v", tt.wantError, err)
 				}
 			} else {
@@ -282,7 +281,7 @@ func TestSnapshotCloneLocalDataSourceNamespaces(t *testing.T) {
 
 func TestSnapshotCloneDataSourceOverrideBeforeResolution(t *testing.T) {
 	dir := cloneSnapshotCLI(t)
-	tr := core.TestRequirement{ID: "TR-VIRT-018", Params: map[string]any{"datasource": "images/selected", "use_snapshot": true}}
+	tr := core.TestRequirement{ID: "TR-VIRT-018", Params: map[string]any{"datasource_name": "selected", "datasource_namespace": "images", "use_snapshot": true}}
 	rc := &core.RunCtx{Backend: &core.ResolvedBackend{StorageClass: "target", SnapshotClass: "nondefault"}}
 	if _, err := snapshotClonePreflight(context.Background(), rc, tr); err != nil {
 		t.Fatal(err)

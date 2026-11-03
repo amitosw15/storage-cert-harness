@@ -11,8 +11,8 @@ spec:
       spec:
         sourceRef:
           kind: DataSource
-          name: rhel9
-          namespace: openshift-virtualization-os-images
+          name: {{ .DATASOURCE_NAME | default "rhel9" | quote }}
+          namespace: {{ .DATASOURCE_NAMESPACE | quote }}
         storage:
           accessModes:
             - ReadWriteMany

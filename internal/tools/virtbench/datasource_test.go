@@ -13,70 +13,15 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 )
 
-func TestDataSourceTemplatePreservesCustomFields(t *testing.T) {
-	source := []byte(`apiVersion: kubevirt.io/v1
-kind: VirtualMachine
-metadata:
-  name: rhel-9-vm
-  annotations: {custom: retained}
-spec:
-  runStrategy: Always
-  dataVolumeTemplates:
-    - metadata: {name: root, labels: {custom: retained}}
-      spec:
-        sourceRef: {kind: DataSource, name: original, namespace: images}
-        pvc: {storageClassName: fast, volumeMode: Block, accessModes: [ReadWriteMany]}
-    - metadata: {name: blank}
-      spec:
-        source: {blank: {}}
-        storage: {storageClassName: fixed, volumeMode: Filesystem}
-  template:
-    spec:
-      volumes:
-        - name: cloudinit
-          cloudInitNoCloud: {userData: "#cloud-config\ncustom: retained"}
-`)
-	before, err := manifest.Documents(source)
-	if err != nil {
-		t.Fatal(err)
+func TestVMDataSourcesReadsWithoutChangingManifest(t *testing.T) {
+	source := []byte("kind: VirtualMachine\nspec:\n  dataVolumeTemplates:\n  - spec:\n      sourceRef: {kind: DataSource, name: original, namespace: images}\n      pvc: {volumeMode: Block}\n")
+	before := append([]byte(nil), source...)
+	refs, err := vmDataSources(source)
+	if err != nil || !reflect.DeepEqual(refs, []cloneSource{{Name: "original", Namespace: "images"}}) {
+		t.Fatalf("refs=%+v err=%v", refs, err)
 	}
-	for _, defaults := range []bool{false, true} {
-		rendered, refs, err := selectVMSource(source, "chosen/new-image", defaults)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(refs, []cloneSource{{Name: "new-image", Namespace: "chosen"}}) {
-			t.Fatalf("refs=%+v", refs)
-		}
-		docs, err := manifest.Documents(rendered)
-		if err != nil {
-			t.Fatal(err)
-		}
-		expected, err := manifest.Documents(source)
-		if err != nil {
-			t.Fatal(err)
-		}
-		volumes := expected[0]["spec"].(map[string]any)["dataVolumeTemplates"].([]any)
-		root := volumes[0].(map[string]any)["spec"].(map[string]any)
-		root["sourceRef"] = map[string]any{"kind": "DataSource", "name": "new-image", "namespace": "chosen"}
-		if defaults {
-			delete(root["pvc"].(map[string]any), "volumeMode")
-			delete(volumes[1].(map[string]any)["spec"].(map[string]any)["storage"].(map[string]any), "volumeMode")
-		}
-		if !reflect.DeepEqual(docs, expected) {
-			t.Fatalf("custom VM fields changed: %s", rendered)
-		}
-	}
-	after, _ := manifest.Documents(source)
-	if !reflect.DeepEqual(before, after) {
+	if !reflect.DeepEqual(source, before) {
 		t.Fatal("source mutated")
-	}
-	unchanged, _, err := selectVMSource(source, "", false)
-	if err != nil || string(unchanged) != string(source) {
-		t.Fatal("unselected custom source changed", err)
-	}
-	if _, _, err := selectVMSource([]byte("kind: VirtualMachine\nspec: {}"), "images/selected", false); err == nil || !strings.Contains(err.Error(), "no DataSource sourceRef") {
-		t.Fatalf("missing sourceRef accepted: %v", err)
 	}
 }
 
@@ -94,7 +39,7 @@ func TestDataSourceAppliedAtEveryCLIProvisioningBoundary(t *testing.T) {
 	}
 	for _, id := range []string{"TR-VIRT-001", "TR-VIRT-002", "TR-VIRT-013", "TR-VIRT-018", "TR-STOR-001", "TR-STOR-002", "TR-VIRT-008"} {
 		t.Run(id, func(t *testing.T) {
-			tr := core.TestRequirement{ID: id, Params: map[string]any{"datasource": "images/selected", "storage_class": "fast", "num_vms": 1, "fio_bs": "4k", "target_node": "worker-a"}}
+			tr := core.TestRequirement{ID: id, Params: map[string]any{"datasource_name": "selected", "datasource_namespace": "images", "storage_class": "fast", "num_vms": 1, "fio_bs": "4k", "target_node": "worker-a"}}
 			root := t.TempDir()
 			sc, ok := scenarioFor(tr)
 			if !ok {
@@ -123,7 +68,7 @@ func TestDataSourceAppliedAtEveryCLIProvisioningBoundary(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, refs, err := selectVMSource(data, "", false)
+			refs, err := vmDataSources(data)
 			if err != nil || len(refs) != 1 || refs[0].Name != "selected" || refs[0].Namespace != "images" {
 				t.Fatalf("datasource not selected: %+v %v", refs, err)
 			}
@@ -145,7 +90,7 @@ func TestPreparedSnapshotIsValidatedWithoutSelectingDataSourceAgain(t *testing.T
 	if err := os.WriteFile(source, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	request := manifestRequest{Directory: root, Prepared: true, TR: core.TestRequirement{ID: "TR-VIRT-002", Params: map[string]any{"datasource": "images/selected"}}, Args: []string{"datasource-clone", "--storage-class", "fast", "--vm-template", source}}
+	request := manifestRequest{Directory: root, Prepared: true, TR: core.TestRequirement{ID: "TR-VIRT-002", Params: map[string]any{"datasource_name": "selected", "datasource_namespace": "images"}}, Args: []string{"datasource-clone", "--storage-class", "fast", "--vm-template", source}}
 	args, err := prepareManifest(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +149,7 @@ esac
 		t.Fatal(err)
 	}
 	tr := core.TestRequirement{ID: "TR-VIRT-007", Params: map[string]any{
-		"datasource": "chosen/recovery-image", "storage_class": "fast", "vm_template": source,
+		"datasource_name": "recovery-image", "datasource_namespace": "chosen", "storage_class": "fast", "vm_template": source,
 		"node": "worker-a", "node_hostname_label": "worker-a", "namespace_prefix": "recovery", "vm_count": 2,
 	}}
 	rc := &core.RunCtx{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}

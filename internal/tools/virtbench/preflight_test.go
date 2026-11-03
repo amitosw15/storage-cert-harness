@@ -132,8 +132,8 @@ func TestTemplateLocalDataSourcePreflight(t *testing.T) {
 		{name: "omitted", wantNamespaces: []string{"my-tests-2", "my-tests-3"}},
 		{name: "empty", namespace: `namespace: ""`, wantNamespaces: []string{"my-tests-2", "my-tests-3"}},
 		{name: "qualified template", namespace: "namespace: custom-images", wantNamespaces: []string{"custom-images"}},
-		{name: "unqualified override", selection: "fedora-local", wantNamespaces: []string{imageNamespace}},
-		{name: "qualified override", selection: "other-images/fedora-local", wantNamespaces: []string{"other-images"}},
+		{name: "unqualified override ignored by fixed template", selection: "fedora-local", wantNamespaces: []string{"my-tests-2", "my-tests-3"}},
+		{name: "qualified override ignored by fixed template", selection: "other-images/fedora-local", wantNamespaces: []string{"my-tests-2", "my-tests-3"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()

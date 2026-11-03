@@ -54,7 +54,7 @@ func resolveLocalDataSources(tr core.TestRequirement, refs []cloneSource) ([]clo
 func vmTargetNamespaces(tr core.TestRequirement) ([]string, error) {
 	sc, ok := scenarioFor(tr)
 	if !ok || sc.VMRange == nil {
-		return nil, fmt.Errorf("cannot resolve local DataSource namespace for %s; specify sourceRef.namespace or datasource: namespace/name", tr.ID)
+		return nil, fmt.Errorf("cannot resolve local DataSource namespace for %s; specify sourceRef.namespace in the template", tr.ID)
 	}
 	start, end, err := sc.VMRange(tr)
 	if err != nil {
@@ -156,21 +156,14 @@ func loadDataSource(ctx context.Context, kubeconfig string, ref cloneSource) (da
 	return ds, nil
 }
 
-// selectVMSource keeps source changes in a template and inspects the rendered result read-only.
-func selectVMSource(data []byte, selection string, defaults bool) ([]byte, []cloneSource, error) {
+// vmDataSources reads DataSource references from the rendered VM.
+func vmDataSources(data []byte) ([]cloneSource, error) {
 	docs, err := manifest.Documents(data)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if len(docs) != 1 {
-		return nil, nil, fmt.Errorf("VM template must contain one YAML document")
-	}
-	var selected cloneSource
-	if selection != "" {
-		selected, err = parseDataSource(selection)
-		if err != nil {
-			return nil, nil, err
-		}
+		return nil, fmt.Errorf("VM template must contain one YAML document")
 	}
 	spec, _ := docs[0]["spec"].(map[string]any)
 	volumes, _ := spec["dataVolumeTemplates"].([]any)
@@ -184,28 +177,12 @@ func selectVMSource(data []byte, selection string, defaults bool) ([]byte, []clo
 		}
 		name, _ := ref["name"].(string)
 		ns, _ := ref["namespace"].(string)
-		if selection != "" {
-			name, ns = selected.Name, selected.Namespace
-		}
 		if name == "" {
-			return nil, nil, fmt.Errorf("DataSource sourceRef requires a name")
+			return nil, fmt.Errorf("DataSource sourceRef requires a name")
 		}
 		refs = append(refs, cloneSource{Name: name, Namespace: ns})
 	}
-	if selection != "" && len(refs) == 0 {
-		return nil, nil, fmt.Errorf("datasource %q: VM template has no DataSource sourceRef; supply a template with a DataSource reference", selection)
-	}
-	if (selection == "" && !defaults) || len(volumes) == 0 {
-		return data, refs, nil
-	}
-	templateSource, err := templates.ReadFile(selectedVMTemplatePath)
-	if err != nil {
-		return nil, nil, err
-	}
-	rendered, err := manifest.Render(vmRenderer, "selected-vm.yaml", templateSource, map[string]any{
-		"VM": docs[0], "DATASOURCE": selected, "DEFAULTS": defaults,
-	})
-	return rendered, refs, err
+	return refs, nil
 }
 
 type preflightVMTemplate struct {
@@ -214,7 +191,7 @@ type preflightVMTemplate struct {
 }
 
 func preflightVMTemplates(ctx context.Context, rc *core.RunCtx, tr core.TestRequirement) ([]preflightVMTemplate, error) {
-	source, defaults, err := vmSourceTemplate(ctx, tr)
+	source, _, err := vmSourceTemplate(ctx, tr)
 	if err != nil {
 		return nil, err
 	}
@@ -243,10 +220,6 @@ func preflightVMTemplates(ctx context.Context, rc *core.RunCtx, tr core.TestRequ
 		if err != nil {
 			return nil, err
 		}
-		rendered, _, err = selectVMSource(rendered, strParamOr(tr, "datasource", ""), defaults)
-		if err != nil {
-			return nil, err
-		}
 		prepared = append(prepared, preflightVMTemplate{Namespace: ns, Data: rendered})
 	}
 	return prepared, nil
@@ -259,7 +232,7 @@ func datasourcePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRequi
 	}
 	var refs []cloneSource
 	for _, vm := range prepared {
-		_, found, err := selectVMSource(vm.Data, "", false)
+		found, err := vmDataSources(vm.Data)
 		if err != nil {
 			return nil, err
 		}
