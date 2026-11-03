@@ -1128,3 +1128,19 @@ func TestStageTemplateRejectsSymlinkEscape(t *testing.T) {
 		t.Fatal("prepareManifest accepted a symlink escaping the source directory")
 	}
 }
+
+func TestExecVirtbenchStopsOnDeadline(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "virtbench"), []byte("#!/bin/sh\nexec sleep 30\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	rc := &core.RunCtx{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := execVirtbench(ctx, rc, manifestRequest{Directory: dir, Args: []string{"version"}})
+	if err == nil || ctx.Err() != context.DeadlineExceeded || time.Since(started) > 3*time.Second {
+		t.Fatalf("command not stopped by deadline: err=%v context=%v", err, ctx.Err())
+	}
+}

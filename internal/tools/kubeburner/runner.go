@@ -97,6 +97,7 @@ func buildRunCmd(ctx context.Context, rc *core.RunCtx, env []string, resultsDir,
 	cfg := filepath.Join(absResults, subdir, "config.yaml")
 	args := []string{"init", "-c", cfg}
 	cmd := exec.CommandContext(ctx, path, args...) // #nosec G204 -- path comes from LookPath and args are harness-generated.
+	cmd.WaitDelay = 5 * time.Second
 	cmd.Dir = filepath.Join(absResults, subdir)
 	cmd.Env = append(os.Environ(), env...)
 	rc.Logger.Info("kube-burner: running host binary", "path", path)

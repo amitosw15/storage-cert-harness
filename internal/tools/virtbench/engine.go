@@ -814,6 +814,7 @@ func execVirtbench(ctx context.Context, rc *core.RunCtx, request manifestRequest
 		return err
 	}
 	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204 -- arguments are assembled by the harness scenario.
+	cmd.WaitDelay = 5 * time.Second
 	cmd.Dir = request.Directory
 	cmd.Stdout = logWriter{log: rc.Logger, stream: "stdout"}
 	cmd.Stderr = logWriter{log: rc.Logger, stream: "stderr"}

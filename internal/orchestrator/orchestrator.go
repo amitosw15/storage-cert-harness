@@ -658,7 +658,15 @@ func relativeTo(workdir string, paths []string) (kept, dropped []string) {
 
 // runJob drives one tool's stage pipeline over its selected TRs and grades the
 // results. Teardown always runs. Context cancellation short-circuits.
+const perTestTimeout = 2 * time.Hour
+
 func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verdicts []core.Verdict, measurements []core.Measurement) {
+	return runJobWithTimeout(ctx, j, rc, g, perTestTimeout)
+}
+
+func runJobWithTimeout(parent context.Context, j job, rc *core.RunCtx, g *grader.Grader, timeout time.Duration) (verdicts []core.Verdict, measurements []core.Measurement) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
 	// Time the whole tool run for this job and stamp it onto every verdict, so the
 	// report always shows how long the test took — with or without an SLA bar.
 	start := time.Now()
@@ -680,14 +688,30 @@ func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verd
 	if ti.Teardown != nil {
 		defer func() {
 			rc.SetStage("teardown", j.trs)
-			_ = ti.Teardown.Teardown(ctx, rc, bag)
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+			defer cleanupCancel()
+			if err := ti.Teardown.Teardown(cleanupCtx, rc, bag); err != nil && rc.Logger != nil {
+				rc.Logger.Warn("test teardown failed", "tool", j.tool, "err", err)
+			}
 		}()
 	}
+	defer func() {
+		if ctx.Err() == context.DeadlineExceeded && parent.Err() == nil {
+			verdicts = nil
+			measurements = nil
+			for _, tr := range j.trs {
+				verdicts = append(verdicts, itemVerdicts(tr, core.OutcomeFail, fmt.Sprintf("test exceeded %s limit", timeout))...)
+			}
+		}
+	}()
 
 	if ti.Preflight != nil {
 		rc.SetStage("preflight", j.trs)
 		findings, err := ti.Preflight.Check(ctx, rc, bag, j.trs)
 		if err != nil {
+			return errTRs(j.trs, "preflight: "+err.Error()), nil
+		}
+		if err := ctx.Err(); err != nil {
 			return errTRs(j.trs, "preflight: "+err.Error()), nil
 		}
 		for _, f := range findings {
@@ -707,12 +731,18 @@ func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verd
 		if err := ti.Provisioner.Provision(ctx, rc, bag, j.trs); err != nil {
 			return errTRs(j.trs, "provision: "+err.Error()), nil
 		}
+		if err := ctx.Err(); err != nil {
+			return errTRs(j.trs, "provision: "+err.Error()), nil
+		}
 	}
 	var handle stages.RunHandle
 	if ti.Runner != nil {
 		rc.SetStage("run", j.trs)
 		h, err := ti.Runner.Run(ctx, rc, bag, j.trs)
 		if err != nil {
+			return errTRs(j.trs, "run: "+err.Error()), nil
+		}
+		if err := ctx.Err(); err != nil {
 			return errTRs(j.trs, "run: "+err.Error()), nil
 		}
 		handle = h
@@ -722,6 +752,9 @@ func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verd
 		rc.SetStage("collect", j.trs)
 		lb, err := ti.LogCollector.Collect(ctx, rc, bag, handle)
 		if err != nil {
+			return errTRs(j.trs, "collect: "+err.Error()), nil
+		}
+		if err := ctx.Err(); err != nil {
 			return errTRs(j.trs, "collect: "+err.Error()), nil
 		}
 		if rc.RecordArtifacts != nil {
@@ -745,6 +778,9 @@ func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verd
 		rc.SetStage("parse", j.trs)
 		rs, err := ti.ResultParser.Parse(ctx, rc, bag, logs)
 		if err != nil {
+			return errTRs(j.trs, "parse: "+err.Error()), nil
+		}
+		if err := ctx.Err(); err != nil {
 			return errTRs(j.trs, "parse: "+err.Error()), nil
 		}
 		results = rs
@@ -853,9 +889,12 @@ func ResolveExecutions(trs []core.TestRequirement, cfg config.Config) ([]core.Te
 	return out, nil
 }
 
-// Keep ordinary multi-TR batching; named variants get independent pipelines.
 // All executions for this tool stay inside its scheduling lock.
 func runToolExecutions(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader, progress *progressTracker) ([]core.Verdict, []core.Measurement) {
+	return runToolExecutionsWithTimeout(ctx, j, rc, g, progress, perTestTimeout)
+}
+
+func runToolExecutionsWithTimeout(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader, progress *progressTracker, timeout time.Duration) ([]core.Verdict, []core.Measurement) {
 	var ordinary []core.TestRequirement
 	for _, tr := range j.trs {
 		if tr.Variant == "" {
@@ -864,19 +903,15 @@ func runToolExecutions(ctx context.Context, j job, rc *core.RunCtx, g *grader.Gr
 	}
 	var vs []core.Verdict
 	var ms []core.Measurement
-	if len(ordinary) > 0 {
+	for _, tr := range ordinary {
 		batch := j
-		batch.trs = ordinary
-		for _, tr := range ordinary {
-			progress.start(tr)
-		}
-		v, m := runJob(ctx, batch, rc, g)
-		for _, tr := range ordinary {
-			if ctx.Err() != nil {
-				progress.abort(tr, core.OutcomeError)
-			} else {
-				progress.complete(tr, summarizeTR(v, tr))
-			}
+		batch.trs = []core.TestRequirement{tr}
+		progress.start(tr)
+		v, m := runJobWithTimeout(ctx, batch, rc, g, timeout)
+		if ctx.Err() != nil {
+			progress.abort(tr, core.OutcomeError)
+		} else {
+			progress.complete(tr, summarizeTR(v, tr))
 		}
 		vs = append(vs, v...)
 		ms = append(ms, m...)
@@ -900,7 +935,7 @@ func runToolExecutions(ctx context.Context, j job, rc *core.RunCtx, g *grader.Gr
 		batch := j
 		batch.trs = []core.TestRequirement{tr}
 		progress.start(tr)
-		v, m := runJob(ctx, batch, &variantRC, g)
+		v, m := runJobWithTimeout(ctx, batch, &variantRC, g, timeout)
 		if ctx.Err() != nil {
 			progress.abort(tr, core.OutcomeError)
 		} else {
