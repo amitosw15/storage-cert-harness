@@ -2,7 +2,6 @@ package clustercheck
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +17,13 @@ printf '%s\n' "$*" >> "$SNAPSHOT_TEST_DIR/commands"
 if [ "$1" = --kubeconfig ]; then shift 2; fi
 case "$1 $2" in
   'get storageclass') echo 'Warning: a harmless API warning' >&2; echo '{"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"name":"backend","annotations":{"storageclass.kubernetes.io/is-default-class":"true","storageclass.kubevirt.io/is-default-virt-class":"true"}},"provisioner":"driver","parameters":{"pool":"pool-a"},"allowVolumeExpansion":true,"volumeBindingMode":"Immediate"}' ;;
-  'get storageprofile') printf '%s' "$TEST_PROFILE" ;;
+  'get storageprofile')
+    if [ -n "$TEST_INITIAL_PROFILE" ] && [ ! -f "$SNAPSHOT_TEST_DIR/profile-observed" ]; then
+      : > "$SNAPSHOT_TEST_DIR/profile-observed"
+      printf '%s' "$TEST_INITIAL_PROFILE"
+    else
+      printf '%s' "$TEST_PROFILE"
+    fi ;;
   'get volumesnapshotclass')
     case "$3" in
       missing) echo 'NotFound' >&2; exit 1 ;;
@@ -35,6 +40,7 @@ esac
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
+	t.Setenv("TEST_INITIAL_PROFILE", "")
 	t.Setenv("TEST_PROFILE", `{"status":{"snapshotClass":"profile-class","claimPropertySets":[{"volumeMode":"Block","accessModes":["ReadWriteMany"]}]}}`)
 	t.Setenv("TEST_CLASSES", `{"items":[{"metadata":{"name":"default","annotations":{"snapshot.storage.kubernetes.io/is-default-class":"true"}},"driver":"driver"},{"metadata":{"name":"nondefault"},"driver":"driver"}]}`)
 	return dir
@@ -101,53 +107,5 @@ func TestResolveSnapshotAmbiguity(t *testing.T) {
 				t.Fatalf("selection = %+v, error = %v", s, err)
 			}
 		})
-	}
-}
-
-func TestPrepareVMStorageIsIsolated(t *testing.T) {
-	dir := snapshotCLI(t)
-	s := SnapshotSelection{StorageClass: "backend", SnapshotClass: "nondefault", Kubeconfig: "/test/kubeconfig"}
-	created, err := s.PrepareVMStorage(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "created.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sc map[string]any
-	if err := json.Unmarshal(data, &sc); err != nil {
-		t.Fatal(err)
-	}
-	meta := sc["metadata"].(map[string]any)
-	if meta["annotations"] != nil || meta["name"] != nil || meta["generateName"] != "storage-cert-snapshot-" {
-		t.Fatalf("metadata = %+v", meta)
-	}
-	if sc["provisioner"] != "driver" || sc["parameters"].(map[string]any)["pool"] != "pool-a" || sc["allowVolumeExpansion"] != true {
-		t.Fatalf("backend configuration lost: %+v", sc)
-	}
-	data, err = os.ReadFile(filepath.Join(dir, "patch.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"snapshotClass":"nondefault"`) || !strings.Contains(string(data), `"volumeMode":"Block"`) {
-		t.Fatalf("profile patch = %s", data)
-	}
-	if err := s.CleanupVMStorage(context.Background(), created); err != nil {
-		t.Fatal(err)
-	}
-	commands, _ := os.ReadFile(filepath.Join(dir, "commands"))
-	if strings.Contains(string(commands), "patch storageprofile backend") || !strings.Contains(string(commands), "delete storageclass storage-cert-snapshot-test") {
-		t.Fatalf("unexpected mutations: %s", commands)
-	}
-}
-
-func TestPrepareVMStorageReturnsCleanupNameOnFailure(t *testing.T) {
-	snapshotCLI(t)
-	t.Setenv("TEST_WAIT_FAIL", "true")
-	s := SnapshotSelection{StorageClass: "backend", SnapshotClass: "nondefault"}
-	created, err := s.PrepareVMStorage(context.Background())
-	if err == nil || created != "storage-cert-snapshot-test" {
-		t.Fatalf("created=%q, error=%v", created, err)
 	}
 }

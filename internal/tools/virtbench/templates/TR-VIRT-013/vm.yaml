@@ -1,39 +1,23 @@
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: rhel-9-vm
+  name: {{ .VM_NAME | quote }}
   labels:
     app: kubevirt-perf-test
 spec:
   dataVolumeTemplates:
     - metadata:
-        name: rhel-9-vm-volume
+        name: {{ printf "%s-volume" .VM_NAME | quote }}
       spec:
         sourceRef:
           kind: DataSource
-          name: rhel9
-          namespace: openshift-virtualization-os-images
+          name: {{ .DATASOURCE_NAME | default "rhel9" | quote }}
+          namespace: {{ .DATASOURCE_NAMESPACE | quote }}
         storage:
-          accessModes:
-            - ReadWriteMany
           resources:
             requests:
               storage: 30Gi
-          storageClassName: {{STORAGE_CLASS_NAME}}
-          volumeMode: Block
-    - metadata:
-        name: rhel-9-vm-data
-      spec:
-        source:
-          blank: {}
-        storage:
-          accessModes:
-            - ReadWriteMany
-          resources:
-            requests:
-              storage: 10Gi
-          storageClassName: {{STORAGE_CLASS_NAME}}
-          volumeMode: Block
+          storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
   runStrategy: Always
   template:
     metadata:
@@ -47,9 +31,6 @@ spec:
           disks:
             - name: rootdisk
               bootOrder: 1
-              disk:
-                bus: virtio
-            - name: datadisk
               disk:
                 bus: virtio
             - name: cloudinitdisk
@@ -79,10 +60,7 @@ spec:
       volumes:
         - name: rootdisk
           dataVolume:
-            name: rhel-9-vm-volume
-        - name: datadisk
-          dataVolume:
-            name: rhel-9-vm-data
+            name: {{ printf "%s-volume" .VM_NAME | quote }}
         - name: cloudinitdisk
           cloudInitNoCloud:
             userData: |

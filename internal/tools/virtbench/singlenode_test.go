@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
@@ -199,7 +200,7 @@ func writeTemplate(t *testing.T, dir string, n int) string {
 func TestTemplateDiskCount(t *testing.T) {
 	dir := t.TempDir()
 	for _, want := range []int{1, 2, 3} {
-		got, err := templateDiskCount(writeTemplate(t, dir, want))
+		got, err := templateDiskCount(writeTemplate(t, dir, want), core.TestRequirement{})
 		if err != nil {
 			t.Fatalf("templateDiskCount(%d disks): %v", want, err)
 		}
@@ -227,6 +228,10 @@ func TestSingleNodeCeilingArgsIncludesTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("singleNodeCeilingArgs: %v", err)
 	}
+	args, err = prepareManifest(t.Context(), manifestRequest{Directory: root, Args: args, TR: tr})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var staged string
 	for i, a := range args {
 		if a == "--vm-template" && i+1 < len(args) {
@@ -236,7 +241,7 @@ func TestSingleNodeCeilingArgsIncludesTemplate(t *testing.T) {
 	if staged == "" {
 		t.Fatalf("--vm-template not passed; args = %v", args)
 	}
-	if filepath.Dir(staged) != root {
+	if filepath.Dir(staged) != filepath.Join(root, "rendered") {
 		t.Errorf("template staged at %q, want inside results root %q", staged, root)
 	}
 	if _, err := os.Stat(staged); err != nil {
@@ -269,6 +274,45 @@ func TestSingleNodeCeilingValidate(t *testing.T) {
 			}
 			if !tc.wantErr && err != nil {
 				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestManifestDiskCountUsesSharedDocumentValidation(t *testing.T) {
+	source := `apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata: {name: vm}
+spec:
+  template:
+    spec:
+      volumes:
+        - {name: root, dataVolume: {name: root}}
+        - {name: extra, persistentVolumeClaim: {claimName: extra}}
+        - {name: cloudinit, cloudInitNoCloud: {}}
+        - {name: configdrive, cloudInitConfigDrive: {}}
+`
+	for _, tt := range []struct {
+		name, source string
+		count        int
+		wantError    string
+	}{
+		{"cloud-init excluded", source, 2, ""},
+		{"preceding object", "kind: ConfigMap\n---\n" + source, 2, ""},
+		{"missing volumes", "kind: VirtualMachine\nspec: {}", 0, ""},
+		{"bad trailing document", source + "---\ninvalid: [", 0, "invalid YAML"},
+		{"no VM", "kind: ConfigMap", 0, "no VirtualMachine"},
+		{"bad volumes", "kind: VirtualMachine\nspec: {template: {spec: {volumes: wrong}}}", 0, "volumes must be a list"},
+		{"bad volume", "kind: VirtualMachine\nspec: {template: {spec: {volumes: [wrong]}}}", 0, "volume must be a mapping"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			count, err := manifestDiskCount([]byte(tt.source))
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Fatalf("error=%v, want %s", err, tt.wantError)
+				}
+			} else if err != nil || count != tt.count {
+				t.Fatalf("count=%d error=%v", count, err)
 			}
 		})
 	}

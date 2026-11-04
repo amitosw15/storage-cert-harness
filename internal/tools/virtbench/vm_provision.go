@@ -3,7 +3,6 @@ package virtbench
 import (
 	"context"
 	crand "crypto/rand"
-	_ "embed"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -11,10 +10,8 @@ import (
 	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 )
-
-//go:embed templates/rhel9-vm-failure-recovery.yaml
-var failureRecoveryVMTemplate string
 
 // provisionFailureRecoveryVMs creates vm_count VMs (one per namespace) on the
 // target node using a required nodeSelector. The custom virtbench FAR mode
@@ -53,31 +50,46 @@ func provisionFailureRecoveryVMs(ctx context.Context, rc *core.RunCtx, bag *core
 
 	nsPrefix := strParamOr(tr, "namespace_prefix", "failure-recovery")
 	vmName := strParamOr(tr, "vm_name", defaultVMName)
-	count := intParam(tr, "vm_count", 3)
+	start, count, err := recoveryVMRange(tr)
+	if err != nil {
+		return err
+	}
 	createTimeout := intParam(tr, "vm_create_timeout", 300)
 
 	rc.Logger.Info("virtbench: creating VMs on target node", "node", node, "count", count, "storage_class", sc)
 
-	for i := 1; i <= count; i++ {
+	source, _, err := vmSourceTemplate(ctx, tr)
+	if err != nil {
+		return err
+	}
+
+	values, err := resolvePlanTemplateValues("datasource-clone", rc, tr)
+	if err != nil {
+		return err
+	}
+	values["NODE_NAME"] = node
+	values["HOSTNAME_LABEL"] = hostnameLabel
+
+	for i := start; i <= count; i++ {
 		ns := nsPrefix + "-" + strconv.Itoa(i)
+		values["NAMESPACE"] = ns
+		rendered, err := renderVMTemplate("failure-recovery.yaml", source, values)
+		if err != nil {
+			return err
+		}
+
 		if err := ensureNamespace(ctx, kubeconfig, ns); err != nil {
 			return fmt.Errorf("virtbench: create namespace %s: %w", ns, err)
 		}
-		manifest := strings.NewReplacer(
-			"{{VM_NAME}}", vmName,
-			"{{NAMESPACE}}", ns,
-			"{{NODE_NAME}}", node,
-			"{{HOSTNAME_LABEL}}", hostnameLabel,
-			"{{STORAGE_CLASS_NAME}}", sc,
-		).Replace(failureRecoveryVMTemplate)
-		if err := kubectlApply(ctx, kubeconfig, manifest); err != nil {
+
+		if err := kubectlApply(ctx, kubeconfig, string(rendered)); err != nil {
 			return fmt.Errorf("virtbench: apply VM in %s: %w", ns, err)
 		}
 		rc.Logger.Info("virtbench: VM applied", "namespace", ns, "vm", vmName)
 	}
 
 	rc.Logger.Info("virtbench: waiting for VMs to reach Running", "count", count, "timeout_s", createTimeout)
-	for i := 1; i <= count; i++ {
+	for i := start; i <= count; i++ {
 		ns := nsPrefix + "-" + strconv.Itoa(i)
 		if err := waitForVMRunning(ctx, kubeconfig, ns, vmName, createTimeout); err != nil {
 			return fmt.Errorf("virtbench: VM %s/%s not ready: %w", ns, vmName, err)
@@ -181,5 +193,13 @@ func waitForVMRunning(ctx context.Context, kubeconfig, ns, vmName string, timeou
 
 // ensureNamespace creates a namespace if it does not already exist.
 func ensureNamespace(ctx context.Context, kubeconfig, ns string) error {
-	return kubectlApply(ctx, kubeconfig, "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: "+ns+"\n")
+	templateSource, err := templates.ReadFile(namespaceTemplatePath)
+	if err != nil {
+		return err
+	}
+	rendered, err := manifest.Render(vmRenderer, "namespace.yaml", templateSource, map[string]any{"NAMESPACE": ns})
+	if err != nil {
+		return err
+	}
+	return kubectlApply(ctx, kubeconfig, string(rendered))
 }

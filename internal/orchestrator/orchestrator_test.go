@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/config"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
@@ -186,5 +187,75 @@ func TestApplyOverridesDoesNotMutateCatalog(t *testing.T) {
 	}
 	if orig["iodepth"] != 1 || len(orig) != 1 {
 		t.Fatalf("shared catalog params were mutated: %+v", orig)
+	}
+}
+
+type storageFindingProbe struct{ level string }
+
+func (p storageFindingProbe) Check(context.Context, *core.RunCtx, *core.Bag, []core.TestRequirement) ([]core.Finding, error) {
+	return []core.Finding{{Level: p.level, Message: "source and target StorageClasses differ"}}, nil
+}
+
+func TestPreflightStorageFindingsAreLogged(t *testing.T) {
+	for _, level := range []string{"warn", "error"} {
+		t.Run(level, func(t *testing.T) {
+			name := "storage-finding-" + level
+			rec := &recorder{}
+			registry.Register(stages.ToolIntegration{Name: name, Preflight: storageFindingProbe{level: level}, Runner: recRunner{name: name, rec: rec}})
+			var output strings.Builder
+			rc := &core.RunCtx{Logger: slog.New(slog.NewTextHandler(&output, nil)), SetStage: func(string, []core.TestRequirement) {}}
+			tr := core.TestRequirement{ID: "storage-test", AutomationTool: name}
+			runJob(t.Context(), job{tool: name, trs: []core.TestRequirement{tr}}, rc, nil)
+			if !strings.Contains(output.String(), "level="+strings.ToUpper(level)) || !strings.Contains(output.String(), "source and target StorageClasses differ") {
+				t.Fatalf("missing finding: %s", output.String())
+			}
+			wantRuns := 1
+			if level == "error" {
+				wantRuns = 0
+			}
+			if rec.count("job:"+name) != wantRuns {
+				t.Fatalf("runner count=%d; want %d", rec.count("job:"+name), wantRuns)
+			}
+		})
+	}
+}
+
+type timeoutProbe struct {
+	cleaned int
+	runs    []string
+}
+
+func (p *timeoutProbe) Run(ctx context.Context, _ *core.RunCtx, _ *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error) {
+	p.runs = append(p.runs, trs[0].ID)
+	if trs[0].ID == "b" {
+		return stages.RunHandle{}, fmt.Errorf("second test ran")
+	}
+	<-ctx.Done()
+	return stages.RunHandle{}, ctx.Err()
+}
+
+func (p *timeoutProbe) Teardown(ctx context.Context, _ *core.RunCtx, _ *core.Bag) error {
+	if ctx.Err() == nil {
+		p.cleaned++
+	}
+	return nil
+}
+
+func TestTimeoutFailsTestAndAllowsNextJob(t *testing.T) {
+	const name = "test-timeout-per-tr"
+	probe := &timeoutProbe{}
+	registry.Register(stages.ToolIntegration{Name: name, Runner: probe, Teardown: probe})
+	trs := []core.TestRequirement{{ID: "a", AutomationTool: name}, {ID: "b", AutomationTool: name}}
+	jobs := groupByTool(trs, nil)
+	if len(jobs) != 1 || len(jobs[0].trs) != 2 {
+		t.Fatalf("expected tests to share a scheduling lock, got %+v", jobs)
+	}
+	rc := &core.RunCtx{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), SetStage: func(string, []core.TestRequirement) {}}
+	verdicts, _ := runToolExecutionsWithTimeout(t.Context(), jobs[0], rc, nil, nil, 20*time.Millisecond)
+	if len(verdicts) != 2 || verdicts[0].Outcome != core.OutcomeFail || !strings.Contains(verdicts[0].Reason, "limit") || !strings.Contains(verdicts[1].Reason, "second test ran") {
+		t.Fatalf("got verdicts %+v", verdicts)
+	}
+	if len(probe.runs) != 2 || probe.runs[1] != "b" || probe.cleaned != 2 {
+		t.Fatalf("runs=%v cleanups=%d", probe.runs, probe.cleaned)
 	}
 }

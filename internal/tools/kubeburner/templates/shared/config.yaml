@@ -1,0 +1,56 @@
+---
+global:
+  measurements:
+    - name: volumeSnapshotLatency
+
+metricsEndpoints:
+  - indexer:
+      type: local
+      metricsDirectory: collected-metrics
+
+jobs:
+  - name: vmsnapshot-provision
+    jobType: create
+    jobIterations: 1
+    qps: {{.QPS}}
+    burst: {{.BURST}}
+    namespace: {{.NAMESPACE}}
+    namespacedIterations: false
+    waitWhenFinished: true
+    maxWaitTimeout: {{.MAX_WAIT}}
+    objects:
+      - objectTemplate: templates/vm.yaml
+        replicas: {{.REPLICAS}}
+        inputVars:
+          storageClass: {{.STORAGE_CLASS}}
+          usePopulator: {{.USE_POPULATOR}}
+          vmImage: {{.VM_IMAGE}}
+          diskSize: {{.DISK_SIZE}}
+
+{{ $replicas := .REPLICAS | int }}
+{{ $count := .SNAPSHOT_COUNT | int }}
+{{ $legacy := eq .LEGACY_SNAPSHOT_JOB "true" }}
+{{ range $start := untilStep 0 $count $replicas }}
+{{ $batch := add 1 (div $start $replicas) }}
+  - name: {{ if $legacy }}vmsnapshot-snapshot{{ else }}vmsnapshot-snapshot-{{ $batch }}{{ end }}
+    jobType: create
+    jobIterations: 1
+    qps: {{ $.QPS }}
+    burst: {{ $.BURST }}
+    namespace: {{ $.NAMESPACE }}
+    namespacedIterations: false
+    waitWhenFinished: true
+    maxWaitTimeout: {{ $.MAX_WAIT }}
+    objects:
+      - objectTemplate: {{ if $legacy }}templates/vmsnapshot.yaml{{ else }}templates/vmsnapshot-batch.yaml{{ end }}
+        replicas: {{ min $replicas (sub $count $start) }}
+        {{ if not $legacy }}
+        inputVars:
+          snapshotBatch: {{ $batch }}
+        {{ end }}
+        wait: true
+        waitOptions:
+          customStatusPaths:
+            - key: '.readyToUse | tostring'
+              value: "true"
+{{ end }}

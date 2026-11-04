@@ -1,0 +1,131 @@
+[
+  {
+    "global": {
+      "measurements": [
+        {
+          "name": "volumeSnapshotLatency"
+        }
+      ]
+    },
+    "jobs": [
+      {
+        "burst": 9,
+        "jobIterations": 1,
+        "jobType": "create",
+        "maxWaitTimeout": "25m",
+        "name": "vmsnapshot-provision",
+        "namespace": "custom-ns",
+        "namespacedIterations": false,
+        "objects": [
+          {
+            "inputVars": {
+              "diskSize": "20Gi",
+              "storageClass": "fast",
+              "usePopulator": true,
+              "vmImage": "quay.io/example/disk:custom"
+            },
+            "objectTemplate": "templates/vm.yaml",
+            "replicas": 3
+          }
+        ],
+        "qps": 7,
+        "waitWhenFinished": true
+      },
+      {
+        "burst": 9,
+        "jobIterations": 1,
+        "jobType": "create",
+        "maxWaitTimeout": "25m",
+        "name": "vmsnapshot-snapshot-1",
+        "namespace": "custom-ns",
+        "namespacedIterations": false,
+        "objects": [
+          {
+            "inputVars": {
+              "snapshotBatch": 1
+            },
+            "objectTemplate": "templates/vmsnapshot-batch.yaml",
+            "replicas": 3,
+            "wait": true,
+            "waitOptions": {
+              "customStatusPaths": [
+                {
+                  "key": ".readyToUse | tostring",
+                  "value": "true"
+                }
+              ]
+            }
+          }
+        ],
+        "qps": 7,
+        "waitWhenFinished": true
+      },
+      {
+        "burst": 9,
+        "jobIterations": 1,
+        "jobType": "create",
+        "maxWaitTimeout": "25m",
+        "name": "vmsnapshot-snapshot-2",
+        "namespace": "custom-ns",
+        "namespacedIterations": false,
+        "objects": [
+          {
+            "inputVars": {
+              "snapshotBatch": 2
+            },
+            "objectTemplate": "templates/vmsnapshot-batch.yaml",
+            "replicas": 3,
+            "wait": true,
+            "waitOptions": {
+              "customStatusPaths": [
+                {
+                  "key": ".readyToUse | tostring",
+                  "value": "true"
+                }
+              ]
+            }
+          }
+        ],
+        "qps": 7,
+        "waitWhenFinished": true
+      },
+      {
+        "burst": 9,
+        "jobIterations": 1,
+        "jobType": "create",
+        "maxWaitTimeout": "25m",
+        "name": "vmsnapshot-snapshot-3",
+        "namespace": "custom-ns",
+        "namespacedIterations": false,
+        "objects": [
+          {
+            "inputVars": {
+              "snapshotBatch": 3
+            },
+            "objectTemplate": "templates/vmsnapshot-batch.yaml",
+            "replicas": 1,
+            "wait": true,
+            "waitOptions": {
+              "customStatusPaths": [
+                {
+                  "key": ".readyToUse | tostring",
+                  "value": "true"
+                }
+              ]
+            }
+          }
+        ],
+        "qps": 7,
+        "waitWhenFinished": true
+      }
+    ],
+    "metricsEndpoints": [
+      {
+        "indexer": {
+          "metricsDirectory": "collected-metrics",
+          "type": "local"
+        }
+      }
+    ]
+  }
+]

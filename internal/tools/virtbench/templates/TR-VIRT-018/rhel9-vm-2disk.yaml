@@ -1,57 +1,43 @@
-# TR-VIRT-008 VM template: the upstream rhel9-vm-datasource template with the
-# changes node-drain evacuation requires (see decisions/0013):
-#   * evictionStrategy: LiveMigrate   — a drain live-migrates the VM instead of
-#     shutting it down, so it evacuates to another node.
-#   * accessModes: [ReadWriteMany]    — live migration needs the volume mountable
-#     on source and destination at once; RWO makes migration impossible.
-#   * soft nodeAffinity ({{TARGET_NODE}}) — a *preferred* (not required) affinity
-#     concentrates the VMs on the drain target without cordoning shared nodes.
-#     Preferred + IgnoredDuringExecution keeps the VM spec migratable: the
-#     live-migration target pod is free to land on any other node. A *required*
-#     rule (or nodeSelector) would re-pin the migration target and break drain.
-# {{STORAGE_CLASS_NAME}} is substituted by virtbench datasource-clone;
-# {{TARGET_NODE}} is substituted by the harness before the clone. The VM name
-# must stay rhel-9-vm (datasource-clone polls the VM by that name).
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
-  name: rhel-9-vm
+  name: {{ .VM_NAME | quote }}
   labels:
     app: kubevirt-perf-test
 spec:
   dataVolumeTemplates:
     - metadata:
-        name: rhel-9-vm-volume
+        name: {{ printf "%s-volume" .VM_NAME | quote }}
       spec:
         sourceRef:
           kind: DataSource
-          name: rhel9
-          namespace: openshift-virtualization-os-images
+          name: {{ .DATASOURCE_NAME | default "rhel9" | quote }}
+          namespace: {{ .DATASOURCE_NAMESPACE | quote }}
         storage:
           accessModes:
             - ReadWriteMany
           resources:
             requests:
               storage: 30Gi
-          storageClassName: {{STORAGE_CLASS_NAME}}
-          volumeMode: Block
+          storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
+    - metadata:
+        name: {{ printf "%s-data" .VM_NAME | quote }}
+      spec:
+        source:
+          blank: {}
+        storage:
+          accessModes:
+            - ReadWriteMany
+          resources:
+            requests:
+              storage: 10Gi
+          storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
   runStrategy: Always
   template:
     metadata:
       labels:
         app: kubevirt-perf-test
     spec:
-      evictionStrategy: LiveMigrate
-      affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100   # scheduling weight
-              preference:
-                matchExpressions:
-                  - key: kubernetes.io/hostname
-                    operator: In
-                    values:
-                      - {{TARGET_NODE}}
       domain:
         cpu:
           cores: 1
@@ -59,6 +45,9 @@ spec:
           disks:
             - name: rootdisk
               bootOrder: 1
+              disk:
+                bus: virtio
+            - name: datadisk
               disk:
                 bus: virtio
             - name: cloudinitdisk
@@ -88,7 +77,10 @@ spec:
       volumes:
         - name: rootdisk
           dataVolume:
-            name: rhel-9-vm-volume
+            name: {{ printf "%s-volume" .VM_NAME | quote }}
+        - name: datadisk
+          dataVolume:
+            name: {{ printf "%s-data" .VM_NAME | quote }}
         - name: cloudinitdisk
           cloudInitNoCloud:
             userData: |

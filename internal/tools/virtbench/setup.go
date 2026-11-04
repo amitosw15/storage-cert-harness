@@ -9,12 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/manifest"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
 )
 
@@ -35,68 +35,11 @@ const (
 	sshPodRollbackPollDeleting = time.Second
 	sshPodRollbackSettle       = time.Second
 
-	// Pinned quay.io/virtarraycert/ssh-helper release (0.1.11; log wrappers in /opt/sshhelper/bin).
-	sshHelperImage = "quay.io/virtarraycert/ssh-helper@sha256:369697c3002c1971bb608189d343fe9ea4989d2b66fde1bd1b64e924416533d1"
-
 	sshPodAnnotPrefix = "storage-cert-harness.redhat.com/"
 )
 
 // errSSHPodUIDPreconditionFailed means delete targeted a different object instance.
 var errSSHPodUIDPreconditionFailed = errors.New("ssh helper pod delete UID precondition failed")
-
-// sshPodManifest is the helper pod virtbench uses for ping and in-VM SSH checks.
-// Keep in sync with container-patches/virtbench/examples/utilities/ssh-pod.yaml.
-// Remove manually when decommissioning the cluster:
-//
-//	kubectl delete pod ssh-test-pod -n default
-var sshPodManifest = `apiVersion: v1
-kind: Pod
-metadata:
-  name: ` + sshPodName + `
-  namespace: ` + sshPodNS + `
-  labels:
-    app: kubevirt-perf-test
-    managed-by: storage-cert-harness
-spec:
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 65532
-    runAsGroup: 65532
-    fsGroup: 65532
-    seccompProfile:
-      type: RuntimeDefault
-  containers:
-  - name: ssh-client
-    image: ` + sshHelperImage + `
-    imagePullPolicy: IfNotPresent
-    securityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop: ["ALL"]
-      readOnlyRootFilesystem: true
-      runAsNonRoot: true
-      runAsUser: 65532
-      runAsGroup: 65532
-    command: ["/bin/bash", "-c", "exec sleep infinity"]
-    volumeMounts:
-    - name: tmp
-      mountPath: /tmp
-    - name: home
-      mountPath: /home/sshhelper
-    resources:
-      requests:
-        memory: "128Mi"
-        cpu: "100m"
-      limits:
-        memory: "256Mi"
-        cpu: "200m"
-  volumes:
-  - name: tmp
-    emptyDir: {}
-  - name: home
-    emptyDir: {}
-  restartPolicy: Always
-`
 
 // sshPodSetup is the group-scoped provider that ensures the shared ssh helper pod.
 type sshPodSetup struct {
@@ -155,8 +98,12 @@ func (s *sshPodSetup) Setup(ctx context.Context, rc *core.RunCtx, trs []core.Tes
 			// Create (not apply) so a pod another harness created between get and
 			// create is not patched with this run's annotations. Create can still
 			// commit before its command returns, so rollback reconciles by run-id/UID.
+			manifest, err := sshPodManifestForNodes(avoidHostnameLabels, sshPodBootstrapAnnotations(rc))
+			if err != nil {
+				return err
+			}
 			createAttemptedThisSetup = true
-			uid, err := kubectlCreateSSHPod(ctx, kubeconfig, sshPodManifestForNodes(avoidHostnameLabels, sshPodBootstrapAnnotations(rc)))
+			uid, err := kubectlCreateSSHPod(ctx, kubeconfig, manifest)
 			if err != nil {
 				if isKubectlAlreadyExists(err) {
 					continue
@@ -300,36 +247,20 @@ func sshHelperAvoidNodes(ctx context.Context, kubeconfig string, trs []core.Test
 	return avoidNames, avoidLabels, nil
 }
 
-func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[string]string) string {
-	manifest := sshPodManifest
-	if len(annotations) > 0 {
-		var ann strings.Builder
-		ann.WriteString("  annotations:\n")
-		for _, key := range sortedMapKeys(annotations) {
-			ann.WriteString("    ")
-			ann.WriteString(key)
-			ann.WriteString(": ")
-			ann.WriteString(strconv.Quote(annotations[key]))
-			ann.WriteByte('\n')
-		}
-		manifest = strings.Replace(manifest, "    managed-by: storage-cert-harness\n", "    managed-by: storage-cert-harness\n"+ann.String(), 1)
-	}
-	if len(avoidNodes) == 0 {
-		return manifest
-	}
+func sshPodManifestForNodes(avoidNodes map[string]struct{}, annotations map[string]string) (string, error) {
 	values := make([]string, 0, len(avoidNodes))
 	for node := range avoidNodes {
 		values = append(values, node)
 	}
 	slices.Sort(values)
-	var affinity strings.Builder
-	affinity.WriteString("  affinity:\n    nodeAffinity:\n      requiredDuringSchedulingIgnoredDuringExecution:\n        nodeSelectorTerms:\n        - matchExpressions:\n          - key: kubernetes.io/hostname\n            operator: NotIn\n            values:\n")
-	for _, node := range values {
-		affinity.WriteString("            - ")
-		affinity.WriteString(strconv.Quote(node))
-		affinity.WriteByte('\n')
+	templateSource, err := templates.ReadFile(sshPodManifestPath)
+	if err != nil {
+		return "", err
 	}
-	return strings.Replace(manifest, "spec:\n", "spec:\n"+affinity.String(), 1)
+	rendered, err := manifest.Render(vmRenderer, "ssh-pod.yaml", templateSource, map[string]any{
+		"NAME": sshPodName, "NAMESPACE": sshPodNS, "ANNOTATIONS": annotations, "AVOID_NODES": values,
+	})
+	return string(rendered), err
 }
 
 func sortedMapKeys(m map[string]string) []string {
@@ -500,12 +431,23 @@ func deleteSSHPodUID(ctx context.Context, kubeconfig, uid string) error {
 }
 
 func writeSSHPodDeleteOptions(uid string) (string, error) {
-	body := fmt.Sprintf(`{"apiVersion":"v1","kind":"DeleteOptions","preconditions":{"uid":"%s"}}`, uid)
+	options := struct {
+		APIVersion    string `json:"apiVersion"`
+		Kind          string `json:"kind"`
+		Preconditions struct {
+			UID string `json:"uid"`
+		} `json:"preconditions"`
+	}{APIVersion: "v1", Kind: "DeleteOptions"}
+	options.Preconditions.UID = uid
+	body, err := json.Marshal(options)
+	if err != nil {
+		return "", err
+	}
 	f, err := os.CreateTemp("", "ssh-pod-delete-*.json")
 	if err != nil {
 		return "", err
 	}
-	if _, err := f.WriteString(body); err != nil {
+	if _, err := f.Write(body); err != nil {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
 		return "", err

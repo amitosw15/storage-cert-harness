@@ -337,6 +337,18 @@ func TestPreflightUsesEmbeddedFIOP99Template(t *testing.T) {
 	if err := os.WriteFile(binaryPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake virtbench: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "oc"), []byte(`#!/bin/sh
+if [ "$1" = create ]; then echo '{"status":{"allowed":true}}'; exit 0; fi
+case "$2" in
+ datasource) echo '{"spec":{"source":{"pvc":{"name":"disk"}}},"status":{"conditions":[{"type":"Ready","status":"True"}]}}' ;;
+ pvc) echo '{"spec":{"storageClassName":"sc"},"status":{"phase":"Bound"}}' ;;
+ storageclass) echo '{"items":[{"metadata":{"name":"sc"}}]}' ;;
+ storageprofile) echo '{"status":{"claimPropertySets":[{"accessModes":["ReadWriteMany"],"volumeMode":"Filesystem"}]}}' ;;
+ *) exit 1 ;;
+esac
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PATH", dir)
 	findings, err := (preflight{sc: Scenario{Validate: fioValidate}}).Check(
 		context.Background(), &core.RunCtx{}, nil, []core.TestRequirement{{ID: "TR-STOR-002", Params: map[string]any{"storage_class": "sc", "num_vms": 1}}},
@@ -344,7 +356,7 @@ func TestPreflightUsesEmbeddedFIOP99Template(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
-	if len(findings) != 3 {
+	if len(findings) != 11 {
 		t.Fatalf("findings = %+v, want binary, storage class, and parameter checks", findings)
 	}
 	for _, f := range findings {
@@ -495,7 +507,7 @@ func TestBuildArgsFIO(t *testing.T) {
 	resultsDir := t.TempDir()
 	tr := core.TestRequirement{ID: "TR-STOR-002", Params: map[string]any{
 		"storage_class":   "ocs-storagecluster-ceph-rbd",
-		"fio_vm_template": "assets/fio-vm-template.yaml",
+		"fio_vm_template": "templates/TR-STOR-002/fio-vm-template.yaml",
 		"num_vms":         1,
 		"fio_bs":          "4k",
 	}}
@@ -521,7 +533,7 @@ func TestBuildArgsFIO(t *testing.T) {
 	}
 	fleet := core.TestRequirement{ID: "TR-STOR-002", Params: map[string]any{
 		"storage_class":   "ocs-storagecluster-ceph-rbd",
-		"fio_vm_template": "assets/fio-vm-template.yaml",
+		"fio_vm_template": "templates/TR-STOR-002/fio-vm-template.yaml",
 		"num_vms":         40,
 		"fio_bs":          "4k",
 		"profile":         "load-80",
@@ -557,17 +569,19 @@ func TestBuildArgsFIO(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build args with embedded template: %v", err)
 	}
-	staged := filepath.Join(defaultResultsDir, fioVMTemplateFile)
-	data, err := os.ReadFile(staged)
+	if entries, err := os.ReadDir(defaultResultsDir); err != nil || len(entries) != 0 {
+		t.Fatalf("argument builder wrote intermediate manifests: %v %v", entries, err)
+	}
+	got, err = prepareManifest(t.Context(), manifestRequest{Directory: defaultResultsDir, Args: got, TR: defaultTR})
 	if err != nil {
-		t.Fatalf("read staged embedded template: %v", err)
+		t.Fatal(err)
 	}
-	if string(data) != fioVMTemplate {
-		t.Fatal("staged embedded template differs from the compiled template")
+	staged, _ := argument(got, "--vm-template")
+	data, err := os.ReadFile(staged)
+	if err != nil || strings.Contains(string(data), "{{") || !strings.Contains(string(data), "ocs-storagecluster-ceph-rbd") {
+		t.Fatalf("invalid prepared FIO template: %s %v", data, err)
 	}
-	if !strings.Contains(strings.Join(got, " "), "--vm-template "+staged) {
-		t.Fatalf("FIO args do not use staged embedded template: %v", got)
-	}
+
 }
 
 func TestFIOActionArgs(t *testing.T) {
@@ -1110,7 +1124,23 @@ func TestStageTemplateRejectsSymlinkEscape(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if _, err := stageTemplate(resultsDir, template); err == nil {
-		t.Fatal("stageTemplate accepted a symlink escaping the source directory")
+	if _, err := prepareManifest(t.Context(), manifestRequest{Directory: resultsDir, Args: []string{"datasource-clone", "--storage-class", "test", "--vm-template", template}}); err == nil {
+		t.Fatal("prepareManifest accepted a symlink escaping the source directory")
+	}
+}
+
+func TestExecVirtbenchStopsOnDeadline(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "virtbench"), []byte("#!/bin/sh\nexec sleep 30\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	rc := &core.RunCtx{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := execVirtbench(ctx, rc, manifestRequest{Directory: dir, Args: []string{"version"}})
+	if err == nil || ctx.Err() != context.DeadlineExceeded || time.Since(started) > 3*time.Second {
+		t.Fatalf("command not stopped by deadline: err=%v context=%v", err, ctx.Err())
 	}
 }

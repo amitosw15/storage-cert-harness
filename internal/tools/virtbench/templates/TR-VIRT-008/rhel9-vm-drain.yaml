@@ -1,0 +1,102 @@
+# TR-VIRT-008 VM template: the upstream rhel9-vm-datasource template with the
+# changes node-drain evacuation requires (see decisions/0013):
+#   * evictionStrategy: LiveMigrate   — a drain live-migrates the VM instead of
+#     shutting it down, so it evacuates to another node.
+#   * accessModes: [ReadWriteMany]    — live migration needs the volume mountable
+#     on source and destination at once; RWO makes migration impossible.
+#   * soft nodeAffinity ({{ .TARGET_NODE }}) — a *preferred* (not required) affinity
+#     concentrates the VMs on the drain target without cordoning shared nodes.
+#     Preferred + IgnoredDuringExecution keeps the VM spec migratable: the
+#     live-migration target pod is free to land on any other node. A *required*
+#     rule (or nodeSelector) would re-pin the migration target and break drain.
+# The harness renders all inputs before invoking datasource-clone.
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: rhel-9-vm
+  labels:
+    app: kubevirt-perf-test
+spec:
+  dataVolumeTemplates:
+    - metadata:
+        name: rhel-9-vm-volume
+      spec:
+        sourceRef:
+          kind: DataSource
+          name: {{ .DATASOURCE_NAME | default "rhel9" | quote }}
+          namespace: {{ .DATASOURCE_NAMESPACE | quote }}
+        storage:
+          accessModes:
+            - ReadWriteMany
+          resources:
+            requests:
+              storage: 30Gi
+          storageClassName: {{ .STORAGE_CLASS_NAME | quote }}
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        app: kubevirt-perf-test
+    spec:
+      evictionStrategy: LiveMigrate
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100   # scheduling weight
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - {{ .TARGET_NODE | quote }}
+      domain:
+        cpu:
+          cores: 1
+        devices:
+          disks:
+            - name: rootdisk
+              bootOrder: 1
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+        features:
+          acpi: {}
+          smm:
+            enabled: true
+        resources:
+          requests:
+            cpu: "1"
+            memory: 2Gi
+      networks:
+        - name: default
+          pod: {}
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: rhel-9-vm-volume
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            userData: |
+              #cloud-config
+              user: cloud-user
+              password: changeme
+              chpasswd:
+                expire: false
+              ssh_pwauth: true
+              disable_root: false
+              packages:
+                - qemu-guest-agent
+              runcmd:
+                - systemctl enable --now qemu-guest-agent
