@@ -66,11 +66,25 @@ jobs:
           mkdir -p "${bindir}"
           curl -sSfL "https://github.com/securego/gosec/releases/download/${GOSEC_VERSION}/gosec_${ver}_linux_amd64.tar.gz" \
             | tar xz -C "${bindir}" gosec
-      - run: |
+      # Download the pinned release directly: the upstream installer uses get.trivy.dev,
+      # whose DNS failure can block the build before any supply-chain checks run.
+      - name: Install Trivy
+        run: |
           set -euo pipefail
           source ci/scripts/images.sh
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
+          ver="${TRIVY_VERSION#v}"
+          archive="trivy_${ver}_Linux-64bit.tar.gz"
+          checksums="trivy_${ver}_checksums.txt"
+          release="https://github.com/aquasecurity/trivy/releases/download/${TRIVY_VERSION}"
+          bindir="$(go env GOPATH)/bin"
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "${tmp}"' EXIT
+          curl -fsSL --retry 3 "${release}/${archive}" -o "${tmp}/${archive}"
+          curl -fsSL --retry 3 "${release}/${checksums}" -o "${tmp}/${checksums}"
+          (cd "${tmp}" && sha256sum --check --ignore-missing "${checksums}")
+          mkdir -p "${bindir}"
+          tar xzf "${tmp}/${archive}" -C "${bindir}" trivy
+          "${bindir}/trivy" --version
       - run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - run: ./ci/scripts/supply-chain.sh
       - if: failure()
