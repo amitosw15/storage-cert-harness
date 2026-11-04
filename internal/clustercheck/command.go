@@ -23,7 +23,7 @@ func runKubeCommand(ctx context.Context, kubeconfig string, input []byte, args .
 	if kubeconfig != "" {
 		args = append([]string{"--kubeconfig", kubeconfig}, args...)
 	}
-	cmd := exec.CommandContext(ctx, cli, args...) // #nosec G204 -- CLI is selected by cluster detection; arguments are structured.
+	cmd := exec.CommandContext(ctx, cli, args...) // #nosec G204 -- CLI is selected by cluster detection; exec passes args directly without a shell.
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if input != nil {

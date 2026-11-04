@@ -1,5 +1,6 @@
 extends: default
 
+# Raw Go templates are invalid YAML until rendered, so yamllint cannot parse them.
 ignore: |
   vendor/
   logs/
