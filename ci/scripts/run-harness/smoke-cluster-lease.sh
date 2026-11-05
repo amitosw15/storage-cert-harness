@@ -44,10 +44,6 @@ smoke_cluster_lease_run_id() {
 		echo "${GITHUB_RUN_ID}"
 		return
 	fi
-	if [[ -n "${CI_PIPELINE_ID:-}" ]]; then
-		echo "${CI_PIPELINE_ID}"
-		return
-	fi
 	if [[ -n "${HARNESS_SMOKE_LEASE_RUN_ID:-}" ]]; then
 		echo "${HARNESS_SMOKE_LEASE_RUN_ID}"
 		return
@@ -99,10 +95,6 @@ smoke_cluster_lease_workflow_url() {
 		echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 		return
 	fi
-	if [[ -n "${CI_PIPELINE_URL:-}" ]]; then
-		echo "${CI_PIPELINE_URL}"
-		return
-	fi
 	echo ""
 }
 
@@ -127,7 +119,7 @@ smoke_cluster_lease_collect_annotations() {
 	_anns+=("${SMOKE_CLUSTER_LEASE_ANNOT_PREFIX}git-sha=$(git_sha)")
 	_anns+=("${SMOKE_CLUSTER_LEASE_ANNOT_PREFIX}started-at=$(smoke_cluster_lease_rfc3339_now)")
 
-	local pr="${LIVE_SMOKE_PR_NUMBER:-${GITHUB_PR_NUMBER:-${CI_MERGE_REQUEST_IID:-}}}"
+	local pr="${LIVE_SMOKE_PR_NUMBER:-${GITHUB_PR_NUMBER:-}}"
 	if [[ -n "${pr}" ]]; then
 		_anns+=("${SMOKE_CLUSTER_LEASE_ANNOT_PREFIX}pr-number=${pr}")
 	fi

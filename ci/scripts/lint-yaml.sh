@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lint YAML (plans, backends example, CI wrappers, CodeRabbit).
-# Used by GitLab, GitHub Actions, and the pre-commit hook.
+# Used by GitHub Actions, make lint, and the pre-commit hook.
 set -euo pipefail
 # shellcheck source=ci-utils.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ci-utils.sh"
@@ -11,6 +11,5 @@ else
 fi
 require_cmd yamllint
 yamllint -c "${CI_CONFIG_DIR}/yamllint.yaml" .
-"${CI_SCRIPTS_DIR}/sync-images-yml.sh" --check
 "${CI_SCRIPTS_DIR}/layout-check.sh"
 echo "yaml lint ok"

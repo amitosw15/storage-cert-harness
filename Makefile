@@ -15,14 +15,14 @@ endif
 	run-harness-smoke run-quay-image-tests partner-preflight partner-cert-load-80 \
 	partner-cert-no-load-80 partner-package-results \
 	image-contents-check image-scan-trivy image-scan-dive image-scan image-push \
-	secret-scan supply-chain install-tools mirror-ci-tools sync-images set-next-version
+	secret-scan supply-chain install-tools mirror-ci-tools set-next-version
 
 all: build
 
 build:
 	./ci/scripts/build.sh
 
-# 1:1 with GitLab job unittest (stage: test).
+# Same as the CI unittest job.
 unittest:
 	./ci/scripts/unittest.sh
 
@@ -41,10 +41,8 @@ lint-md:
 lint-go:
 	./ci/scripts/lint-go.sh
 
-# GitLab stage: lint
 lint: lint-yaml lint-actions lint-md lint-go
 
-# GitLab stage: test
 test: unittest secret-scan supply-chain
 
 tidy:
@@ -146,14 +144,9 @@ image-scan: image-build image-contents-check image-scan-trivy image-scan-dive
 image-push:
 	PUSH=1 ./ci/scripts/image-push.sh
 
-# One-time (or refresh) Hub → quay.io/virtarraycert/ci_tools retags. Needs
-# Docker Hub pull + Quay push credentials. Not run in GitLab.
+# Docker Hub pull + Quay push credentials. Run manually when refreshing ci_tools tags.
 mirror-ci-tools:
 	./ci/scripts/mirror-ci-tools.sh
-
-# After editing ci/config/images.env. lint-yaml.sh --check fails if this is stale.
-sync-images:
-	./ci/scripts/sync-images-yml.sh
 
 # Set next binary or image version (see docs/ci.md Versioning).
 #   make set-next-version BINARY=1.0.0

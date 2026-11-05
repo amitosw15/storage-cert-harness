@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local fast path: GitLab lint + test stages, then replay-smoke.
+# Local fast path: lint + test stages, then replay-smoke.
 # Does not build or scan the container. Pass --image to also build + scan sequentially.
 set -euo pipefail
 # shellcheck source=ci-utils.sh

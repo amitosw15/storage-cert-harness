@@ -6,8 +6,7 @@ Script-centric checks for **storage-cert-harness** ([ECOPROJECT-5274](https://re
 files run locally, in GitHub Actions, and via
 pre-commit (yamllint, markdownlint, golangci-lint, secret-scan).
 
-**Support status:** GitHub Actions is the only supported and maintained CI
-provider. GitLab CI is no longer supported.
+**Support status:** GitHub Actions is the supported CI provider.
 
 **`unittest.sh`** (`make unittest`) runs unit tests only (`go test ./...`:
 package tests and golden-file parser tests). It does not need a cluster.
@@ -34,7 +33,6 @@ ci/
     ...                  # lint-*.sh, unittest.sh, secret-scan.sh, etc.
   config/     # linters, pins, allowlists
     images.env           # pinned CI images and tool versions (single source of truth)
-    images.yml           # generated image configuration
     golangci.yml         # golangci-lint config
     yamllint.yaml        # yamllint config
     markdownlint-cli2.jsonc  # markdownlint-cli2 config (includes MD rule overrides)
@@ -333,7 +331,7 @@ In the supported GitHub Actions flow, `image-push` runs automatically on
    (release tarballs today; customized source builds land there first).
 2. Record the immutable digest (`skopeo inspect` on the semver tag).
 3. In this repo, set `HARNESS_BUILDER_VERSION` and `BUILD_IMAGE@sha256:…` in
-   `ci/config/images.env`, then run `./ci/scripts/sync-images-yml.sh --check`.
+   `ci/config/images.env`.
 4. Build the runtime image: `make image-build-local` (rebuilds `bin/harness`
    under the same lock) or `./ci/scripts/image-build.sh` (GitHub: `ci-images.yml`
    after the `harness-binary` artifact).
@@ -390,9 +388,11 @@ an error. Lock files may remain on disk and are reused by subsequent runs.
 
 `run-harness/run-image-tests.sh` and `run-harness/live-cluster-smoke.sh` acquire a Kubernetes
 **Coordination Lease** (`storage-cert-ci/storage-cert-harness-smoke`) via
-`ci/scripts/run-harness/smoke-cluster-lease.sh`: holder identity is the CI run id or
-`local-<user>-<epoch>` for developer runs; annotations record run id, host,
-plan, git SHA, and related metadata (see design doc §2). A background loop renews
+`ci/scripts/run-harness/smoke-cluster-lease.sh`: on **GitHub Actions** live smoke,
+holder identity is `GITHUB_RUN_ID`; locally it is `local-<user>-<epoch>-…`
+(or `HARNESS_SMOKE_LEASE_RUN_ID` when set). Annotations record run id, optional
+PR number (`LIVE_SMOKE_PR_NUMBER` / `GITHUB_PR_NUMBER`), workflow URL when GitHub
+run metadata is present, host, plan, git SHA, and related metadata (see design doc §2). A background loop renews
 the lease every 5 minutes; `trap` on `EXIT` / `INT` / `TERM` stops renewal and
 deletes the lease when this run holds it. If another run holds the lease, the
 script exits with code **2** (cluster busy). Set
@@ -463,14 +463,12 @@ which archives `logs/run-quay-image-tests.log` before each run.
 
 Pins live in **`ci/config/images.env`**. Shell scripts source
 `ci/scripts/images.sh` via `ci/scripts/ci-utils.sh` or `install-tools.sh`.
-After editing the env file, run `./ci/scripts/sync-images-yml.sh`; the
-generated projection is retained for repository compatibility.
 
 | Job | Pin (`ci/config/images.env`) |
 | --- | --- |
 | lint-yaml | `YAML_LINT_IMAGE` |
 | lint-md | `MD_LINT_IMAGE` |
-| lint-go, unittest, secret-scan, supply-chain, replay-smoke, build | Host Go on GitHub Actions (`setup-go`); `GO_IMAGE` is listed for legacy GitLab job images |
+| lint-go, unittest, secret-scan, supply-chain, replay-smoke, build | Host Go on GitHub Actions (`setup-go`); `GO_IMAGE` is for local podman-based jobs |
 | image-build | `BUILD_IMAGE` (digest-pinned **harness-builder**) and `RUNTIME_IMAGE` |
 | image-scan-trivy | Trivy release binary (`TRIVY_VERSION`) + `dist/harness-image.tar` |
 | image-scan-dive | Dive release binary (`DIVE_VERSION`) + `dist/harness-image.tar` |
@@ -567,9 +565,8 @@ uploads `logs/*.log` when a job fails (not the README).
 | `install-tools.sh` | Local install of lint/scan tools + podman (idempotent; `--check`) |
 | `ci-utils.sh` | Shared helpers: `REPO_ROOT`, `CI_SCRIPTS_DIR`, `CI_CONFIG_DIR`, version functions, `container_engine`, logging |
 | `images.sh` | Load `ci/config/images.env`, derive tool refs |
-| `sync-images-yml.sh` | Project `images.env` → generated `images.yml`; `--check` from lint-yaml |
 | `layout-check.sh` | Verify reorder layout: scripts, configs, version files, no leftovers |
-| `lint-yaml.sh` | yamllint + images.yml/Containerfile pin check + layout-check |
+| `lint-yaml.sh` | yamllint + Containerfile pin check + layout-check |
 | `lint-actions.sh` | actionlint validation for `.github/workflows/*.yml` |
 | `lint-md.sh` | markdownlint-cli2 (config from `ci/config/markdownlint-cli2.jsonc`) |
 | `lint-go.sh` | gofmt, go vet, golangci-lint (config from `ci/config/golangci.yml`) |
@@ -763,11 +760,9 @@ Standard `CI` on fork PRs (lint, test, build) continues without cluster credenti
 See the design doc section **Forks and untrusted repositories** in
 [storage-cert-harness-ci-smoke-test.md](design/storage-cert-harness-ci-smoke-test.md).
 
-### AI agent files must not go to public GitHub
+### AI agent files on the public repository
 
-`AGENTS.md`, `CLAUDE.md`, and `skills/` are AI instruction surfaces. On a public
-mirror they can be edited to mis-instruct agents. They stay on **internal
-GitLab**. `.gitattributes` marks them `export-ignore`. GitHub migration must
-publish a tree **without** those paths and fail CI if they reappear. Public
-contributors use this file, [contributing.md](contributing.md), and
+`AGENTS.md`, `CLAUDE.md`, and `skills/` are AI instruction surfaces. They are
+omitted from release archives via `.gitattributes` `export-ignore` when present.
+Public contributors use this file, [contributing.md](contributing.md), and
 [adapter-authoring.md](adapter-authoring.md).

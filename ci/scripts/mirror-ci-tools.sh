@@ -4,7 +4,7 @@
 # (ECOPROJECT-5411 / ECOPROJECT-5417).
 #
 # Requires: a host that can pull Docker Hub *and* push to virtarraycert
-# (podman login quay.io). GitLab CEE runners must not pull Hub themselves.
+# (podman login quay.io). Run from a host that can pull Docker Hub when mirroring.
 #
 # Usage:
 #   ./ci/mirror-ci-tools.sh           # pull Hub, tag, push

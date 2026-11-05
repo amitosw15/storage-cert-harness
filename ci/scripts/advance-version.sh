@@ -58,7 +58,7 @@ echo "${next_img}" > "${REPO_ROOT}/IMAGE-VERSION"
 echo "$(bump_patch "${next_img}")" > "${REPO_ROOT}/NEXT-IMAGE-VERSION"
 
 export ALLOW_VERSION_CHANGE=1
-if [[ -n "${GITHUB_ACTIONS:-}" || -n "${GITLAB_CI:-}" ]]; then
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
 	git -C "${REPO_ROOT}" config user.name "github-actions[bot]"
 	git -C "${REPO_ROOT}" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 fi
@@ -69,16 +69,10 @@ if [[ "${VERSION_BUMP_PR:-}" == "1" ]]; then
 else
 	git -C "${REPO_ROOT}" commit -m "chore: advance binary ${next_bin} image ${next_img} [skip ci]"
 
-	if [[ -n "${GIT_PUSH_TOKEN:-}" ]]; then
-		[[ -n "${CI_PROJECT_PATH:-}" ]] || die "CI_PROJECT_PATH is required for GitLab pushes"
-		[[ -n "${CI_COMMIT_BRANCH:-}" ]] || die "CI_COMMIT_BRANCH is required for GitLab pushes"
-		git -C "${REPO_ROOT}" remote set-url origin \
-			"https://oauth2:${GIT_PUSH_TOKEN}@gitlab.cee.redhat.com/${CI_PROJECT_PATH}.git"
-		git -C "${REPO_ROOT}" push origin "HEAD:${CI_COMMIT_BRANCH}"
-	elif [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+	if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
 		git -C "${REPO_ROOT}" push
 	else
-		echo "note: committed locally but did not push (set GIT_PUSH_TOKEN in GitLab or run in GitHub Actions)"
+		echo "note: committed locally but did not push (run in GitHub Actions to push)"
 	fi
 fi
 echo "advance-version ok"

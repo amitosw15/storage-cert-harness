@@ -30,7 +30,7 @@ make set-next-version BINARY=1.0.0   # or IMAGE=1.0.0; see docs/ci.md Versioning
 ```
 
 `make unittest` / `./ci/scripts/unittest.sh` are **unit tests only** (no cluster).
-`make lint` and `make test` match the GitLab `lint` and `test` stages.
+`make lint` and `make test` match the GitHub Actions lint and test jobs.
 
 ## Live cluster smoke before you open a PR
 

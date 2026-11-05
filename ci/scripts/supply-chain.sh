@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Module integrity (vendor), govulncheck, gosec, and trivy fs (repo tree).
-# Used by GitLab, GitHub Actions, and make test. GitHub Actions gates on
-# failures; GitLab keeps this job allow-failure pending ECOPROJECT-5419.
+# Used by GitHub Actions, make test, and the pre-commit hook.
 set -euo pipefail
 # shellcheck source=ci-utils.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ci-utils.sh"
@@ -13,7 +12,7 @@ require_cmd govulncheck
 require_cmd gosec
 require_cmd trivy
 
-# Each step is announced so a GitLab log is not a single GOPROXY line + exit 1.
+# Each step is announced so CI logs are not a single GOPROXY line + exit 1.
 step() { echo "==> $*"; }
 
 # go mod verify / go mod vendor read the module cache (and the proxy if a
@@ -25,7 +24,7 @@ step() { echo "==> $*"; }
 if [[ "${GOPROXY}" == "off" ]]; then
 	step "go mod verify (GOPROXY=off; skip if the module cache is empty)"
 	if ! env -u GOFLAGS go mod verify; then
-		echo "note: go mod verify failed under GOPROXY=off (typical on GitLab:"
+		echo "note: go mod verify failed under GOPROXY=off (typical on a cold CI runner:"
 		echo "      empty GOMODCACHE). Integrity is committed vendor/ + go.sum."
 		echo "      A local run with a warm cache still verifies. Continuing."
 	fi

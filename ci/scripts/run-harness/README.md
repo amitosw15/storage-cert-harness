@@ -71,7 +71,14 @@ Smoke uses separate mechanisms so local runs do not stomp each other or shared l
 
 - Resource: `storage-cert-ci/storage-cert-harness-smoke` (template in `ci/config/smoke/`).
 - Acquired in `smoke-cluster-lease.sh` before the main harness work; released on exit.
-- Holder ID: `GITHUB_RUN_ID`, `CI_PIPELINE_ID`, `HARNESS_SMOKE_LEASE_RUN_ID`, or `local-<user>-<timestamp>`.
+- **Holder identity** (lease `spec.holderIdentity` and label `storage-cert-harness/ci-smoke`):
+  - **GitHub Actions** live smoke: `GITHUB_RUN_ID`
+  - **Override** (tests or custom CI): `HARNESS_SMOKE_LEASE_RUN_ID`
+  - **Local:** `local-<user>-<epoch>-<pid>-<random>`
+- **Lease annotations** (when set): `pr-number` from `LIVE_SMOKE_PR_NUMBER` or
+  `GITHUB_PR_NUMBER`; `workflow-url` from GitHub Actions run metadata
+  (`GITHUB_SERVER_URL`, `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`); plus plan, git SHA,
+  runner hostname, and API server host (see `docs/ci.md` cluster lease section).
 - Exit code **2** if another CI job or operator holds the lease.
 - Stale lease (crashed runner): delete with cluster admin tools, e.g.  
   `oc delete lease storage-cert-harness-smoke -n storage-cert-ci`

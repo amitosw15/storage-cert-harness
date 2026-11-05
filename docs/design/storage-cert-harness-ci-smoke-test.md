@@ -134,11 +134,11 @@ The Jira description still references `plans/virtbench-bootstorm-live-smoke.yaml
 a boot-storm-only smoke. Implementation and this design use an expanded
 `plans/harness-smoke-plan.yaml` aligned with
 `plans/level3-internal-minimal.yaml` (all catalog TRs, smoke overrides) but
-**without** `TR-VIRT-007`. Image build/push is already implemented via GitHub
-Actions / GitLab CI, not a single combined shell script named `ci/live-smoke.sh`.
+**without** `TR-VIRT-007`. Image build/push is implemented via GitHub Actions,
+not a single combined shell script named `ci/live-smoke.sh`.
 The design keeps **portable scripts** under `storage-cert-harness/ci/scripts/`
-(e.g. extend `run-image-tests.sh` or add `live-cluster-smoke.sh`) so GitLab and
-GitHub share one entry point.
+(e.g. extend `run-image-tests.sh` or add `live-cluster-smoke.sh`) as the shared
+entry point for CI and local runs.
 
 ### When ECOPROJECT-5462 is not needed
 
@@ -147,12 +147,9 @@ GitHub share one entry point.
 `main` and explicitly **not** on push to `main`. That conflicts with the
 historical post-merge-only lean; this design adopts **PR-open smoke** (see §1).
 
-Treat ECOPROJECT-5462 as **out of scope** when either:
-
-- Smoke runs on a **GitLab runner** (or other internal executor) that already has
-network path to the cluster and `podman`/`oc`, or
-- GitHub Actions uses a **self-hosted runner** or **runner group** with cluster
-access, while default `ubuntu-latest` jobs stay unchanged.
+Treat ECOPROJECT-5462 as **out of scope** when GitHub Actions uses a
+**self-hosted runner** or **runner group** with cluster access, while default
+`ubuntu-latest` jobs stay unchanged.
 
 In those cases, only ECOPROJECT-5406-style work is required: secrets, workflow
 job, path filters, and cluster lease/cleanup. No separate “hosted runner”
@@ -163,7 +160,7 @@ the ops runbook instead.
 
 | ECOPROJECT-5462 AC                         | This design                                                                                               |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| Hosted runner used only for cluster smoke  | Satisfied by dedicating a runner label / GitLab tag to the live-smoke job only                            |
+| Hosted runner used only for cluster smoke  | Satisfied by dedicating a self-hosted runner label to the live-smoke job only                            |
 | PR targeting `main` can run smoke on demand / schedule | **Adopted** — no PR-open auto-run; **required** merge gate on failure when check runs |
 | Push to `main` does not run smoke          | **Adopted** — no push trigger; optional daily schedule only with 24h PR activity       |
 | PR to non-`main` branch does not run smoke | Satisfied                                                                                                 |
@@ -242,10 +239,6 @@ fork workflows. Required behavior:
 5. **Self-hosted runner** `storage-cert-smoke` — register only on the upstream
    org; do not attach cluster-capable runners to public fork copies.
 
-**GitLab (internal):** use protected + masked variables and `rules` so live-smoke
-runs only on the canonical project’s protected `main`; fork MRs do not receive
-protected cluster variables.
-
 **Verification:** open a test PR from a personal fork — upstream `CI` lint/test/build
 may run, but **no** `live-smoke` job appears and no workflow step receives
 kubeconfig. Push to a fork’s `main` — same (no smoke job or job skipped with
@@ -272,7 +265,7 @@ paths.
 | Path pattern                                                | Reason                                                                                                             |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `docs/**`, `*.md` (except if co-changed with include paths) | Documentation                                                                                                      |
-| `ci/scripts/**`, `.github/**`, `.gitlab-ci.yml`             | CI wiring — unless paired with include paths in the same push                                                      |
+| `ci/scripts/**`, `.github/**`             | CI wiring — unless paired with include paths in the same push                                                      |
 | `plans/**`                                                  | Plan-only edits (smoke plan is versioned but stable; changing overrides without code should not burn cluster time) |
 | `decisions/**`, `okf/**`, `skills/**`, `AGENTS.md`          | Process / KB metadata                                                                                              |
 | `go.mod`, `go.sum`, `vendor/**`                             | **Dependency-only** — do **not** trigger live smoke (unit test + image build still run on PR)                      |
@@ -281,7 +274,6 @@ paths.
 
 - GitHub: `paths` / `paths-ignore` on a dedicated workflow, or a first-step
 `dorny/paths-filter` (or equivalent) job that sets `run_live_smoke=true`.
-- GitLab: `rules:changes` with the same globs.
 - If a single commit mixes doc and code changes, **run** smoke (include wins).
 
 ### Relationship to image build
@@ -343,7 +335,7 @@ not sensitive).
 | --- | --- | --- |
 | Purpose | On-demand + optional daily schedule (24h PR activity) | Pre-PR validation required by policy |
 | Access | `live-smoke` environment secrets | Contributor `KUBECONFIG` + `work/backends.local.yaml` |
-| Entry point | GHA / GitLab | `make build` + `make image-build-local` + `make run-harness-smoke` |
+| Entry point | GitHub Actions | `make build` + `make image-build-local` + `make run-harness-smoke` |
 
 This does not replace unit tests or replay-smoke; it catches integration issues
 before consuming shared CI cluster time.
@@ -439,7 +431,7 @@ When the lease is held:
 
 - A new smoke workflow **fails immediately** (exit code distinct from harness
   failure, e.g. `2`, message `cluster smoke lease held by run <id>`).
-- **Do not** queue workflows in GitHub/GitLab waiting for the lease.
+- **Do not** queue workflows in GitHub Actions waiting for the lease.
 - Contributors may retry on demand after the active run finishes or use
   `[skip live-smoke]` if the lab is down.
 
@@ -451,7 +443,7 @@ needed):
 | Field | Value |
 | --- | --- |
 | Lease name | `storage-cert-harness-smoke` |
-| Holder identity | `run_id` = `${GITHUB_RUN_ID}` or `${CI_PIPELINE_ID}` |
+| Holder identity | `run_id` = `${GITHUB_RUN_ID}`, `${HARNESS_SMOKE_LEASE_RUN_ID}`, or local `local-<user>-…` |
 | `leaseDurationSeconds` | Job timeout + 15m; **renew** every 5m while harness runs |
 | Labels on workloads created by harness | `storage-cert-harness/ci-smoke=<run_id>` |
 
@@ -515,7 +507,7 @@ release the lease so the next contributor on-demand run can proceed.
 
 | Model                                                    | Cluster access                   | ECOPROJECT-5462                                                   |
 | -------------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
-| GitLab runner in lab VLAN                                | VPN/LAN to API                   | Not needed                                                        |
+| Self-hosted runner in lab VLAN                                | VPN/LAN to API                   | Not needed                                                        |
 | GHA self-hosted runner (`runs-on: [storage-cert-smoke]`) | Same                             | Partially overlaps 5462 — use runner group docs, not “PR-only” AC |
 | GHA `ubuntu-latest` + public API                         | Only if API is public (unlikely) | Impractical                                                       |
 
@@ -543,8 +535,7 @@ GitHub: **Environment** `live-smoke` with required reviewers optional; secrets
 only exposed to the live-smoke job on **upstream** `main` (see **Forks and
 untrusted repositories**). Cluster kubeconfig and backends **must not** live in
 repo-level secrets that are inherited by every workflow — use environment secrets
-so fork PR workflows and unrelated jobs never receive them. GitLab: **protected** +
-**masked** variables, protected branch `main` only on the canonical project.
+so fork PR workflows and unrelated jobs never receive them.
 
 ### Kubeconfig handling
 
@@ -904,7 +895,7 @@ After every run, with `KUBECONFIG` still valid and lease still held:
 
 ### Stuck jobs
 
-On GitLab/GHA **timeout** or **cancel**:
+On GitHub Actions **timeout** or **cancel**:
 
 - `trap` still runs if the runner receives SIGTERM (use `bash` trap; avoid `exec` without trap).
 - Lease TTL expiry allows the next run after slack period even if trap failed once — monitor for duplicate leases.
@@ -950,11 +941,6 @@ operators enable it. Triggers: **`workflow_dispatch`**, **`issue_comment`**
 in the last 24 hours). **No** `pull_request` or `push` triggers. Failed runs
 block merge when branch protection requires the check. Resolvers load the current
 PR head via the Pulls API.
-
-### GitLab
-
-New stage `live-smoke` after `image-build`, `rules:changes` + protected variables,
-runner tag `storage-cert-smoke`.
 
 ---
 

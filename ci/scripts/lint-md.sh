@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lint Markdown (docs, ADRs, README). Mermaid fences are allowed (MD013 off).
-# Used by GitLab, GitHub Actions, make lint, and the pre-commit hook.
+# Used by GitHub Actions, make lint, and the pre-commit hook.
 set -euo pipefail
 # shellcheck source=ci-utils.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ci-utils.sh"

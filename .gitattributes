@@ -1,6 +1,6 @@
 *.sh text eol=lf
 
-# AI instruction surfaces stay on internal GitLab. Omit from archives/exports
+# Omit AI instruction surfaces from archives/exports when present.
 # so they are harder to copy onto a public GitHub tree (ECOPROJECT-5274).
 AGENTS.md export-ignore
 CLAUDE.md export-ignore

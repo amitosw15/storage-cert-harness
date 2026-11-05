@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Go format, vet, and golangci-lint. Fails if tools are missing (unlike the old Makefile).
 # Prefer ~/.local/bin and GOPATH/bin over a distro golangci-lint built with older Go.
-# Used by GitLab, GitHub Actions, make lint, and the pre-commit hook.
+# Used by GitHub Actions, make lint, and the pre-commit hook.
 set -euo pipefail
 # shellcheck source=ci-utils.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ci-utils.sh"

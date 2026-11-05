@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Secret scan: run reports that could carry graded customer numbers, and
 # editor/workspace env vars that look like API keys or tokens.
-# Used by GitLab, GitHub Actions, make test, and the pre-commit hook.
+# Used by GitHub Actions, make test, and the pre-commit hook.
 #
 # SLA thresholds are public (ADR-0017): thresholds.json may be committed and
 # numeric gate values in code/plans/fixtures are no longer scanned. This gate

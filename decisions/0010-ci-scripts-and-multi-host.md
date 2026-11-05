@@ -5,25 +5,23 @@
 
 ## Context
 
-Local development, GitLab CI, GitHub Actions, and pre-commit need the same checks,
+Local development, GitHub Actions, and pre-commit need the same checks,
 including diff-based secret scanning. Makefile-only logic is awkward for hooks
 and specialized job images.
 
 ## Decision
 
 - **`ci/scripts/` owns CI behavior:** build, unit tests, lint, secret scanning,
-  supply-chain checks, replay smoke, and image build/scan/push. Makefile, GitLab,
-  GitHub, and pre-commit are thin wrappers. This supersedes ADR-0002's
+  supply-chain checks, replay smoke, and image build/scan/push. Makefile, GitHub,
+  and pre-commit are thin wrappers. This supersedes ADR-0002's
   Makefile-owned logic.
 - **Offline Go:** commit `vendor/`; use `GOPROXY=off` and `GOFLAGS=-mod=vendor`.
-- **CEE runners:** set `tags: [itup-alm-x86]` on every GitLab job and in
-  `default.tags` so new jobs inherit the pool.
 - **Image release gates:** run Trivy and Dive as parallel CI jobs; push to Quay
   only after both pass. [ADR-0011](0011-harness-ships-as-container-image.md)
   defines the release artifact.
 - **Internal instruction files:** keep `AGENTS.md`, `CLAUDE.md`, and `skills/`
-  on internal GitLab and exclude them from public exports with `export-ignore`.
-  This attribute applies to archives; a normal Git push does not filter history.
+  out of public release archives with `export-ignore` when those paths exist in
+  the tree. This attribute applies to archives; a normal Git push does not filter history.
 
 ## Decision notes
 
@@ -36,7 +34,7 @@ and specialized job images.
 ### Consequences
 
 Scripts check required commands and run in different job images. Local image
-work uses Podman (`CONTAINER_ENGINE`); GitLab uses Buildah and GitHub Docker.
+work uses Podman (`CONTAINER_ENGINE`); GitHub Actions image jobs use Podman.
 
 Contributors run `./ci/scripts/install-tools.sh`, then `make ci` or
 `./ci/scripts/ci.sh`. See [CI documentation](../docs/ci.md) for commands/config.

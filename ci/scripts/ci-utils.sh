@@ -31,7 +31,7 @@ require_cmd() {
 }
 
 git_sha() {
-	local sha="${CI_COMMIT_SHA:-${GITHUB_SHA:-}}"
+	local sha="${GITHUB_SHA:-}"
 	if [[ -n "${sha}" ]]; then
 		echo "${sha:0:12}"
 		return
@@ -44,9 +44,6 @@ image_ref() {
 }
 
 is_main_push() {
-	if [[ -n "${CI_COMMIT_BRANCH:-}" && "${CI_COMMIT_BRANCH}" == "main" && "${CI_PIPELINE_SOURCE:-}" == "push" ]]; then
-		return 0
-	fi
 	if [[ "${GITHUB_REF:-}" == "refs/heads/main" && "${GITHUB_EVENT_NAME:-}" == "push" ]]; then
 		return 0
 	fi
@@ -55,9 +52,6 @@ is_main_push() {
 
 is_version_bump_push() {
 	if is_main_push; then
-		return 0
-	fi
-	if [[ "${CI_COMMIT_BRANCH:-}" == "test-ci" && "${CI_PIPELINE_SOURCE:-}" == "push" ]]; then
 		return 0
 	fi
 	if [[ "${GITHUB_REF:-}" == "refs/heads/test-ci" && "${GITHUB_EVENT_NAME:-}" == "push" ]]; then
@@ -126,8 +120,8 @@ ci_log_init() {
 		log="${LOG_DIR}/${name}-$(date -u +%Y%m%dT%H%M%SZ).log"
 	fi
 	: >"${log}"
-	# GitLab k8s executor packs artifacts as soon as the script exits and does
-	# not wait for process-substitution tee. Close FDs on EXIT so the log is complete.
+	# Some CI runners pack artifacts as soon as the script exits and do not wait
+	# for process-substitution tee. Close FDs on EXIT so the log is complete.
 	_ci_log_start_tee "${log}"
 	echo "==> ${name}  $(date -u +%Y-%m-%dT%H:%M:%SZ)  sha=$(git_sha)"
 }
@@ -143,10 +137,6 @@ _ci_log_flush() {
 trap '_ci_log_flush' EXIT
 
 merge_base() {
-	if [[ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]]; then
-		echo "${CI_MERGE_REQUEST_DIFF_BASE_SHA}"
-		return
-	fi
 	if git rev-parse --verify origin/main >/dev/null 2>&1; then
 		if base="$(git merge-base HEAD origin/main 2>/dev/null)"; then
 			echo "${base}"

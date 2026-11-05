@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verify the built image contains harness, kube-burner, kube-burner-ocp, kubectl, virtctl, and virtbench.
-# Runs after image-build.sh. Same script locally and in GitLab.
+# Runs after image-build.sh. Same script locally and in GitHub Actions.
 set -euo pipefail
 # shellcheck source=ci-utils.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ci-utils.sh"

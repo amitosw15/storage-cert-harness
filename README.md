@@ -181,8 +181,8 @@ plaintext backend credentials. Use `backends.example.yaml` as the template.
 
 ### Layout
 
-See [`AGENTS.md`](AGENTS.md) for the directory map and contributor rules (internal
-GitLab only), [`docs/ci.md`](docs/ci.md) for CI, and [`decisions/`](decisions/)
+See [`AGENTS.md`](AGENTS.md) for the directory map and contributor rules,
+[`docs/ci.md`](docs/ci.md) for CI, and [`decisions/`](decisions/)
 for architecture decision records.
 
 ### Release artifact

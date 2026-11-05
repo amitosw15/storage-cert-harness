@@ -1,8 +1,7 @@
 # AGENTS.md — storage-cert-harness
 
-**Internal only.** This file, `CLAUDE.md`, and `skills/` must not be published
-on public GitHub (tampering / jailbreak risk). See [docs/ci.md](docs/ci.md).
-GitLab keeps them for Red Hat developers.
+**Internal only.** This file, `CLAUDE.md`, and `skills/` are not intended for
+public release archives (tampering / jailbreak risk). See [docs/ci.md](docs/ci.md).
 
 Tool-agnostic project instructions (Claude, Cursor, Gemini, Copilot). `CLAUDE.md`
 is a thin wrapper that loads this file.
@@ -45,7 +44,7 @@ the "why".
 
 - Go 1.26.9+. No cluster needed for the skeleton: the `example` tool runs offline.
 - `./ci/scripts/install-tools.sh` then `make build` → `bin/harness`; `make unittest`
-  (unit tests) or `make test` (GitLab test stage: unittest, secret-scan,
+  (unit tests) or `make test` (GitHub test job: unittest, secret-scan,
   supply-chain); `make ci` / `./ci/scripts/ci.sh`. Image build/run uses **podman** by
   default.
 - Offline Go: `GOPROXY=off`, committed `vendor/`. CI map: [docs/ci.md](docs/ci.md).
@@ -81,7 +80,7 @@ the "why".
 ## Build and test
 
 - `make build` / `make unittest` / `make vet` / `make cover`. `make lint` /
-  `make test` match the GitLab lint and test stages.
+  `make test` match the GitHub Actions lint and test jobs.
 - Every `ResultParser` gets a **golden-file test** (see `internal/tools/example/
   example_test.go`) — cluster-free, so parser work is a small parallel task.
 - Version: `make set-next-version BINARY=x.y.z` or `IMAGE=x.y.z`;
@@ -119,7 +118,7 @@ Propose → review via PR → mark Accepted. Current: 0001 Go, 0002 repo+SDLC,
 0003 architecture, 0004 secret handling, 0005 test plans + backend config,
 0006 KB export v2.0 two-file contract, 0007 virtbench local-exec + replay mode,
 0008 multi-scenario tool table + unit-normalized grading, 0009 scoped setup
-(run/group/individual), 0010 CI scripts (GitLab + GitHub + pre-commit),
+(run/group/individual), 0010 CI scripts (GitHub Actions + pre-commit),
 0011 harness ships as a container image (Quay), 0012 kube-burner generic
 config + snapshot tool, 0013 virtbench node-drain / VM-evacuation (TR-VIRT-008),
 0014 report model + exporters, 0015 continue-from-merge + attestations,
