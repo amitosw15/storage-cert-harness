@@ -74,6 +74,8 @@ func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []cor
 			}
 			if !exists {
 				runs[i].CleanupNamespace = namespace
+			} else if rc.Logger != nil {
+				rc.Logger.Info("kube-burner-ocp: workload namespace existed before run; teardown will skip namespace cleanup", "tr", tr.ID, "namespace", namespace)
 			}
 		}
 
@@ -131,44 +133,6 @@ func namespaceExists(ctx context.Context, namespace string) (bool, error) {
 		return false, err
 	}
 	return strings.TrimSpace(string(out)) != "", nil
-}
-
-func persistentVolumesForNamespace(ctx context.Context, namespace string) (toDelete, retained []string, err error) {
-	cli := clustercheck.KubeCLI()
-	if cli == "" {
-		return nil, nil, fmt.Errorf("kubectl or oc not found on PATH")
-	}
-	out, err := exec.CommandContext(ctx, cli, "get", "pv", "-o", "json").Output()
-	if err != nil {
-		return nil, nil, err
-	}
-	var list struct {
-		Items []struct {
-			Metadata struct {
-				Name string `json:"name"`
-			} `json:"metadata"`
-			Spec struct {
-				PersistentVolumeReclaimPolicy string `json:"persistentVolumeReclaimPolicy"`
-				ClaimRef                      *struct {
-					Namespace string `json:"namespace"`
-				} `json:"claimRef"`
-			} `json:"spec"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(out, &list); err != nil {
-		return nil, nil, fmt.Errorf("parse persistent volumes: %w", err)
-	}
-	for _, pv := range list.Items {
-		if pv.Spec.ClaimRef == nil || pv.Spec.ClaimRef.Namespace != namespace {
-			continue
-		}
-		if pv.Spec.PersistentVolumeReclaimPolicy == "Delete" {
-			toDelete = append(toDelete, pv.Metadata.Name)
-		} else {
-			retained = append(retained, pv.Metadata.Name)
-		}
-	}
-	return toDelete, retained, nil
 }
 
 // buildRunCmd runs kube-burner-ocp from the host PATH, writing into resultsDir/<subdir>.
@@ -322,27 +286,6 @@ func (teardown) Teardown(ctx context.Context, rc *core.RunCtx, bag *core.Bag) er
 			}
 			errs = append(errs, err)
 			continue
-		}
-		toDelete, retained, err := persistentVolumesForNamespace(cleanupCtx, run.CleanupNamespace)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("list persistent volumes for namespace %q: %w", run.CleanupNamespace, err))
-			continue
-		}
-		if len(retained) > 0 && rc.Logger != nil {
-			rc.Logger.Warn("kube-burner-ocp: retained persistent volumes remain after timeout cleanup", "namespace", run.CleanupNamespace, "volumes", retained)
-		}
-		if len(toDelete) == 0 {
-			continue
-		}
-		args := append([]string{"delete", "pv"}, toDelete...)
-		args = append(args, "--ignore-not-found", "--timeout=3m")
-		output, err = exec.CommandContext(cleanupCtx, cli, args...).CombinedOutput() // #nosec G204 -- PV names were returned by the API for the run-owned namespace.
-		if err != nil {
-			err = fmt.Errorf("delete persistent volumes for namespace %q: %w: %s", run.CleanupNamespace, err, strings.TrimSpace(string(output)))
-			if rc.Logger != nil {
-				rc.Logger.Warn("kube-burner-ocp: persistent volume cleanup failed", "namespace", run.CleanupNamespace, "err", err)
-			}
-			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
