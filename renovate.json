@@ -1,6 +1,22 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
+  "extends": ["config:recommended"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": ["ci/config/images\\.env$"],
+      "matchStrings": [
+        "\\w+_IMAGE=(?<depName>[^:\\s@]+):(?<currentValue>[^\\s@]+)\\n"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["ci/config/images\\.env$"],
+      "matchStrings": [
+        "\\w+_IMAGE=(?<depName>[^:\\s@]+)@(?<currentDigest>sha256:[a-f0-9]+)"
+      ],
+      "datasourceTemplate": "docker"
+    }
   ]
 }
