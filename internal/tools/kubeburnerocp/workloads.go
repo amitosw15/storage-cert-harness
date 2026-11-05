@@ -7,6 +7,22 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/clustercheck"
 )
 
+func workloadNamespace(p Params) string {
+	switch p.Workload {
+	case WorkloadPVCDensity:
+		return "pvc-density"
+	case WorkloadVirtMigration:
+		return "virt-migration"
+	case WorkloadVirtParallel:
+		if namespace, ok := asString(p.Raw["namespace"]); ok && namespace != "" {
+			return namespace
+		}
+		return "virt-parallel"
+	default:
+		return ""
+	}
+}
+
 type argType int
 
 const (

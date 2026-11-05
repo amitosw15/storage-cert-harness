@@ -10,6 +10,7 @@ package stages
 
 import (
 	"context"
+	"time"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
@@ -78,6 +79,11 @@ type ToolIntegration struct {
 	LogCollector LogCollector
 	ResultParser ResultParser
 	Teardown     Teardown
+
+	// RunTimeout overrides the default per-test execution limit when positive.
+	RunTimeout time.Duration
+	// TeardownTimeout overrides the default detached cleanup budget when positive.
+	TeardownTimeout time.Duration
 
 	// Scheduling defaults (a plan may override per run — see config.ToolSchedule).
 	// ParallelSafe true lets this tool's job overlap other parallel-safe jobs.

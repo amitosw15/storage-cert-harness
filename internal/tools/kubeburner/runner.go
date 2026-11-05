@@ -16,11 +16,10 @@ import (
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/safefs"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/stages"
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/toolprocess"
 )
 
 type runner struct{}
-
-const cleanupTimeout = 30 * time.Second
 
 func (runner) Run(ctx context.Context, rc *core.RunCtx, bag *core.Bag, trs []core.TestRequirement) (stages.RunHandle, error) {
 	if len(trs) != 1 {
@@ -96,8 +95,7 @@ func buildRunCmd(ctx context.Context, rc *core.RunCtx, env []string, resultsDir,
 	}
 	cfg := filepath.Join(absResults, subdir, "config.yaml")
 	args := []string{"init", "-c", cfg}
-	cmd := exec.CommandContext(ctx, path, args...) // #nosec G204 -- path comes from LookPath and args are harness-generated.
-	cmd.WaitDelay = 5 * time.Second
+	cmd := toolprocess.CommandContext(ctx, path, args...) // #nosec G204 -- path comes from LookPath and args are harness-generated.
 	cmd.Dir = filepath.Join(absResults, subdir)
 	cmd.Env = append(os.Environ(), env...)
 	rc.Logger.Info("kube-burner: running host binary", "path", path)
@@ -184,9 +182,7 @@ func (teardown) Teardown(ctx context.Context, rc *core.RunCtx, bag *core.Bag) er
 	defer func() {
 		selection, _ := core.GetAs[clustercheck.SnapshotSelection](bag, "snapshot_selection")
 		created, _ := core.GetAs[string](bag, "snapshot_storage_class")
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-		defer cancel()
-		if err := selection.CleanupVMStorage(cleanupCtx, created); err != nil {
+		if err := selection.CleanupVMStorage(ctx, created); err != nil {
 			rc.Logger.Warn("kube-burner: remove snapshot storage class", "err", err)
 		}
 	}()
@@ -199,9 +195,7 @@ func (teardown) Teardown(ctx context.Context, rc *core.RunCtx, bag *core.Bag) er
 		return nil
 	}
 	rc.Logger.Info("kube-burner: removing run namespace", "ns", p.NS)
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-	defer cancel()
-	if output, err := exec.CommandContext(cleanupCtx, cli, "delete", "ns", p.NS, "--wait=false", "--ignore-not-found").CombinedOutput(); err != nil { // #nosec G204 -- CLI is resolved by clustercheck and arguments are structured.
+	if output, err := exec.CommandContext(ctx, cli, "delete", "ns", p.NS, "--wait=false", "--ignore-not-found").CombinedOutput(); err != nil { // #nosec G204 -- CLI is resolved by clustercheck and arguments are structured.
 		rc.Logger.Warn("kube-burner: remove run namespace", "ns", p.NS, "err", err, "output", strings.TrimSpace(string(output)))
 	}
 	return nil

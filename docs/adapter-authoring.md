@@ -75,6 +75,18 @@ independently-ownable tasks — great for parallel work.
 8. **Verify:** `make unittest && ./bin/harness list` should show your tool and
    `run --tool <tool>` should exercise it.
 
+### Timeout and teardown
+
+`ToolIntegration.RunTimeout` overrides the harness's default per-test limit of
+two hours. When it expires, the runner context is cancelled; child-process
+adapters should use `internal/toolprocess.CommandContext` to send an interrupt,
+wait up to ten seconds, and then force-stop a process that does not exit.
+The orchestrator then calls the tool's `Teardown` with a detached context,
+bounded by `ToolIntegration.TeardownTimeout` (five minutes by default). Use that
+adapter hook for tool-specific cleanup, whether that means stopping and
+destroying resources or invoking a direct cleanup operation. Scope cleanup to
+resources owned by the current run.
+
 ## Runtime template layout
 
 Keep harness-owned source YAML under `internal/tools/<tool>/templates/<TR-ID>/`.

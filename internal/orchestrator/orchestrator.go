@@ -659,9 +659,19 @@ func relativeTo(workdir string, paths []string) (kept, dropped []string) {
 // runJob drives one tool's stage pipeline over its selected TRs and grades the
 // results. Teardown always runs. Context cancellation short-circuits.
 const perTestTimeout = 2 * time.Hour
+const defaultTeardownTimeout = 5 * time.Minute
 
 func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verdicts []core.Verdict, measurements []core.Measurement) {
-	return runJobWithTimeout(ctx, j, rc, g, perTestTimeout)
+	return runJobWithTimeout(ctx, j, rc, g, runTimeout(j, perTestTimeout))
+}
+
+func runTimeout(j job, fallback time.Duration) time.Duration {
+	if len(j.trs) > 0 {
+		if ti, ok := resolveTool(j.trs[0]); ok && ti.RunTimeout > 0 {
+			return ti.RunTimeout
+		}
+	}
+	return fallback
 }
 
 func runJobWithTimeout(parent context.Context, j job, rc *core.RunCtx, g *grader.Grader, timeout time.Duration) (verdicts []core.Verdict, measurements []core.Measurement) {
@@ -684,26 +694,37 @@ func runJobWithTimeout(parent context.Context, j job, rc *core.RunCtx, g *grader
 		return errTRs(j.trs, fmt.Sprintf("tool %q not registered", j.tool)), nil
 	}
 	bag := core.NewBag()
-
-	if ti.Teardown != nil {
-		defer func() {
-			rc.SetStage("teardown", j.trs)
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-			defer cleanupCancel()
-			if err := ti.Teardown.Teardown(cleanupCtx, rc, bag); err != nil && rc.Logger != nil {
-				rc.Logger.Warn("test teardown failed", "tool", j.tool, "err", err)
-			}
-		}()
-	}
+	var teardownErr error
 	defer func() {
 		if ctx.Err() == context.DeadlineExceeded && parent.Err() == nil {
 			verdicts = nil
 			measurements = nil
+			reason := fmt.Sprintf("test exceeded %s limit", timeout)
+			if teardownErr != nil {
+				reason += fmt.Sprintf("; teardown failed: %v", teardownErr)
+			}
 			for _, tr := range j.trs {
-				verdicts = append(verdicts, itemVerdicts(tr, core.OutcomeFail, fmt.Sprintf("test exceeded %s limit", timeout))...)
+				verdicts = append(verdicts, itemVerdicts(tr, core.OutcomeFail, reason)...)
 			}
 		}
 	}()
+	if ti.Teardown != nil {
+		defer func() {
+			rc.SetStage("teardown", j.trs)
+			teardownTimeout := ti.TeardownTimeout
+			if teardownTimeout <= 0 {
+				teardownTimeout = defaultTeardownTimeout
+			}
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), teardownTimeout)
+			defer cleanupCancel()
+			if err := ti.Teardown.Teardown(cleanupCtx, rc, bag); err != nil {
+				teardownErr = err
+				if rc.Logger != nil {
+					rc.Logger.Warn("test teardown failed", "tool", j.tool, "err", err)
+				}
+			}
+		}()
+	}
 
 	if ti.Preflight != nil {
 		rc.SetStage("preflight", j.trs)
@@ -907,7 +928,7 @@ func runToolExecutionsWithTimeout(ctx context.Context, j job, rc *core.RunCtx, g
 		batch := j
 		batch.trs = []core.TestRequirement{tr}
 		progress.start(tr)
-		v, m := runJobWithTimeout(ctx, batch, rc, g, timeout)
+		v, m := runJobWithTimeout(ctx, batch, rc, g, runTimeout(batch, timeout))
 		if ctx.Err() != nil {
 			progress.abort(tr, core.OutcomeError)
 		} else {
@@ -935,7 +956,7 @@ func runToolExecutionsWithTimeout(ctx context.Context, j job, rc *core.RunCtx, g
 		batch := j
 		batch.trs = []core.TestRequirement{tr}
 		progress.start(tr)
-		v, m := runJobWithTimeout(ctx, batch, &variantRC, g, timeout)
+		v, m := runJobWithTimeout(ctx, batch, &variantRC, g, runTimeout(batch, timeout))
 		if ctx.Err() != nil {
 			progress.abort(tr, core.OutcomeError)
 		} else {
