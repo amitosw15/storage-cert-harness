@@ -6,7 +6,7 @@ metadata:
     app: storage-cert-vmsnapshot
     managed-by: storage-cert-harness
 spec:
-  running: true
+  runStrategy: Always
   dataVolumeTemplates:
     - metadata:
         name: vmdisk-{{.Replica}}
