@@ -661,10 +661,6 @@ func relativeTo(workdir string, paths []string) (kept, dropped []string) {
 const perTestTimeout = 2 * time.Hour
 const defaultTeardownTimeout = 5 * time.Minute
 
-func runJob(ctx context.Context, j job, rc *core.RunCtx, g *grader.Grader) (verdicts []core.Verdict, measurements []core.Measurement) {
-	return runJobWithTimeout(ctx, j, rc, g, runTimeout(j, perTestTimeout))
-}
-
 func runTimeout(j job, fallback time.Duration) time.Duration {
 	if len(j.trs) > 0 {
 		if ti, ok := resolveTool(j.trs[0]); ok && ti.RunTimeout > 0 {

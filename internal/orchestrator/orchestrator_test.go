@@ -205,7 +205,8 @@ func TestPreflightStorageFindingsAreLogged(t *testing.T) {
 			var output strings.Builder
 			rc := &core.RunCtx{Logger: slog.New(slog.NewTextHandler(&output, nil)), SetStage: func(string, []core.TestRequirement) {}}
 			tr := core.TestRequirement{ID: "storage-test", AutomationTool: name}
-			runJob(t.Context(), job{tool: name, trs: []core.TestRequirement{tr}}, rc, nil)
+			j := job{tool: name, trs: []core.TestRequirement{tr}}
+			runJobWithTimeout(t.Context(), j, rc, nil, runTimeout(j, perTestTimeout))
 			if !strings.Contains(output.String(), "level="+strings.ToUpper(level)) || !strings.Contains(output.String(), "source and target StorageClasses differ") {
 				t.Fatalf("missing finding: %s", output.String())
 			}
