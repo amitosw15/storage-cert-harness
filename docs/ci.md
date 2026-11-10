@@ -336,10 +336,12 @@ In the supported GitHub Actions flow, `image-push` runs automatically on
    under the same lock) or `./ci/scripts/image-build.sh` (GitHub: `ci-images.yml`
    after the `harness-binary` artifact).
 
-The `Containerfile` uses `FROM ${BUILD_IMAGE} AS tools` and `COPY --from=tools`
-for `/usr/bin/*`, `/opt/virtbench-runtime` (including `examples/vm-templates`),
-and `/opt/virtbench-venv`, then `FROM ${RUNTIME_IMAGE}` for the final non-root
-runtime. It does not download, compile, or relabel the packaged tools.
+The `Containerfile` extends the digest-pinned **harness-builder** image
+(`FROM ${BUILD_IMAGE}`), adds `bin/harness`, the virtbench `ssh-pod.yaml` patch,
+and the entrypoint, then refreshes RPMs for Trivy. It does not re-copy the tool
+tree onto a second `RUNTIME_IMAGE` rootfs (that pattern duplicated UBI layers and
+failed Dive). It does not download, compile, or relabel the packaged tools.
+`RUNTIME_IMAGE` in `images.env` must still match the builder base stream.
 Override `BUILD_IMAGE` in the environment only for local experiments;
 release CI uses the pinned digest from `images.env`.
 
