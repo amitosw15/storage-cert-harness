@@ -277,3 +277,30 @@ func vmStoragePreflight(ctx context.Context, rc *core.RunCtx, tr core.TestRequir
 	clustercheck.LabelStorageRequests(requests, tr)
 	return clustercheck.CheckStorage(ctx, strParamOr(tr, "kubeconfig", ""), requests)
 }
+
+func datasourceCloneScenario() Scenario {
+	return Scenario{
+		AutomationTool: "virtbench datasource-clone",
+		ProvidesTR:     "TR-VIRT-002",
+		VMRange:        cloneVMRange,
+		Template:       vmTemplateConfig{Embedded: singleNodeVMTemplatePath},
+		ResultFile:     SummaryFileName,
+		NSPrefix:       "virtbench",
+		BuildArgs:      datasourceCloneArgs(false, "virtbench"),
+		Parse:          ParseSummary,
+		// all SLAs (clone_duration / time_to_running / time_to_ping) are measured.
+	}
+}
+
+func bootStormScenario() Scenario {
+	return Scenario{
+		AutomationTool: "virtbench datasource-clone --boot-storm",
+		ProvidesTR:     "TR-VIRT-001",
+		VMRange:        cloneVMRange,
+		Template:       vmTemplateConfig{Embedded: singleNodeVMTemplatePath},
+		ResultFile:     BootStormFileName,
+		NSPrefix:       "virtbench",
+		BuildArgs:      datasourceCloneArgs(true, "virtbench"),
+		Parse:          ParseBootStorm,
+	}
+}

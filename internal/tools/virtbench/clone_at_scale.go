@@ -86,3 +86,29 @@ func cloneAtScaleValidate(tr core.TestRequirement) error {
 	}
 	return nil
 }
+
+func newCloneAtScaleScenario() Scenario {
+	return Scenario{
+		// VDI Ready badge (TR-VIRT-018): clone VMs at scale with 2 disks each.
+		// Same datasource-clone parser as TR-VIRT-002, but its own BuildArgs
+		// (clone_at_scale.go): virtbench's --num-disks flag only labels output,
+		// it never adds a disk, so a real 2-disk template is embedded by
+		// default; a plan may swap in its own vm_template/num_disks, validated
+		// against each other (cloneAtScaleValidate). Only gate: clone_duration.
+		AutomationTool: "virtbench datasource-clone --num-disks 2",
+		ProvidesTR:     "TR-VIRT-018",
+		VMRange:        cloneAtScaleRange,
+		Template:       vmTemplateConfig{Embedded: twoDiskVMTemplatePath},
+		ResultFile:     SummaryFileName,
+		NSPrefix:       "virtbench",
+		BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+			return cloneAtScaleArgs("virtbench")(rc, tr, resultsRoot)
+		},
+		Parse:    ParseSummary,
+		Validate: cloneAtScaleValidate,
+		// TR-018's gate is p99 clone provisioning; compute it from the per-VM
+		// samples (the summary carries only avg/max/min).
+		DetailFile:  DetailCloneFileName,
+		DetailParse: func(data []byte) ([]core.Metric, error) { return ClonePercentiles(data, []string{"p99"}) },
+	}
+}

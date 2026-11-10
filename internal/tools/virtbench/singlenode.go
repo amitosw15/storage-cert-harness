@@ -219,3 +219,22 @@ func singleNodeLunMetric(tr core.TestRequirement, res core.TestResult) []core.Me
 	vms := vmCount(res, "max_vms_per_node")
 	return []core.Metric{{Name: "max_luns_per_node", Value: float64(vms * disks), Unit: "count"}}
 }
+
+func singleNodeScenario() Scenario {
+	return Scenario{
+		AutomationTool: "virtbench datasource-clone --single-node",
+		ProvidesTR:     "TR-VIRT-013",
+		VMRange:        singleNodeVMRange,
+		Template:       vmTemplateConfig{Embedded: singleNodeVMTemplatePath},
+		ResultFile:     SummaryFileName,
+		NSPrefix:       singleNodeNSPrefix,
+		BuildArgs: func(rc *core.RunCtx, _ *core.Bag, tr core.TestRequirement, resultsRoot string) ([]string, error) {
+			return singleNodeCeilingArgs(singleNodeNSPrefix)(rc, tr, resultsRoot)
+		},
+		Parse:            ParseSingleNodeCeiling,
+		Preflight:        singleNodeCeilingPreflight,
+		Validate:         singleNodeCeilingValidate,
+		DeriveMetrics:    singleNodeLunMetric,
+		TolerateRunError: true, // virtbench exits 1 whenever any VM failed — expected here (singlenode.go)
+	}
+}

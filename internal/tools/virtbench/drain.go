@@ -234,3 +234,20 @@ func uncordonNode(ctx context.Context, kubeconfig, node string) error {
 	}
 	return nil
 }
+
+func drainScenario() Scenario {
+	return Scenario{
+		AutomationTool:   "virtbench vm-ops drain-nodes",
+		ProvidesTR:       "TR-VIRT-008",
+		VMRange:          drainVMRange,
+		Template:         vmTemplateConfig{Embedded: drainVMTemplatePath},
+		ResultFile:       DrainFileName,
+		NSPrefix:         drainNSPrefix,
+		BuildArgs:        drainArgs,
+		Parse:            ParseDrain,
+		Preflight:        drainPreflight,
+		Provision:        drainProvision,
+		Teardown:         drainTeardown,
+		TolerateRunError: true, // drain-nodes exits 1 on timeout; grade the FAIL from the log
+	}
+}
