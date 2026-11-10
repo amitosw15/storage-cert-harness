@@ -241,6 +241,40 @@ func TestParseFIOErrors(t *testing.T) {
 	}
 }
 
+func TestParseFIORejectsJobErrorWhenSummarySaysSuccess(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", FIOFileName))
+	if err != nil {
+		t.Fatalf("read FIO fixture: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("decode FIO fixture: %v", err)
+	}
+	job := result["jobs"].([]any)[0].(map[string]any)
+	job["error"] = 5
+	raw, err = json.Marshal(result)
+	if err != nil {
+		t.Fatalf("encode FIO fixture: %v", err)
+	}
+
+	collected, err := json.Marshal(fioCollectedResults{
+		Summary: json.RawMessage(`{"total_vms":1,"successful":1,"failed":0}`),
+		Results: []json.RawMessage{raw},
+	})
+	if err != nil {
+		t.Fatalf("encode collected FIO fixture: %v", err)
+	}
+
+	for name, payload := range map[string][]byte{"raw": raw, "collected": collected} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseFIO(payload, "TR-STOR-002")
+			if err == nil || !strings.Contains(err.Error(), "fio job failed with error 5") {
+				t.Fatalf("ParseFIO error = %v, want nonzero job error rejection", err)
+			}
+		})
+	}
+}
+
 func TestCollectFIOResults(t *testing.T) {
 	root := t.TempDir()
 	raw, err := os.ReadFile(filepath.Join("testdata", FIOFileName))
