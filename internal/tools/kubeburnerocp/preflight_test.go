@@ -13,19 +13,19 @@ import (
 func TestPreflightContinuesAfterInvalidWorkload(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	trs := []core.TestRequirement{
-		{ID: "INVALID", Params: map[string]any{"workload": "unknown"}},
-		{ID: "MIGRATION", Params: map[string]any{"workload": WorkloadVirtMigration, "iterations": 1, "iteration_vms": 2}},
-		{ID: "PARALLEL", Params: map[string]any{"workload": WorkloadVirtParallel}},
+		{ID: "TR-STOR-006", Params: map[string]any{"workload": "unknown"}},
+		{ID: "TR-VIRT-004", Params: map[string]any{"workload": WorkloadVirtMigration, "iterations": 1, "iteration_vms": 2}},
+		{ID: "TR-VIRT-019", Params: map[string]any{"workload": WorkloadVirtParallel}},
 	}
 	got, err := (preflight{}).Check(context.Background(), &core.RunCtx{}, core.NewBag(), trs)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []struct{ level, message string }{
-		{"error", "INVALID parameters:"},
+		{"error", "TR-STOR-006 parameters:"},
 		{"skip", "cannot select checks without a valid workload"},
-		{"info", "MIGRATION workload=virt-migration"},
-		{"info", "PARALLEL workload=virt-parallel"},
+		{"info", "TR-VIRT-004 workload=virt-migration"},
+		{"info", "TR-VIRT-019 workload=virt-parallel"},
 		{"error", "kube-burner-ocp"},
 		{"error", "virtctl"},
 		{"skip", "kubevirts.kubevirt.io: neither kubectl nor oc found"},
@@ -50,7 +50,7 @@ func TestPreflightSuccessfulMigration(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 	got, err := (preflight{}).Check(context.Background(), &core.RunCtx{Backend: &core.ResolvedBackend{StorageClass: "test-sc"}}, core.NewBag(),
-		[]core.TestRequirement{{ID: "MIGRATION", Params: map[string]any{
+		[]core.TestRequirement{{ID: "TR-VIRT-004", Params: map[string]any{
 			"workload": WorkloadVirtMigration, "iterations": 1, "iteration_vms": 2,
 		}}})
 	if err != nil {
@@ -81,7 +81,7 @@ func TestPreflightRejectsMissingWorkloadParam(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 	got, err := (preflight{}).Check(context.Background(), &core.RunCtx{Backend: &core.ResolvedBackend{StorageClass: "test-sc"}}, core.NewBag(),
-		[]core.TestRequirement{{ID: "MIGRATION", Params: map[string]any{
+		[]core.TestRequirement{{ID: "TR-VIRT-004", Params: map[string]any{
 			"workload": WorkloadVirtMigration, "concurrency": 2, // what the catalog declares, not what the tool needs
 		}}})
 	if err != nil {

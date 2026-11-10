@@ -1,4 +1,4 @@
-// Package kubeburnerocp integrates kube-burner-ocp (many workloads, one adapter; the workload is selected per TR by the plan).
+// Package kubeburnerocp integrates kube-burner-ocp (many workloads, one adapter; the workload is selected by TR ID).
 package kubeburnerocp
 
 import (

@@ -203,20 +203,3 @@ func ensureNamespace(ctx context.Context, kubeconfig, ns string) error {
 	}
 	return kubectlApply(ctx, kubeconfig, string(rendered))
 }
-
-func failureRecoveryScenario() Scenario {
-	return Scenario{
-		// HA badge (TR-VIRT-007): create VMs on the target node with node affinity,
-		// then monitor them recovering after a node failure.
-		AutomationTool: "virtbench failure-recovery",
-		ProvidesTR:     "TR-VIRT-007",
-		VMRange:        recoveryVMRange,
-		Template:       vmTemplateConfig{Embedded: failureRecoveryVMTemplatePath},
-		ResultFile:     FailureRecoveryFileName,
-		NSPrefix:       "failure-recovery",
-		BuildArgs:      failureRecoveryArgs("failure-recovery"),
-		Parse:          ParseFailureRecovery,
-		Validate:       failureRecoveryValidate,
-		ProvisionVMs:   provisionFailureRecoveryVMs,
-	}
-}

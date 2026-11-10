@@ -35,6 +35,10 @@ flowchart LR
   GRADE -->|"Verdict per item"| REP["report: json + markdown"]
 ```
 
+Kube-burner and virtbench maintain their scenario configuration by TR ID.
+Kube-burner-ocp selects its workload by TR ID; a plan may retain a `workload`
+parameter only when it matches the workload assigned to that TR.
+
 ## Stage interfaces (the layers)
 
 `Preflight`, `Provisioner`, `Runner`, `LogCollector`, `ResultParser`,

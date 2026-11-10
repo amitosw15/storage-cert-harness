@@ -37,6 +37,12 @@ type workloadSpec struct {
 	mapResults resultMapper
 }
 
+var scenarioWorkloads = map[string]string{
+	"TR-STOR-006": WorkloadPVCDensity,
+	"TR-VIRT-004": WorkloadVirtMigration,
+	"TR-VIRT-019": WorkloadVirtParallel,
+}
+
 var workloadSpecs = map[string]workloadSpec{
 	WorkloadPVCDensity: {
 		sub:        "pvc-density",

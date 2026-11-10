@@ -14,25 +14,33 @@ const (
 	resultsSubdir         = "kubeburner-results"
 )
 
-// Params identifies the workload; per-flag values stay in Raw (the plan's TR
-// params) and are type-checked as they render via workloadSpecs.
+// Params identifies the TR workload and retains plan parameters for validation.
 type Params struct {
+	TRID     string
 	Workload string
 	Raw      map[string]any
 }
 
 func resolveParams(trs []core.TestRequirement) Params {
-	if len(trs) == 0 || trs[0].Params == nil {
+	if len(trs) == 0 {
 		return Params{}
 	}
-	p := Params{Raw: trs[0].Params}
-	if v, ok := asString(p.Raw["workload"]); ok {
-		p.Workload = v
-	}
+	p := Params{TRID: trs[0].ID, Raw: trs[0].Params, Workload: scenarioWorkloads[trs[0].ID]}
 	return p
 }
 
 func (p Params) validate() error {
+	if p.TRID != "" {
+		if p.Workload == "" {
+			return fmt.Errorf("kube-burner-ocp: no workload for TR %q", p.TRID)
+		}
+		if value, present := p.Raw["workload"]; present {
+			workload, ok := asString(value)
+			if !ok || workload != p.Workload {
+				return fmt.Errorf("kube-burner-ocp: TR %s requires workload %q, got %v", p.TRID, p.Workload, value)
+			}
+		}
+	}
 	if p.Workload == "" {
 		return fmt.Errorf("kube-burner-ocp: missing required param %q", "workload")
 	}
