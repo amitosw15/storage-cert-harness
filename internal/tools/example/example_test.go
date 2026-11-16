@@ -1,16 +1,41 @@
 package example
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openshift-storage-cert/storage-cert-harness/internal/core"
 )
 
 // update regenerates the golden file: go test ./... -update
 var update = flag.Bool("update", false, "update golden files")
+
+func TestRunnerUsesDistinctHandlesWithinRun(t *testing.T) {
+	rc := &core.RunCtx{RunID: "same-run", Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	handles := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		bag := core.NewBag()
+		h, err := (runner{}).Run(context.Background(), rc, bag, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h.ID == "" || handles[h.ID] {
+			t.Fatalf("expected distinct nonempty handle, got %q", h.ID)
+		}
+		handles[h.ID] = true
+		job, ok := core.GetAs[string](bag, "job")
+		if !ok || job != h.ID {
+			t.Fatalf("bag job = %q, want %q", job, h.ID)
+		}
+	}
+}
 
 // TestParseResults is the golden-file pattern every tool's ResultParser test
 // should follow: feed a fixture, parse, compare normalized output to a golden

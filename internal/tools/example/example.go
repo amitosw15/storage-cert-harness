@@ -11,6 +11,7 @@ package example
 
 import (
 	"context"
+	"crypto/rand"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -61,7 +62,11 @@ type runner struct{}
 
 func (runner) Run(_ context.Context, rc *core.RunCtx, bag *core.Bag, _ []core.TestRequirement) (stages.RunHandle, error) {
 	ns, _ := core.GetAs[string](bag, "namespace")
-	job := "example-job-" + rc.RunID
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return stages.RunHandle{}, fmt.Errorf("example: generate job handle: %w", err)
+	}
+	job := fmt.Sprintf("example-job-%s-%x", rc.RunID, id)
 	bag.Set("job", job)
 	rc.Logger.Debug("example: launched", "namespace", ns, "job", job)
 	// A real runner would create a Job from ToolIntegration.Image here.
