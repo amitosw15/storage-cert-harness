@@ -93,6 +93,17 @@ make build
 `thresholds.json` is supplied with the repository inputs and is passed at run
 time via `--thresholds <path>` or `HARNESS_THRESHOLDS`.
 
+### Preview selected executions
+
+Use the normal run inputs with `--inspect-plan` to print the selected test executions as JSON and exit before attestations or workloads:
+
+```sh
+./bin/harness run --catalog catalog.json --thresholds thresholds.json \
+  --plan plans/virtbench-fio-live-smoke.yaml --inspect-plan
+```
+
+The versioned JSON output lists each test ID, tool, and any named variant or scenario. Selection and filters use the same rules as `run`; CLI selection flags replace the plan selector. The command loads and validates the normal run inputs, including any selected backend, but does not run tool preflight, collect the cluster environment, or create reports. Backend resolution may read configured credentials. Standard output contains JSON; logs go to standard error.
+
 ### Preflight checks
 
 Use the same catalog, plan, and backend options as the intended run:

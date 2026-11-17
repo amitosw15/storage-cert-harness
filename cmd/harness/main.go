@@ -269,6 +269,7 @@ func newRunCmd() *cobra.Command {
 		continueFrom     string
 		retryFailed      bool
 		skipEnv          bool
+		inspectPlan      bool
 		runTimeout       time.Duration
 	)
 	cmd := &cobra.Command{
@@ -277,7 +278,7 @@ func newRunCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
 			var logFile io.WriteCloser
 			var closeLog func()
-			if outputDir != "" {
+			if outputDir != "" && !inspectPlan {
 				root, err := safefs.OpenRootDir(outputDir, 0o755)
 				if err != nil {
 					return err
@@ -381,6 +382,28 @@ func newRunCmd() *cobra.Command {
 				before := len(selected)
 				selected = orchestrator.ResumeExecutionsWithOptions(selected, *prior, cfg.Scenario, retryFailed)
 				logger.Info("continue-from: selecting incomplete executions", "previously_selected", before, "resuming", len(selected), "skipped_completed", before-len(selected), "scenario", cfg.Scenario)
+			}
+			if inspectPlan {
+				executions, err := orchestrator.ResolveExecutions(selected, cfg)
+				if err != nil {
+					return err
+				}
+				type execution struct {
+					ID       string `json:"id"`
+					Tool     string `json:"tool"`
+					Variant  string `json:"variant,omitempty"`
+					Scenario string `json:"scenario,omitempty"`
+				}
+				preview := struct {
+					SchemaVersion string      `json:"schema_version"`
+					Executions    []execution `json:"executions"`
+				}{SchemaVersion: "1", Executions: make([]execution, 0, len(executions))}
+				for _, tr := range executions {
+					preview.Executions = append(preview.Executions, execution{ID: tr.ID, Tool: tr.AutomationTool, Variant: tr.Variant, Scenario: cfg.Scenario})
+				}
+				encoder := json.NewEncoder(cmd.OutOrStdout())
+				encoder.SetIndent("", "  ")
+				return encoder.Encode(preview)
 			}
 			var attestations []core.Attestation
 			switch {
@@ -535,6 +558,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&continueFrom, "continue-from", "", "path to a prior report.json to reuse its environment and merge this run into")
 	cmd.Flags().BoolVar(&retryFailed, "retry-failed", false, "with --continue-from, rerun previously completed fail/error executions")
 	cmd.Flags().BoolVar(&skipEnv, "skip-env", false, "skip cluster environment collection")
+	cmd.Flags().BoolVar(&inspectPlan, "inspect-plan", false, "print selected executions as JSON and exit before running tests")
 	cmd.Flags().DurationVar(&runTimeout, "timeout", 0, "cancel the run after this duration (0 means no harness timeout)")
 	cmd.Flags().StringSliceVar(&cfg.Filter.Tools, "tool", nil, "restrict to these automation tools")
 	cmd.Flags().StringSliceVar(&cfg.Filter.IDs, "id", nil, "restrict to these TR ids")
