@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -169,6 +170,9 @@ func newPreflightCmd() *cobra.Command {
 		Use:   "preflight",
 		Short: "Run preflight checks for the tools selected by the catalog/filter",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := validateIDFlag(cmd, filter.IDs); err != nil {
+				return err
+			}
 			logger := newLoggerTo(verbose, cmd.OutOrStdout(), nil)
 			cfg := config.Config{Filter: filter}
 			resolved, err := configureExecution(cmd, &cfg, planPath, backendsPath, &backendName, false, logger)
@@ -275,6 +279,9 @@ func newRunCmd() *cobra.Command {
 		Use:   "run",
 		Short: "Run selected certification tests and emit a report",
 		RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
+			if err := validateIDFlag(cmd, cfg.Filter.IDs); err != nil {
+				return err
+			}
 			var logFile io.WriteCloser
 			var closeLog func()
 			if outputDir != "" {
@@ -665,6 +672,21 @@ func loadAttestations(path string) ([]core.Attestation, error) {
 		out = append(out, core.Attestation{Claim: k, Value: doc.Claims[k], SignedBy: doc.SignedBy})
 	}
 	return out, nil
+}
+
+func validateIDFlag(cmd *cobra.Command, ids []string) error {
+	if !cmd.Flags().Changed("id") {
+		return nil
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("--id requires nonempty test IDs")
+	}
+	for _, id := range ids {
+		if strings.TrimSpace(id) == "" {
+			return fmt.Errorf("--id requires nonempty test IDs")
+		}
+	}
+	return nil
 }
 
 func configureExecution(cmd *cobra.Command, cfg *config.Config, planPath, backendsPath string, backendName *string, applyConcurrency bool, logger *slog.Logger) (*core.ResolvedBackend, error) {
