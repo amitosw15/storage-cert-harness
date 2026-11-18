@@ -108,3 +108,19 @@ func TestContinueCompletedPreviewIsEmpty(t *testing.T) {
 		t.Fatalf("executions = %v", result.Executions)
 	}
 }
+
+func TestAllTestsSelectorConflicts(t *testing.T) {
+	for _, command := range []string{"run", "preflight"} {
+		for _, tc := range []struct{ flag, value string }{{"id", "TR-1"}, {"tool", "tool-a"}, {"partner-level", "3"}} {
+			t.Run(command+"/"+tc.flag, func(t *testing.T) {
+				cmd := newRootCmd()
+				cmd.SetOut(&bytes.Buffer{})
+				cmd.SetArgs([]string{command, "--catalog", "missing.json", "--all-tests", "--" + tc.flag, tc.value})
+				err := cmd.Execute()
+				if err == nil || !strings.Contains(err.Error(), "--all-tests cannot be combined with --"+tc.flag) {
+					t.Fatalf("error = %v", err)
+				}
+			})
+		}
+	}
+}

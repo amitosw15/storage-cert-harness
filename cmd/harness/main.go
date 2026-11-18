@@ -166,6 +166,7 @@ func newPreflightCmd() *cobra.Command {
 		backendsPath      string
 		backendName       string
 		focusIDs, skipIDs []string
+		allTests          bool
 	)
 	var verbose bool
 	cmd := &cobra.Command{
@@ -180,6 +181,9 @@ func newPreflightCmd() *cobra.Command {
 			resolved, err := configureExecution(cmd, &cfg, planPath, backendsPath, &backendName, false, logger)
 			if err != nil {
 				return err
+			}
+			if allTests {
+				cfg.Filter = config.Filter{}
 			}
 			cat, err := catalog.Load(catalogPath)
 			if err != nil {
@@ -257,6 +261,7 @@ func newPreflightCmd() *cobra.Command {
 	cmd.Flags().StringVar(&backendName, "backend", "", "name of the active storage backend (overrides the plan)")
 	cmd.Flags().StringSliceVar(&filter.Tools, "tool", nil, "restrict to these automation tools")
 	cmd.Flags().StringSliceVar(&filter.IDs, "id", nil, "restrict to these TR ids")
+	cmd.Flags().BoolVar(&allTests, "all-tests", false, "select all catalog tests instead of the plan selection")
 	cmd.Flags().IntSliceVar(&filter.PartnerLevels, "partner-level", nil, "restrict to these partner levels (1|2|3)")
 	addFocusSkipFlags(cmd, &focusIDs, &skipIDs)
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "debug logging")
@@ -281,6 +286,7 @@ func newRunCmd() *cobra.Command {
 		retryFailed      bool
 		skipEnv          bool
 		inspectPlan      bool
+		allTests         bool
 		focusIDs         []string
 		skipIDs          []string
 		runTimeout       time.Duration
@@ -320,6 +326,9 @@ func newRunCmd() *cobra.Command {
 			resolved, err := configureExecution(cmd, &cfg, planPath, backendsPath, &backendName, true, logger)
 			if err != nil {
 				return err
+			}
+			if allTests {
+				cfg.Filter = config.Filter{}
 			}
 			if cmd.Flags().Changed("scenario") {
 				cfg.Scenario = scenario
@@ -580,6 +589,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&runTimeout, "timeout", 0, "cancel the run after this duration (0 means no harness timeout)")
 	cmd.Flags().StringSliceVar(&cfg.Filter.Tools, "tool", nil, "restrict to these automation tools")
 	cmd.Flags().StringSliceVar(&cfg.Filter.IDs, "id", nil, "restrict to these TR ids")
+	cmd.Flags().BoolVar(&allTests, "all-tests", false, "select all catalog tests instead of the plan selection")
 	cmd.Flags().IntSliceVar(&cfg.Filter.PartnerLevels, "partner-level", nil, "restrict to these partner levels (1|2|3)")
 	addFocusSkipFlags(cmd, &focusIDs, &skipIDs)
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "debug logging")
@@ -716,6 +726,17 @@ func addFocusSkipFlags(cmd *cobra.Command, focusIDs, skipIDs *[]string) {
 }
 
 func validateSelectionFlags(cmd *cobra.Command) error {
+	allTests, err := cmd.Flags().GetBool("all-tests")
+	if err != nil {
+		return err
+	}
+	if allTests {
+		for _, name := range []string{"id", "tool", "partner-level"} {
+			if cmd.Flags().Changed(name) {
+				return fmt.Errorf("--all-tests cannot be combined with --%s", name)
+			}
+		}
+	}
 	for _, name := range []string{"id", "tool", "focus", "skip"} {
 		if !cmd.Flags().Changed(name) {
 			continue

@@ -55,6 +55,10 @@ select:
 	}{
 		{"multiple tools and variants", multi, nil, []planExecution{{ID: "TR-1", Tool: "tool-a", Scenario: "load"}, {ID: "TR-2", Tool: "tool-b", Variant: "small", Scenario: "load"}, {ID: "TR-2", Tool: "tool-b", Variant: "large", Scenario: "load"}}},
 		{"another plan", single, nil, []planExecution{{ID: "TR-1", Tool: "tool-a"}, {ID: "TR-3", Tool: "tool-a"}}},
+		{"all tests overrides plan", single, []string{"--all-tests"}, []planExecution{{ID: "TR-1", Tool: "tool-a"}, {ID: "TR-2", Tool: "tool-b"}, {ID: "TR-3", Tool: "tool-a"}}},
+		{"all tests with focus", single, []string{"--all-tests", "--focus", "TR-2"}, []planExecution{{ID: "TR-2", Tool: "tool-b"}}},
+		{"all tests with skip", single, []string{"--all-tests", "--skip", "TR-2"}, []planExecution{{ID: "TR-1", Tool: "tool-a"}, {ID: "TR-3", Tool: "tool-a"}}},
+		{"all tests false preserves plan", single, []string{"--all-tests=false"}, []planExecution{{ID: "TR-1", Tool: "tool-a"}, {ID: "TR-3", Tool: "tool-a"}}},
 		{"filter replaces plan selector", single, []string{"--id", "TR-2", "--scenario", "custom"}, []planExecution{{ID: "TR-2", Tool: "tool-b", Scenario: "custom"}}},
 		{"tool filter", multi, []string{"--tool", "tool-b"}, []planExecution{{ID: "TR-2", Tool: "tool-b", Variant: "small", Scenario: "load"}, {ID: "TR-2", Tool: "tool-b", Variant: "large", Scenario: "load"}}},
 		{"partner level filter", single, []string{"--partner-level", "2"}, []planExecution{{ID: "TR-2", Tool: "tool-b"}}},

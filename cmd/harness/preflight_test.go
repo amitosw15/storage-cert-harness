@@ -275,6 +275,7 @@ func TestPreflightFocusSkipOnlyChecksSelectedTools(t *testing.T) {
 		{"focus overrides skip", []string{"--focus", "TR-CLEAN", "--skip", "TR-CLEAN,TR-FAIL"}},
 		{"id and focus", []string{"--id", "TR-CLEAN,TR-FAIL", "--focus", "TR-CLEAN"}},
 		{"tool and skip", []string{"--tool", "test-preflight-clean,test-preflight-mixed", "--skip", "TR-FAIL"}},
+		{"all tests with focus", []string{"--all-tests", "--focus", "TR-CLEAN"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
@@ -296,5 +297,26 @@ func TestPreflightFocusSkipOnlyChecksSelectedTools(t *testing.T) {
 		if err := cmd.Execute(); err == nil {
 			t.Fatalf("expected selection error for %v", args)
 		}
+	}
+}
+
+func TestPreflightAllTestsOverridesPlan(t *testing.T) {
+	catalogPath := writePreflightCatalog(t, []catalog.TR{
+		{ID: "TR-CLEAN", AutomationTool: "test-preflight-clean"},
+		{ID: "TR-FAIL", AutomationTool: "test-preflight-mixed"},
+	})
+	planPath := filepath.Join(t.TempDir(), "plan.yaml")
+	if err := os.WriteFile(planPath, []byte("schema_version: '1'\nname: single\nselect:\n  ids: [TR-CLEAN]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"preflight", "--catalog", catalogPath, "--plan", planPath, "--all-tests"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected failing preflight from additional selected tool")
+	}
+	if !strings.Contains(out.String(), "test-preflight-clean") || !strings.Contains(out.String(), "test-preflight-mixed") {
+		t.Fatalf("output = %s", out.String())
 	}
 }
