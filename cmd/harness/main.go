@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"syscall"
 	"time"
@@ -271,6 +272,7 @@ func newRunCmd() *cobra.Command {
 		skipEnv          bool
 		inspectPlan      bool
 		focusIDs         []string
+		skipIDs          []string
 		runTimeout       time.Duration
 	)
 	cmd := &cobra.Command{
@@ -338,10 +340,16 @@ func newRunCmd() *cobra.Command {
 			}
 
 			planSelection := orchestrator.SelectTRs(trs, cfg.Filter)
-			if cmd.Flags().Changed("focus") {
-				for _, id := range focusIDs {
+			checkIDs := func(flag string, ids []string) error {
+				if !cmd.Flags().Changed(flag) {
+					return nil
+				}
+				if len(ids) == 0 {
+					return fmt.Errorf("--%s requires nonempty test IDs", flag)
+				}
+				for _, id := range ids {
 					if id == "" {
-						return fmt.Errorf("--focus requires nonempty test IDs")
+						return fmt.Errorf("--%s requires nonempty test IDs", flag)
 					}
 					found := false
 					for _, tr := range planSelection {
@@ -351,14 +359,24 @@ func newRunCmd() *cobra.Command {
 						}
 					}
 					if !found {
-						logger.Warn("focus ID is outside the selected plan", "id", id)
+						logger.Warn(flag+" ID is outside the selected plan", "id", id)
 					}
 				}
-				if len(focusIDs) == 0 {
-					return fmt.Errorf("--focus requires nonempty test IDs")
-				}
-				cfg.Filter.FocusIDs = focusIDs
+				return nil
 			}
+			if err := checkIDs("focus", focusIDs); err != nil {
+				return err
+			}
+			if err := checkIDs("skip", skipIDs); err != nil {
+				return err
+			}
+			for _, id := range skipIDs {
+				if slices.Contains(focusIDs, id) {
+					logger.Warn("focus takes precedence over skip", "id", id)
+				}
+			}
+			cfg.Filter.FocusIDs = focusIDs
+			cfg.Filter.SkipIDs = skipIDs
 			selected, err := orchestrator.ResolveExecutions(trs, cfg)
 			if err != nil {
 				return err
@@ -582,6 +600,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&cfg.Filter.Tools, "tool", nil, "restrict to these automation tools")
 	cmd.Flags().StringSliceVar(&cfg.Filter.IDs, "id", nil, "restrict to these TR ids")
 	cmd.Flags().StringSliceVar(&focusIDs, "focus", nil, "restrict the selected plan to these exact TR ids")
+	cmd.Flags().StringSliceVar(&skipIDs, "skip", nil, "skip selected TR ids unless explicitly focused")
 	cmd.Flags().IntSliceVar(&cfg.Filter.PartnerLevels, "partner-level", nil, "restrict to these partner levels (1|2|3)")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "debug logging")
 	_ = cmd.MarkFlagRequired("catalog")

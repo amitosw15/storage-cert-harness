@@ -61,6 +61,9 @@ select:
 		{"focus excludes another test with variants", multi, []string{"--focus", "TR-1"}, []planExecution{{ID: "TR-1", Tool: "tool-a", Scenario: "load"}}},
 		{"focus includes all variants", multi, []string{"--focus", "TR-2"}, []planExecution{{ID: "TR-2", Tool: "tool-b", Variant: "small", Scenario: "load"}, {ID: "TR-2", Tool: "tool-b", Variant: "large", Scenario: "load"}}},
 		{"focus and outside plan", multi, []string{"--focus", "TR-1,TR-3"}, []planExecution{{ID: "TR-1", Tool: "tool-a", Scenario: "load"}}},
+		{"skip removes every variant", multi, []string{"--skip", "TR-2"}, []planExecution{{ID: "TR-1", Tool: "tool-a", Scenario: "load"}}},
+		{"focus wins on overlap", multi, []string{"--focus", "TR-1,TR-2", "--skip", "TR-2,TR-3"}, []planExecution{{ID: "TR-1", Tool: "tool-a", Scenario: "load"}, {ID: "TR-2", Tool: "tool-b", Variant: "small", Scenario: "load"}, {ID: "TR-2", Tool: "tool-b", Variant: "large", Scenario: "load"}}},
+		{"unmatched skip leaves selection", single, []string{"--skip", "TR-2"}, []planExecution{{ID: "TR-1", Tool: "tool-a"}, {ID: "TR-3", Tool: "tool-a"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,6 +123,8 @@ select:
 		{"no matching selection", multi, []string{"--id", "absent"}, "no test requirements selected"},
 		{"focus outside plan", multi, []string{"--focus", "TR-3"}, "no test requirements selected"},
 		{"empty focus", multi, []string{"--focus", ""}, "requires nonempty test IDs"},
+		{"skip all", multi, []string{"--skip", "TR-1,TR-2"}, "no test requirements selected"},
+		{"empty skip", multi, []string{"--skip", ""}, "requires nonempty test IDs"},
 		{"missing plan", filepath.Join(t.TempDir(), "missing.yaml"), nil, "read plan"},
 		{"invalid plan", writePlan("invalid", "invalid: ["), nil, "parse plan"},
 		{"unknown variant ID", writePlan("unknown", "schema_version: '1'\nname: unknown\nselect:\n  all: true\nvariants:\n  MISSING:\n    - name: one\n"), nil, "unknown TR"},

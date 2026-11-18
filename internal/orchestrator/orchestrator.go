@@ -377,6 +377,9 @@ func SelectTRs(all []core.TestRequirement, f config.Filter) []core.TestRequireme
 		if len(f.FocusIDs) > 0 && !slices.Contains(f.FocusIDs, tr.ID) {
 			continue
 		}
+		if slices.Contains(f.SkipIDs, tr.ID) && !slices.Contains(f.FocusIDs, tr.ID) {
+			continue
+		}
 		if len(f.Tools) > 0 && !slices.Contains(f.Tools, tr.AutomationTool) {
 			continue
 		}
