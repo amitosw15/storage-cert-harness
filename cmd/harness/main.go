@@ -270,6 +270,7 @@ func newRunCmd() *cobra.Command {
 		retryFailed      bool
 		skipEnv          bool
 		inspectPlan      bool
+		focusIDs         []string
 		runTimeout       time.Duration
 	)
 	cmd := &cobra.Command{
@@ -336,7 +337,32 @@ func newRunCmd() *cobra.Command {
 				trs = kb.FromCatalog(cat)
 			}
 
-			selected := orchestrator.SelectTRs(trs, cfg.Filter)
+			planSelection := orchestrator.SelectTRs(trs, cfg.Filter)
+			if cmd.Flags().Changed("focus") {
+				for _, id := range focusIDs {
+					if id == "" {
+						return fmt.Errorf("--focus requires nonempty test IDs")
+					}
+					found := false
+					for _, tr := range planSelection {
+						if tr.ID == id {
+							found = true
+							break
+						}
+					}
+					if !found {
+						logger.Warn("focus ID is outside the selected plan", "id", id)
+					}
+				}
+				if len(focusIDs) == 0 {
+					return fmt.Errorf("--focus requires nonempty test IDs")
+				}
+				cfg.Filter.FocusIDs = focusIDs
+			}
+			selected, err := orchestrator.ResolveExecutions(trs, cfg)
+			if err != nil {
+				return err
+			}
 			if len(selected) == 0 {
 				return fmt.Errorf("no test requirements selected")
 			}
@@ -384,10 +410,7 @@ func newRunCmd() *cobra.Command {
 				logger.Info("continue-from: selecting incomplete executions", "previously_selected", before, "resuming", len(selected), "skipped_completed", before-len(selected), "scenario", cfg.Scenario)
 			}
 			if inspectPlan {
-				executions, err := orchestrator.ResolveExecutions(selected, cfg)
-				if err != nil {
-					return err
-				}
+				executions := selected
 				type execution struct {
 					ID       string `json:"id"`
 					Tool     string `json:"tool"`
@@ -472,11 +495,7 @@ func newRunCmd() *cobra.Command {
 				runCtx, cancelRun = context.WithTimeout(ctx, runTimeout)
 				defer cancelRun()
 			}
-			// selected, not trs: --continue-from narrows this list to the
-			// executions still outstanding, and handing the orchestrator the
-			// full catalog instead would re-derive the selection and re-run
-			// everything the prior report had already completed.
-			rep, err := orchestrator.Run(runCtx, cfg, selected, cat.Provenance, cat.SchemaVersion, rc)
+			rep, err := orchestrator.RunResolved(runCtx, cfg, selected, cat.Provenance, cat.SchemaVersion, rc)
 			if err != nil {
 				return err
 			}
@@ -562,6 +581,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&runTimeout, "timeout", 0, "cancel the run after this duration (0 means no harness timeout)")
 	cmd.Flags().StringSliceVar(&cfg.Filter.Tools, "tool", nil, "restrict to these automation tools")
 	cmd.Flags().StringSliceVar(&cfg.Filter.IDs, "id", nil, "restrict to these TR ids")
+	cmd.Flags().StringSliceVar(&focusIDs, "focus", nil, "restrict the selected plan to these exact TR ids")
 	cmd.Flags().IntSliceVar(&cfg.Filter.PartnerLevels, "partner-level", nil, "restrict to these partner levels (1|2|3)")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "debug logging")
 	_ = cmd.MarkFlagRequired("catalog")

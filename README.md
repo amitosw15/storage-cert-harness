@@ -104,6 +104,10 @@ Use the normal run inputs with `--inspect-plan` to print the selected test execu
 
 The versioned JSON output lists each test ID, tool, and any named variant or scenario. Selection and filters use the same rules as `run`; CLI selection flags replace the plan selector. The command loads and validates the normal run inputs, including any selected backend, but does not run tool preflight, collect the cluster environment, or create reports. Backend resolution may read configured credentials. Standard output contains JSON; logs go to standard error.
 
+### Focus selected tests
+
+Use `--focus TR-VIRT-010,TR-VIRT-011` to narrow the plan selection to exact TR IDs. All variants of a focused TR remain selected. IDs outside the selected plan produce a warning; an empty final selection is an error. Unlike `--focus`, `--id` replaces the plan selector. `--inspect-plan` uses the same focus selection as a run.
+
 ### Preflight checks
 
 Use the same catalog, plan, and backend options as the intended run:

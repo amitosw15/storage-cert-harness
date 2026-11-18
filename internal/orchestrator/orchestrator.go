@@ -43,6 +43,11 @@ func Run(ctx context.Context, cfg config.Config, trs []core.TestRequirement, pro
 	if err != nil {
 		return core.Report{}, err
 	}
+	return RunResolved(ctx, cfg, selected, prov, schemaVersion, rc)
+}
+
+// RunResolved executes previously resolved test executions.
+func RunResolved(ctx context.Context, cfg config.Config, selected []core.TestRequirement, prov core.Provenance, schemaVersion string, rc *core.RunCtx) (core.Report, error) {
 	progress := newProgressTracker(rc.Logger, selected)
 
 	var scorable []core.TestRequirement
@@ -367,6 +372,9 @@ func SelectTRs(all []core.TestRequirement, f config.Filter) []core.TestRequireme
 	var out []core.TestRequirement
 	for _, tr := range all {
 		if len(f.IDs) > 0 && !slices.Contains(f.IDs, tr.ID) {
+			continue
+		}
+		if len(f.FocusIDs) > 0 && !slices.Contains(f.FocusIDs, tr.ID) {
 			continue
 		}
 		if len(f.Tools) > 0 && !slices.Contains(f.Tools, tr.AutomationTool) {
