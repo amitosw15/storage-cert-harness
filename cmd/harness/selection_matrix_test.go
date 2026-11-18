@@ -32,10 +32,10 @@ func TestFocusSkipSelectionMatrix(t *testing.T) {
 		{"overlap and unselected skip", []string{"A", "B"}, []string{"B", "C"}, []string{"A", "B"}, []string{"focus takes precedence over skip"}, ""},
 		{"skip outside focus", []string{"A"}, []string{"C"}, []string{"A"}, nil, ""},
 		{"focus mixed unknown", []string{"A", "D"}, nil, []string{"A"}, []string{"focus ID is not in the selected tests"}, ""},
-		{"focus unknown", []string{"D"}, nil, nil, []string{"focus ID is not in the selected tests"}, "no tests remain after focus"},
+		{"focus unknown", []string{"D"}, nil, nil, []string{"focus ID is not in the selected tests"}, ""},
 		{"skip unknown", nil, []string{"D"}, []string{"A", "B", "C"}, []string{"skip ID is not in the selected tests"}, ""},
-		{"skip all", nil, []string{"A", "B", "C"}, nil, nil, "no tests remain after skip"},
-		{"unknown overlap", []string{"D"}, []string{"D"}, nil, []string{"focus ID is not in the selected tests", "skip ID is not in the selected tests"}, "no tests remain after focus"},
+		{"skip all", nil, []string{"A", "B", "C"}, nil, nil, ""},
+		{"unknown overlap", []string{"D"}, []string{"D"}, nil, []string{"focus ID is not in the selected tests", "skip ID is not in the selected tests"}, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

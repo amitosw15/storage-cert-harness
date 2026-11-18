@@ -370,9 +370,6 @@ func newRunCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(selected) == 0 {
-				return fmt.Errorf("no test requirements selected")
-			}
 			// Refuse a run that needs SLA/check numbers without a bundle (5273).
 			if path == "" {
 				for _, tr := range selected {
@@ -440,6 +437,7 @@ func newRunCmd() *cobra.Command {
 			}
 			var attestations []core.Attestation
 			switch {
+			case len(selected) == 0 && prior == nil:
 			case prior != nil && len(prior.Attestations) > 0:
 				logger.Info("continue-from: inheriting attestations from prior report", "count", len(prior.Attestations))
 			case attestationsPath != "":
@@ -523,6 +521,8 @@ func newRunCmd() *cobra.Command {
 			switch {
 			case prior != nil:
 				logger.Info("continue-from: reusing environment from prior report", "path", continueFrom)
+			case len(selected) == 0:
+				logger.Info("skipping environment collection: no selected executions")
 			case skipEnv:
 				logger.Info("skipping environment collection (--skip-env)")
 			default:
@@ -807,10 +807,7 @@ func configureFocusSkip(cfg *config.Config, trs []core.TestRequirement, focusIDs
 	cfg.Filter.FocusIDs = focusIDs
 	cfg.Filter.SkipIDs = skipIDs
 	if len(orchestrator.SelectTRs(trs, cfg.Filter)) == 0 {
-		if len(focusIDs) > 0 {
-			return fmt.Errorf("no test requirements selected: no tests remain after focus")
-		}
-		return fmt.Errorf("no test requirements selected: no tests remain after skip")
+		logger.Info("no tests selected after focus and skip")
 	}
 	return nil
 }

@@ -290,7 +290,7 @@ func TestPreflightFocusSkipOnlyChecksSelectedTools(t *testing.T) {
 			}
 		})
 	}
-	for _, args := range [][]string{{"--focus", "absent"}, {"--skip", "TR-CLEAN,TR-FAIL"}} {
+	for _, args := range [][]string{{"--id", "absent"}} {
 		cmd := newRootCmd()
 		cmd.SetOut(&bytes.Buffer{})
 		cmd.SetArgs(append([]string{"preflight", "--catalog", catalogPath}, args...))

@@ -106,7 +106,7 @@ func RefreshLifecycle(r *core.Report) {
 				return
 			}
 		}
-		r.Certifiable = r.Summary.Fail == 0 && r.Summary.Error == 0
+		r.Certifiable = (len(r.Executions) > 0 || len(r.Verdicts) > 0) && r.Summary.Fail == 0 && r.Summary.Error == 0
 		return
 	}
 	r.Health = core.RunHealthUnhealthy
