@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/attestation"
 	"github.com/openshift-storage-cert/storage-cert-harness/internal/backend"
@@ -264,6 +265,7 @@ func newPreflightCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allTests, "all-tests", false, "select all catalog tests instead of the plan selection")
 	cmd.Flags().IntSliceVar(&filter.PartnerLevels, "partner-level", nil, "restrict to these partner levels (1|2|3)")
 	addFocusSkipFlags(cmd, &focusIDs, &skipIDs)
+	rejectEmptySelectorOccurrences(cmd)
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "debug logging")
 	_ = cmd.MarkFlagRequired("catalog")
 	return cmd
@@ -592,6 +594,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allTests, "all-tests", false, "select all catalog tests instead of the plan selection")
 	cmd.Flags().IntSliceVar(&cfg.Filter.PartnerLevels, "partner-level", nil, "restrict to these partner levels (1|2|3)")
 	addFocusSkipFlags(cmd, &focusIDs, &skipIDs)
+	rejectEmptySelectorOccurrences(cmd)
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "debug logging")
 	_ = cmd.MarkFlagRequired("catalog")
 	return cmd
@@ -723,6 +726,26 @@ func loadAttestations(path string) ([]core.Attestation, error) {
 func addFocusSkipFlags(cmd *cobra.Command, focusIDs, skipIDs *[]string) {
 	cmd.Flags().StringSliceVar(focusIDs, "focus", nil, "restrict selected tests to these exact TR ids")
 	cmd.Flags().StringSliceVar(skipIDs, "skip", nil, "skip selected TR ids unless explicitly focused")
+}
+
+type nonEmptySelectorValue struct {
+	pflag.Value
+	pflag.SliceValue
+	name string
+}
+
+func (v nonEmptySelectorValue) Set(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("--%s requires nonempty values", v.name)
+	}
+	return v.Value.Set(value)
+}
+
+func rejectEmptySelectorOccurrences(cmd *cobra.Command) {
+	for _, name := range []string{"id", "tool", "focus", "skip"} {
+		flag := cmd.Flags().Lookup(name)
+		flag.Value = nonEmptySelectorValue{Value: flag.Value, SliceValue: flag.Value.(pflag.SliceValue), name: name}
+	}
 }
 
 func validateSelectionFlags(cmd *cobra.Command) error {

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -119,6 +120,61 @@ func TestAllTestsSelectorConflicts(t *testing.T) {
 				err := cmd.Execute()
 				if err == nil || !strings.Contains(err.Error(), "--all-tests cannot be combined with --"+tc.flag) {
 					t.Fatalf("error = %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestRepeatedEmptySelectorOccurrences(t *testing.T) {
+	for _, command := range []string{"run", "preflight"} {
+		for _, tc := range []struct{ flag, value string }{{"id", "TR-1"}, {"tool", "example"}, {"partner-level", "3"}, {"focus", "TR-1"}, {"skip", "TR-1"}} {
+			for _, emptyFirst := range []bool{true, false} {
+				t.Run(fmt.Sprintf("%s/%s/emptyFirst=%t", command, tc.flag, emptyFirst), func(t *testing.T) {
+					values := []string{tc.value, ""}
+					if emptyFirst {
+						values[0], values[1] = values[1], values[0]
+					}
+					cmd := newRootCmd()
+					cmd.SetOut(&bytes.Buffer{})
+					cmd.SetArgs([]string{command, "--catalog", "missing.json", "--" + tc.flag, values[0], "--" + tc.flag, values[1]})
+					err := cmd.Execute()
+					if err == nil || !strings.Contains(err.Error(), "--"+tc.flag) {
+						t.Fatalf("error = %v", err)
+					}
+					if strings.Contains(err.Error(), "catalog: read") {
+						t.Fatalf("empty flag reached catalog load: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestMixedEmptySelectorOccurrences(t *testing.T) {
+	for _, command := range []string{"run", "preflight"} {
+		for _, tc := range []struct {
+			name      string
+			args      []string
+			emptyFlag string
+		}{
+			{"id then empty tool", []string{"--id", "TR-1", "--tool", ""}, "tool"},
+			{"tool then empty id", []string{"--tool", "example", "--id", ""}, "id"},
+			{"id then empty partner level", []string{"--id", "TR-1", "--partner-level", ""}, "partner-level"},
+			{"id then empty focus", []string{"--id", "TR-1", "--focus", ""}, "focus"},
+			{"tool then empty skip", []string{"--tool", "example", "--skip", ""}, "skip"},
+			{"focus then repeated empty id", []string{"--focus", "TR-1", "--id", "TR-1", "--id", ""}, "id"},
+		} {
+			t.Run(command+"/"+tc.name, func(t *testing.T) {
+				cmd := newRootCmd()
+				cmd.SetOut(&bytes.Buffer{})
+				cmd.SetArgs(append([]string{command, "--catalog", "missing.json"}, tc.args...))
+				err := cmd.Execute()
+				if err == nil || !strings.Contains(err.Error(), "--"+tc.emptyFlag) {
+					t.Fatalf("error = %v", err)
+				}
+				if strings.Contains(err.Error(), "catalog: read") {
+					t.Fatalf("empty flag reached catalog load: %v", err)
 				}
 			})
 		}
