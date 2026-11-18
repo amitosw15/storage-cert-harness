@@ -81,7 +81,8 @@ func TestPreflightOutput(t *testing.T) {
 		},
 		{
 			name: "empty selection is explicit",
-			want: "No test requirements selected.\nPreflight summary: 0 PASS, 0 FAIL, 0 SKIP\n",
+			want: "",
+			fail: true,
 		},
 	}
 	for _, tc := range cases {
@@ -257,5 +258,43 @@ func TestPreflightWarningsAreVisibleAndNonfatal(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "[WARN] storage:") || !strings.Contains(out.String(), "1 WARN") || results.passed != 0 || results.skipped != 0 {
 		t.Fatalf("unexpected warning output: %s", out.String())
+	}
+}
+
+func TestPreflightFocusSkipOnlyChecksSelectedTools(t *testing.T) {
+	catalogPath := writePreflightCatalog(t, []catalog.TR{
+		{ID: "TR-CLEAN", AutomationTool: "test-preflight-clean"},
+		{ID: "TR-FAIL", AutomationTool: "test-preflight-mixed"},
+	})
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"focus", []string{"--focus", "TR-CLEAN"}},
+		{"skip", []string{"--skip", "TR-FAIL"}},
+		{"focus overrides skip", []string{"--focus", "TR-CLEAN", "--skip", "TR-CLEAN,TR-FAIL"}},
+		{"id and focus", []string{"--id", "TR-CLEAN,TR-FAIL", "--focus", "TR-CLEAN"}},
+		{"tool and skip", []string{"--tool", "test-preflight-clean,test-preflight-mixed", "--skip", "TR-FAIL"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			cmd := newRootCmd()
+			cmd.SetOut(&out)
+			cmd.SetArgs(append([]string{"preflight", "--catalog", catalogPath}, tc.args...))
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("preflight: %v\n%s", err, out.String())
+			}
+			if !strings.Contains(out.String(), "test-preflight-clean") || strings.Contains(out.String(), "test-preflight-mixed") {
+				t.Fatalf("unexpected tools checked: %s", out.String())
+			}
+		})
+	}
+	for _, args := range [][]string{{"--focus", "absent"}, {"--skip", "TR-CLEAN,TR-FAIL"}} {
+		cmd := newRootCmd()
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetArgs(append([]string{"preflight", "--catalog", catalogPath}, args...))
+		if err := cmd.Execute(); err == nil {
+			t.Fatalf("expected selection error for %v", args)
+		}
 	}
 }
