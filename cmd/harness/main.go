@@ -170,7 +170,10 @@ func newPreflightCmd() *cobra.Command {
 		Use:   "preflight",
 		Short: "Run preflight checks for the tools selected by the catalog/filter",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := validateIDFlag(cmd, filter.IDs); err != nil {
+			if err := validateSelectorFlag(cmd, "id", filter.IDs); err != nil {
+				return err
+			}
+			if err := validateSelectorFlag(cmd, "tool", filter.Tools); err != nil {
 				return err
 			}
 			logger := newLoggerTo(verbose, cmd.OutOrStdout(), nil)
@@ -279,7 +282,10 @@ func newRunCmd() *cobra.Command {
 		Use:   "run",
 		Short: "Run selected certification tests and emit a report",
 		RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
-			if err := validateIDFlag(cmd, cfg.Filter.IDs); err != nil {
+			if err := validateSelectorFlag(cmd, "id", cfg.Filter.IDs); err != nil {
+				return err
+			}
+			if err := validateSelectorFlag(cmd, "tool", cfg.Filter.Tools); err != nil {
 				return err
 			}
 			var logFile io.WriteCloser
@@ -674,16 +680,16 @@ func loadAttestations(path string) ([]core.Attestation, error) {
 	return out, nil
 }
 
-func validateIDFlag(cmd *cobra.Command, ids []string) error {
-	if !cmd.Flags().Changed("id") {
+func validateSelectorFlag(cmd *cobra.Command, name string, values []string) error {
+	if !cmd.Flags().Changed(name) {
 		return nil
 	}
-	if len(ids) == 0 {
-		return fmt.Errorf("--id requires nonempty test IDs")
+	if len(values) == 0 {
+		return fmt.Errorf("--%s requires nonempty values", name)
 	}
-	for _, id := range ids {
-		if strings.TrimSpace(id) == "" {
-			return fmt.Errorf("--id requires nonempty test IDs")
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("--%s requires nonempty values", name)
 		}
 	}
 	return nil
