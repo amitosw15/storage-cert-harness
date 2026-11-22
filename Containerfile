@@ -20,6 +20,9 @@ COPY container-patches/virtbench/examples/utilities/ssh-pod.yaml /opt/virtbench-
 COPY container-entrypoint.sh /usr/local/bin/
 # OS RPM versions come from BUILD_IMAGE; promote a new builder digest for CVE fixes (/var/lib/rpm kept for Trivy).
 RUN rm -rf /opt/virtbench-runtime/build /opt/virtbench-runtime/.github \
+  && mkdir -p /opt/virtbench-runtime/vm-ops \
+  && cp "$(/opt/virtbench-venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/vm-ops/drain-nodes.py" \
+        /opt/virtbench-runtime/vm-ops/drain-nodes.py \
   && mkdir -p /home/harness/.config /home/harness/.local/share/containers \
   && chmod 0755 /usr/local/bin/container-entrypoint.sh \
   && chown -R 65532:65532 /opt/virtbench-runtime /home/harness

@@ -121,6 +121,13 @@ else
 	fail "/opt/virtbench-runtime/examples/vm-templates/rhel9-vm-datasource.yaml is missing"
 fi
 
+echo "==> checking virtbench drain script"
+if run_cmd test -f /opt/virtbench-runtime/vm-ops/drain-nodes.py && run_cmd test -r /opt/virtbench-runtime/vm-ops/drain-nodes.py; then
+	echo "  drain-nodes.py: present and readable"
+else
+	fail "/opt/virtbench-runtime/vm-ops/drain-nodes.py is missing or unreadable"
+fi
+
 if [[ "${errors}" -gt 0 ]]; then
 	die "image-contents-check found ${errors} issue(s)"
 fi

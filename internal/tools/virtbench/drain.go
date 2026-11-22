@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -31,6 +32,30 @@ const (
 )
 
 // --- Preflight hook ----------------------------------------------------------
+
+func drainScriptPreflight(trs []core.TestRequirement) core.Finding {
+	if replayDir(trs) != "" {
+		return core.Finding{Level: "skip", Message: "virtbench drain script: replay mode"}
+	}
+	root := os.Getenv("VIRTBENCH_REPO")
+	if root == "" {
+		return core.Finding{Level: "skip", Message: "virtbench drain script: VIRTBENCH_REPO is unset; virtbench resolves its own runtime"}
+	}
+	path := filepath.Join(root, "vm-ops", "drain-nodes.py")
+	info, err := os.Stat(path)
+	if err != nil {
+		return core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: drain script %q unavailable: %v; use a fixed harness image or set VIRTBENCH_REPO to a complete virtbench runtime", path, err)}
+	}
+	if !info.Mode().IsRegular() {
+		return core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: drain script %q is not a regular file", path)}
+	}
+	file, err := os.Open(path) // #nosec G304 -- VIRTBENCH_REPO is the runtime selected by the caller.
+	if err != nil {
+		return core.Finding{Level: "error", Message: fmt.Sprintf("virtbench: cannot read drain script %q: %v", path, err)}
+	}
+	_ = file.Close()
+	return core.Finding{Level: "info", Message: "virtbench drain script available: " + path}
+}
 
 // drainPreflight adds the drain-specific checks on top of the generic ones
 // (binary, storage_class): kubectl present, a target_node named, and a second

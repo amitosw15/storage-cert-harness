@@ -174,15 +174,17 @@ func configureScenarios() {
 			DetailParse: func(data []byte) ([]core.Metric, error) { return ClonePercentiles(data, []string{"p99"}) },
 		},
 		{
-			AutomationTool:   "virtbench vm-ops drain-nodes",
-			ProvidesTR:       "TR-VIRT-008",
-			VMRange:          drainVMRange,
-			Template:         vmTemplateConfig{Embedded: drainVMTemplatePath},
-			ResultFile:       DrainFileName,
-			NSPrefix:         drainNSPrefix,
-			BuildArgs:        drainArgs,
-			Parse:            ParseDrain,
-			Preflight:        drainPreflight,
+			AutomationTool: "virtbench vm-ops drain-nodes",
+			ProvidesTR:     "TR-VIRT-008",
+			VMRange:        drainVMRange,
+			Template:       vmTemplateConfig{Embedded: drainVMTemplatePath},
+			ResultFile:     DrainFileName,
+			NSPrefix:       drainNSPrefix,
+			BuildArgs:      drainArgs,
+			Parse:          ParseDrain,
+			Preflight: func(ctx context.Context, rc *core.RunCtx, trs []core.TestRequirement) []core.Finding {
+				return append([]core.Finding{drainScriptPreflight(trs)}, drainPreflight(ctx, rc, trs)...)
+			},
 			Provision:        drainProvision,
 			Teardown:         drainTeardown,
 			TolerateRunError: true, // drain-nodes exits 1 on timeout; grade the FAIL from the log
